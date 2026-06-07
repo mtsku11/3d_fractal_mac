@@ -17,7 +17,7 @@ Requires an active display on macOS — will fail with `activeDisplays=0` error 
 ```
 dotnet run --project src/Parsec.Cli/Parsec.Cli.csproj -- <command>
 ```
-Commands: `metal-smoke [w] [h]`, `gpu-smoke`, `gpu-render <name>`, `gpu-de-validate`, `attractor-stats`, `all`, `list`.
+Commands: `metal-smoke [w] [h]`, `metal-bulb-smoke [w] [h]`, `gpu-smoke`, `gpu-render <name>`, `gpu-de-validate`, `attractor-stats`, `all`, `list`.
 
 ---
 
@@ -47,8 +47,9 @@ Alpha is the high byte. Using `(a << 24) | (r << 16) | (g << 8) | b` (ARGB) prod
 Unified memory means `Buffer.MemoryCopy` from `MTLBuffer.Contents` to a managed `uint[]` costs <1 ms at 640×480. No DMA copy occurs. CPU readback is not a bottleneck; the GPU kernel dispatch (`WaitUntilCompleted`) dominates.
 
 **Measured timings at 640×480 on Apple Silicon (Release build):**
-- GPU compute: ~5 ms
-- CPU readback: <1 ms
+- Mandelbox GPU compute: ~5 ms
+- Mandelbulb GPU compute: ~7 ms (log-space trig is heavier than fold math)
+- CPU readback: <1 ms for both
 - GL `TexImage2D` upload: measure via status bar in the live app
 
 **MSL port from GLSL: key differences.**
@@ -57,6 +58,7 @@ Unified memory means `Buffer.MemoryCopy` from `MTLBuffer.Contents` to a managed 
 - `mat3` column construction is identical: `float3x3(col0, col1, col2)`
 - Address spaces: `constant` for read-only params (`[[buffer(0)]]`), `device` for output buffer
 - Thread ID: `uint2 gid [[thread_position_in_grid]]`
+- **`atan(y, x)` in GLSL → `atan2(y, x)` in MSL.** MSL's `atan` is single-arg only. The two-arg overload silently compiles but gives wrong results. Use `atan2` everywhere you mean "azimuthal angle from x-axis."
 
 **Embed the `.metal` file as a resource, compile at runtime.**
 ```xml
@@ -78,6 +80,24 @@ var up    = Vector3.Cross(right, fwd);
 float tanY = MathF.Tan(camera.VerticalFovRadians * 0.5f);
 float tanX = tanY * ((float)width / height);
 ```
+
+---
+
+## Porting a second (and subsequent) fp32 3D fractal to Metal
+
+The Mandelbox MSL shader is the template. For each new fractal:
+
+1. Copy `mandelbox_raymarch.metal` → `<fractal>_raymarch.metal`. Replace only the DE section (the helper functions and `estimateFull`/`estimate`). Everything from `estimateNormal` down to the end of the kernel is identical across all fp32 3D fractals and should not be modified.
+2. Rename the kernel function: `kernel void <fractal>_raymarch(...)`.
+3. Update `FoldParams` comments to match the new fractal's parameter usage (the layout is identical for all fractals that reuse `FoldParamsGpu`).
+4. Create `Metal<Fractal>Renderer.cs` as a standalone class (not implementing `IThreeDimensionalRenderBackend` — that interface only declares `RenderMandelbox`). Copy `MetalMandelboxRenderer.cs`, rename, and change `BuildFoldParams` to pack the new fractal's params.
+5. Add `<EmbeddedResource Include="Shaders\<fractal>_raymarch.metal" />` to `Parsec.Rendering.Metal.csproj`.
+6. In `FractalView.cs`: add field, init in macOS block, `when` guard arm before the GL fallback, matching status string, dispose + null. Add `RenderWithMetal<Fractal>` method.
+7. Add `metal-<fractal>-smoke` CLI command in `Parsec.Cli/Program.cs`.
+
+**Camera position matters.** Mandelbox: `(0, 3, 12)` looking at origin. Mandelbulb: `(0, 0, 4)` looking at origin (the bulb fits in a ~1.3 unit sphere; pulling back to 12 renders it tiny).
+
+**The DE shape determines which GLSL helpers are needed.** Mandelbox needs `boxFold`, `sphereFold`, `rotationFromEuler`. Mandelbulb needs only `estimateFull`/`estimate` — no helper functions at all. Remove unused helpers; they add compile time.
 
 ---
 

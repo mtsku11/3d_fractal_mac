@@ -169,19 +169,31 @@ Acceptance criteria:
 - preview frame time is measured at representative sizes
 - next presentation step is chosen from data
 
-### 6. Port remaining fp32 3D shaders
+### 6. Port remaining fp32 3D shaders (in progress)
 
 Goal: expand only after Mandelbox proves the stack.
 
-Expected files touched:
+**Mandelbulb ✓ COMPLETE** — `mandelbulb_raymarch.metal` + `MetalMandelbulbRenderer`. Key difference from Mandelbox: log-space derivative accumulation (no helper folds), `atan2` instead of `atan(y,x)`, camera at `(0,0,4)` not `(0,3,12)`. Measured: 7 ms GPU compute at 640×480. CLI: `metal-bulb-smoke [w] [h]`. See `skills.md` for the two-fractal recipe that is now the porting template.
 
-- additional MSL ports or translation artifacts
-- per-fractal backend methods
-- backend-selection UI/dispatch as needed
+Remaining fp32 3D shaders to port (candidates in rough priority order based on parameter pack complexity):
+- GpuMandelbulbRenderer ✓ done
+- GpuRotBoxRenderer
+- GpuKifsRenderer
+- GpuKleinianRenderer
+- GpuHybridRenderer
+- others as needed
+
+Expected files touched per port:
+
+- `src/Parsec.Rendering.Metal/Shaders/<fractal>_raymarch.metal`
+- `src/Parsec.Rendering.Metal/Metal<Fractal>Renderer.cs`
+- `src/Parsec.Rendering.Metal/Parsec.Rendering.Metal.csproj` (EmbeddedResource)
+- `src/Parsec.App/FractalView.cs` (field, init, switch arm, status, dispose)
+- `src/Parsec.Cli/Program.cs` (smoke command)
 
 Acceptance criteria:
 
-- each port has visual smoke validation
+- each port has visual smoke validation (`metal-*-smoke` CLI command)
 - parameter packing differences are documented
 - no deep-zoom parity implied
 

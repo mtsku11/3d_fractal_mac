@@ -13,6 +13,7 @@
 
   <ItemGroup>
     <EmbeddedResource Include="Shaders\mandelbox_raymarch.metal" />
+    <EmbeddedResource Include="Shaders\mandelbulb_raymarch.metal" />
   </ItemGroup>
 
   <ItemGroup>

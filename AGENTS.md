@@ -30,6 +30,8 @@ Note: every project targets `net9.0`. If `dotnet` is unavailable, fix the SDK en
 - `src/Parsec.Rendering.Gpu/Shaders/raymarch_main.glsl`: shared raymarch/shading compute entry path.
 - `src/Parsec.Rendering.Metal/MetalMandelboxRenderer.cs`: Metal compute backend for Mandelbox. Template for porting other fp32 3D shaders.
 - `src/Parsec.Rendering.Metal/Shaders/mandelbox_raymarch.metal`: MSL compute kernel; reference for future MSL ports.
+- `src/Parsec.Rendering.Metal/MetalMandelbulbRenderer.cs`: Metal compute backend for Mandelbulb. Second example of the porting pattern.
+- `src/Parsec.Rendering.Metal/Shaders/mandelbulb_raymarch.metal`: MSL Mandelbulb kernel. Identical shading/raytrace skeleton to Mandelbox; only the DE section differs.
 - `src/Parsec.Rendering.Gpu/DeepZoomPipeline.cs`: OpenGL fp64/floatexp 2D deep-zoom path; defer for macOS first milestone.
 - `src/Parsec.Rendering/Output/ImageOutput.cs`: PNG export helper.
 - `docs/macos-3d-only-build-plan.md`: current macOS 3D-only implementation plan.
@@ -55,9 +57,9 @@ Note: every project targets `net9.0`. If `dotnet` is unavailable, fix the SDK en
 
 ## Current macOS 3D-Only Scope
 
-Milestones 1–4B are complete. Metal Mandelbox renders in the live app on macOS. Measured: 5 ms GPU compute, <1 ms readback, at 640×480 on Apple Silicon.
+Milestones 1–4B are complete. Metal Mandelbox and Metal Mandelbulb both render on macOS. Measured at 640×480 on Apple Silicon: Mandelbox 5 ms GPU compute, Mandelbulb 7 ms GPU compute, <1 ms readback for both.
 
-Current work: Milestone 5 (confirm GL texture upload cost from live app status bar), then Milestone 6 (port remaining fp32 3D shaders using `MetalMandelboxRenderer` as the template — see `skills.md`).
+Current work: Milestone 5 (confirm GL texture upload cost — requires live app with active display; HDMI dummy plug pending) and Milestone 6 in parallel (port remaining fp32 3D shaders — see `skills.md` for the full recipe, two fractals done).
 
 Non-goals (still deferred):
 

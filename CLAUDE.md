@@ -57,10 +57,11 @@ The macOS-native 3D-only build is underway. Milestones 1–4B are complete:
 - **Milestone 3 (done):** `MetalMandelboxRenderer` with full MSL compute kernel (`mandelbox_raymarch.metal`). Manual port of `mandelbox_core.glsl` + `raymarch_main.glsl`. Renders correctly; 5 ms GPU compute at 640×480 on Apple Silicon.
 - **Milestone 4A (done):** `MetalMandelboxRenderer` wired into `FractalView`. Selecting Mandelbox on macOS uses Metal automatically; all other fractals and non-macOS platforms use the OpenGL path unchanged.
 - **Milestone 4B (done):** per-phase timing in the status bar — `compute N ms · readback N ms · upload N ms · total N ms`. CPU readback from unified memory is <1 ms; GL texture upload is the remaining unknown (visible in the live app only).
+- **Milestone 6 (in progress):** Mandelbulb Metal port complete. `MetalMandelbulbRenderer` + `mandelbulb_raymarch.metal`. 7 ms GPU compute at 640×480. Remaining fp32 3D shaders are next.
 
 ## Current Milestone
 
-Milestone 5 — performance data in hand, decide whether CPU readback + `TexImage2D` is fast enough for interactive preview at target resolution, or whether a `CAMetalLayer` presentation path is needed. Then Milestone 6: port remaining fp32 3D shaders to Metal using the Mandelbox spike as the template.
+Milestone 5 is pending hardware (HDMI dummy plug required to run the live GUI app and read the `upload N ms` value from the status bar). In parallel, Milestone 6 has started — Mandelbulb Metal port is done and validated headlessly. Once Milestone 5 data is in hand, the upload-path decision (stay with `TexImage2D` or move to `CAMetalLayer`) will be made, then remaining fp32 3D shaders will be ported.
 
 See `skills.md` for Metal porting recipes and gotchas from the spike. See `docs/macos-3d-only-build-plan.md` for the full milestone breakdown.
 

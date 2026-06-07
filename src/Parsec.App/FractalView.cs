@@ -25,7 +25,8 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
     private Gl? _gl;
     private RaymarchPipeline? _pipeline;
     private GpuMandelboxRenderer? _boxRenderer;
-    private MetalMandelboxRenderer? _metalRenderer; // null on non-macOS or when Metal unavailable
+    private MetalMandelboxRenderer?  _metalRenderer;         // null on non-macOS or when Metal unavailable
+    private MetalMandelbulbRenderer? _metalMandelbulbRenderer; // null on non-macOS or when Metal unavailable
     private long _metalComputeMs;
     private long _metalReadbackMs;
     private long _texUploadMs;
@@ -538,7 +539,10 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
             _deepPipeline = new DeepZoomPipeline(_gl);
 
             if (OperatingSystem.IsMacOS())
+            {
                 _metalRenderer = new MetalMandelboxRenderer();
+                _metalMandelbulbRenderer = new MetalMandelbulbRenderer();
+            }
 
             _texture = _gl.GenTexture();
             _gl.BindTexture(GlConst.Texture2D, _texture);
@@ -717,6 +721,8 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
                     rw, rh, Palette.ToParams(),
                     new Color(0.02f, 0.03f, 0.07f), heroSamples: 1, tileRows: 64,
                     interactive: _deepInteracting, interactiveIter: _deepPreviewIter),
+                FractalType.Mandelbulb when _metalMandelbulbRenderer?.IsAvailable == true =>
+                    RenderWithMetalMandelbulb(camera, rw, rh),
                 FractalType.Mandelbulb => _mandelbulbRenderer.RenderToBuffer(Mandelbulb.ToParams(), camera,
                     PreviewWidth, PreviewHeight, PreviewSettings(),
                     background: new Color(0.02f, 0.03f, 0.07f),
@@ -896,6 +902,8 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
                 ? $"Deep Zoom 2D · {(_deepView.Formula switch { 1 => "Prospector", 2 => "Julia", 3 => "Burning Ship", _ => "Mandelbrot" })} · radius {_deepView.Radius:e2}{(atMaxDepth ? " · max depth" : "")} · {rw}x{rh} · drag pan · scroll zoom"
                 : ActiveType == FractalType.Mandelbox && _metalRenderer?.IsAvailable == true
                 ? $"Metal Mandelbox · {rw}x{rh} · compute {_metalComputeMs} ms · readback {_metalReadbackMs} ms · upload {_texUploadMs} ms · total {_totalFrameMs} ms  ·  WASD+QE move · drag to look"
+                : ActiveType == FractalType.Mandelbulb && _metalMandelbulbRenderer?.IsAvailable == true
+                ? $"Metal Mandelbulb · {rw}x{rh} · compute {_metalComputeMs} ms · readback {_metalReadbackMs} ms · upload {_texUploadMs} ms · total {_totalFrameMs} ms  ·  WASD+QE move · drag to look"
                 : $"pos ({_cam.Position.X:F2}, {_cam.Position.Y:F2}, {_cam.Position.Z:F2})  ·  WASD+QE move · drag to look");
         }
 
@@ -970,9 +978,11 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
         _deepPipeline?.Dispose();
         _pipeline?.Dispose();
         _metalRenderer?.Dispose();
+        _metalMandelbulbRenderer?.Dispose();
         _texture = _vao = _blitProgram = 0;
         _boxRenderer = null;
         _metalRenderer = null;
+        _metalMandelbulbRenderer = null;
         _kifsRenderer = null;
         _kleinianRenderer = null;
         _attractorRenderer = null;
@@ -1018,6 +1028,20 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
             palette: Palette.ToParams());
         _metalComputeMs  = _metalRenderer!.LastComputeMs;
         _metalReadbackMs = _metalRenderer!.LastReadbackMs;
+        return pixels;
+    }
+
+    private uint[] RenderWithMetalMandelbulb(Camera3D camera, int width, int height)
+    {
+        var pixels = _metalMandelbulbRenderer!.RenderMandelbulb(
+            Mandelbulb.ToParams(), camera, width, height,
+            PreviewSettings(),
+            background: new Color(0.02f, 0.03f, 0.07f),
+            surface: Color.Rgb(210, 175, 140),
+            lightDirection: Light.ToDirection(),
+            palette: Palette.ToParams());
+        _metalComputeMs  = _metalMandelbulbRenderer!.LastComputeMs;
+        _metalReadbackMs = _metalMandelbulbRenderer!.LastReadbackMs;
         return pixels;
     }
 
