@@ -6,8 +6,20 @@ namespace Parsec.App;
 internal static class Program
 {
     [STAThread]
-    public static void Main(string[] args) => BuildAvaloniaApp()
-        .StartWithClassicDesktopLifetime(args);
+    public static async Task<int> Main(string[] args)
+    {
+        if (OperatingSystem.IsMacOS())
+        {
+            var startupBlocker = await MacDisplayPreflight.TryGetBlockingErrorAsync();
+            if (startupBlocker is not null)
+            {
+                Console.Error.WriteLine(startupBlocker);
+                return 1;
+            }
+        }
+
+        return BuildAvaloniaApp().StartWithClassicDesktopLifetime(args);
+    }
 
     // Avalonia configuration, don't remove; also used by visual designer.
     public static AppBuilder BuildAvaloniaApp()
