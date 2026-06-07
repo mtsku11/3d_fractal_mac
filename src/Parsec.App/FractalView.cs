@@ -25,8 +25,9 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
     private Gl? _gl;
     private RaymarchPipeline? _pipeline;
     private GpuMandelboxRenderer? _boxRenderer;
-    private MetalMandelboxRenderer?  _metalRenderer;         // null on non-macOS or when Metal unavailable
-    private MetalMandelbulbRenderer? _metalMandelbulbRenderer; // null on non-macOS or when Metal unavailable
+    private MetalMandelboxRenderer?  _metalRenderer;             // null on non-macOS or when Metal unavailable
+    private MetalMandelbulbRenderer? _metalMandelbulbRenderer;   // null on non-macOS or when Metal unavailable
+    private MetalRotBoxRenderer?     _metalRotBoxRenderer;        // null on non-macOS or when Metal unavailable
     private long _metalComputeMs;
     private long _metalReadbackMs;
     private long _texUploadMs;
@@ -548,6 +549,7 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
             {
                 _metalRenderer = new MetalMandelboxRenderer();
                 _metalMandelbulbRenderer = new MetalMandelbulbRenderer();
+                _metalRotBoxRenderer = new MetalRotBoxRenderer();
             }
 
             _texture = _gl.GenTexture();
@@ -574,7 +576,7 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
     {
         bool notReady = !_ready || _gl == null
             || (OperatingSystem.IsMacOS()
-                ? _metalRenderer == null && _metalMandelbulbRenderer == null
+                ? _metalRenderer == null && _metalMandelbulbRenderer == null && _metalRotBoxRenderer == null
                 : _pipeline == null || _boxRenderer == null || _kifsRenderer == null || _kleinianRenderer == null || _attractorRenderer == null || _mandelbulbRenderer == null || _qjuliaRenderer == null || _rotboxRenderer == null || _hybridRenderer == null || _qjboxRenderer == null || _mengerRenderer == null || _bicomplexRenderer == null || _apollonianRenderer == null || _phoenixRenderer == null || _biomorphRenderer == null || _moselyRenderer == null || _pk4dRenderer == null || _riemannRenderer == null || _mandalayRenderer == null || _anisoRenderer == null || _orbitHybridRenderer == null || _burningShipRenderer == null || _deepPipeline == null);
         if (notReady)
         {
@@ -754,6 +756,8 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
                     lightDirection: Light.ToDirection(),
                     palette: Palette.ToParams(),
                     tileRows: 64),
+                FractalType.RotBox when _metalRotBoxRenderer?.IsAvailable == true =>
+                    RenderWithMetalRotBox(camera, rw, rh),
                 FractalType.RotBox => _rotboxRenderer.RenderToBuffer(RotBox.ToParams(), camera,
                     PreviewWidth, PreviewHeight, PreviewSettings(),
                     background: new Color(0.02f, 0.03f, 0.07f),
@@ -914,6 +918,8 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
                 ? $"Metal Mandelbox · {rw}x{rh} · compute {_metalComputeMs} ms · readback {_metalReadbackMs} ms · upload {_texUploadMs} ms · total {_totalFrameMs} ms  ·  WASD+QE move · drag to look"
                 : ActiveType == FractalType.Mandelbulb && _metalMandelbulbRenderer?.IsAvailable == true
                 ? $"Metal Mandelbulb · {rw}x{rh} · compute {_metalComputeMs} ms · readback {_metalReadbackMs} ms · upload {_texUploadMs} ms · total {_totalFrameMs} ms  ·  WASD+QE move · drag to look"
+                : ActiveType == FractalType.RotBox && _metalRotBoxRenderer?.IsAvailable == true
+                ? $"Metal RotBox · {rw}x{rh} · compute {_metalComputeMs} ms · readback {_metalReadbackMs} ms · upload {_texUploadMs} ms · total {_totalFrameMs} ms  ·  WASD+QE move · drag to look"
                 : $"pos ({_cam.Position.X:F2}, {_cam.Position.Y:F2}, {_cam.Position.Z:F2})  ·  WASD+QE move · drag to look");
         }
 
@@ -989,10 +995,12 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
         _pipeline?.Dispose();
         _metalRenderer?.Dispose();
         _metalMandelbulbRenderer?.Dispose();
+        _metalRotBoxRenderer?.Dispose();
         _texture = _vao = _blitProgram = 0;
         _boxRenderer = null;
         _metalRenderer = null;
         _metalMandelbulbRenderer = null;
+        _metalRotBoxRenderer = null;
         _kifsRenderer = null;
         _kleinianRenderer = null;
         _attractorRenderer = null;
@@ -1052,6 +1060,20 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
             palette: Palette.ToParams());
         _metalComputeMs  = _metalMandelbulbRenderer!.LastComputeMs;
         _metalReadbackMs = _metalMandelbulbRenderer!.LastReadbackMs;
+        return pixels;
+    }
+
+    private uint[] RenderWithMetalRotBox(Camera3D camera, int width, int height)
+    {
+        var pixels = _metalRotBoxRenderer!.RenderRotBox(
+            RotBox.ToParams(), camera, width, height,
+            PreviewSettings(),
+            background: new Color(0.02f, 0.03f, 0.07f),
+            surface: Color.Rgb(190, 175, 155),
+            lightDirection: Light.ToDirection(),
+            palette: Palette.ToParams());
+        _metalComputeMs  = _metalRotBoxRenderer!.LastComputeMs;
+        _metalReadbackMs = _metalRotBoxRenderer!.LastReadbackMs;
         return pixels;
     }
 

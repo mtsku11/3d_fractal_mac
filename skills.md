@@ -54,6 +54,7 @@ Unified memory means `Buffer.MemoryCopy` from `MTLBuffer.Contents` to a managed 
 | Mandelbox 1280×720 | 7 ms | 0 ms | 0 ms |
 | Mandelbox 1920×1080 | 12 ms | 1 ms | 1 ms |
 | Mandelbulb 640×480 | 7 ms | 0 ms | — |
+| RotBox 640×480     | 6 ms | 0 ms | — |
 
 **Decision (Milestone 5):** `TexImage2D` upload is negligible at all preview sizes on unified memory. Stay with the current Metal→CPU readback→TexImage2D path. No `CAMetalLayer` needed.
 
@@ -100,7 +101,9 @@ The Mandelbox MSL shader is the template. For each new fractal:
 6. In `FractalView.cs`: add field, init in macOS block, `when` guard arm before the GL fallback, matching status string, dispose + null. Add `RenderWithMetal<Fractal>` method.
 7. Add `metal-<fractal>-smoke` CLI command in `Parsec.Cli/Program.cs`.
 
-**Camera position matters.** Mandelbox: `(0, 3, 12)` looking at origin. Mandelbulb: `(0, 0, 4)` looking at origin (the bulb fits in a ~1.3 unit sphere; pulling back to 12 renders it tiny).
+**Camera position matters.** Mandelbox: `(0, 3, 12)` looking at origin. Mandelbulb: `(0, 0, 4)` looking at origin (the bulb fits in a ~1.3 unit sphere; pulling back to 12 renders it tiny). RotBox: `(0, 3, 12)` — same as Mandelbox, the default bounding sphere is radius 8.
+
+**RotBox vs Mandelbox parameter order:** RotBox `boxParams = (scale, minRadius, fixedRadius, foldLimit)` — different from Mandelbox `(scale, foldingLimit, minRadius, fixedRadius)`. Also, RotBox Euler angles go in `surfParams.xyz`, not `rot.xyz` (which is where Mandelbox uses its optional rotation). The per-iteration `z = R * z` rotation is what makes RotBox different from a plain Mandelbox.
 
 **The DE shape determines which GLSL helpers are needed.** Mandelbox needs `boxFold`, `sphereFold`, `rotationFromEuler`. Mandelbulb needs only `estimateFull`/`estimate` — no helper functions at all. Remove unused helpers; they add compile time.
 

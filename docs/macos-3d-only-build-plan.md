@@ -176,11 +176,13 @@ Goal: complete and keep this plan current.
 
 Goal: expand only after Mandelbox proves the stack.
 
-**Mandelbulb ✓ COMPLETE** — `mandelbulb_raymarch.metal` + `MetalMandelbulbRenderer`. Key difference from Mandelbox: log-space derivative accumulation (no helper folds), `atan2` instead of `atan(y,x)`, camera at `(0,0,4)` not `(0,3,12)`. Measured: 7 ms GPU compute at 640×480. CLI: `metal-bulb-smoke [w] [h]`. See `skills.md` for the two-fractal recipe that is now the porting template.
+**Mandelbulb ✓ COMPLETE** — `mandelbulb_raymarch.metal` + `MetalMandelbulbRenderer`. Key difference from Mandelbox: log-space derivative accumulation (no helper folds), `atan2` instead of `atan(y,x)`, camera at `(0,0,4)` not `(0,3,12)`. Measured: 7 ms GPU compute at 640×480. CLI: `metal-bulb-smoke [w] [h]`.
+
+**RotBox ✓ COMPLETE** — `rotbox_raymarch.metal` + `MetalRotBoxRenderer`. Standard Mandelbox + per-iteration Euler rotation (`z = R * z` before folds). Key differences: Euler angles in `surfParams.xyz` (not `rot.xyz`); `boxParams` order `(scale, minRadius, fixedRadius, foldLimit)` differs from Mandelbox `(scale, foldingLimit, minRadius, fixedRadius)`. Measured: 6 ms GPU compute at 640×480. CLI: `metal-rotbox-smoke [w] [h]`.
 
 Remaining fp32 3D shaders to port (candidates in rough priority order based on parameter pack complexity):
 - GpuMandelbulbRenderer ✓ done
-- GpuRotBoxRenderer
+- GpuRotBoxRenderer ✓ done
 - GpuKifsRenderer
 - GpuKleinianRenderer
 - GpuHybridRenderer
