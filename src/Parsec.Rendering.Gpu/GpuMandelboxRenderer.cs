@@ -39,11 +39,13 @@ public sealed record MandelboxParams
 /// GPU raymarcher for the Mandelbox / AmazingSurf fold-fractal family. Owns only
 /// its compute shader; shared buffers and the tile/AA loop live in RaymarchPipeline.
 /// </summary>
-public sealed class GpuMandelboxRenderer : IDisposable
+public sealed class GpuMandelboxRenderer : IThreeDimensionalRenderBackend
 {
     private readonly RaymarchPipeline _pipeline;
     private readonly ComputeShader _shader;
     private bool _disposed;
+
+    public bool IsAvailable => true;
 
     public GpuMandelboxRenderer(Gl gl, RaymarchPipeline pipeline)
     {
@@ -104,6 +106,12 @@ public sealed class GpuMandelboxRenderer : IDisposable
         Marshal.Copy(bytes, 0, bitmap.GetPixels(), bytes.Length);
         return bitmap;
     }
+
+    uint[] IThreeDimensionalRenderBackend.RenderMandelbox(
+        MandelboxParams fractal, Camera3D camera, int width, int height,
+        RaymarchSettings settings, Color background, Color surface,
+        Vector3 lightDirection, PaletteParams palette)
+        => RenderToBuffer(fractal, camera, width, height, settings, background, surface, lightDirection, palette);
 
     private void ThrowIfDisposed()
     {

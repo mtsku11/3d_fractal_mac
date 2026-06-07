@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <RootNamespace>Parsec.Rendering.Metal</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Parsec.Rendering\Parsec.Rendering.csproj" />
+    <ProjectReference Include="..\Parsec.Rendering.Gpu\Parsec.Rendering.Gpu.csproj" />
+  </ItemGroup>
+
+</Project>
