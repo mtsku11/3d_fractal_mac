@@ -1171,16 +1171,19 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
         return ActiveType switch
         {
             FractalType.DeepZoom => DeepZoomBitmap(width, height),
-            FractalType.Mandelbulb => _mandelbulbRenderer!.Render(Mandelbulb.ToParams(), cam,
-                width, height, HeroSettings(), bg, Color.Rgb(210, 175, 140), light, pal, tileRows: 32),
+            FractalType.Mandelbulb => OperatingSystem.IsMacOS()
+                ? PixelsToSkBitmap(_metalMandelbulbRenderer!.RenderMandelbulb(Mandelbulb.ToParams(), cam, width, height, HeroSettings(), bg, Color.Rgb(210, 175, 140), light, pal), width, height)
+                : _mandelbulbRenderer!.Render(Mandelbulb.ToParams(), cam, width, height, HeroSettings(), bg, Color.Rgb(210, 175, 140), light, pal, tileRows: 32),
             FractalType.BurningShip => _burningShipRenderer!.Render(BurningShip.ToParams(), cam,
                 width, height, HeroSettings(), bg, Color.Rgb(225, 140, 90), light, pal, tileRows: 32),
             FractalType.QuaternionJulia => _qjuliaRenderer!.Render(QuaternionJulia.ToParams(), cam,
                 width, height, HeroSettings(), bg, Color.Rgb(210, 180, 150), light, pal, tileRows: 32),
-            FractalType.RotBox => _rotboxRenderer!.Render(RotBox.ToParams(), cam,
-                width, height, HeroSettings(), bg, Color.Rgb(190, 175, 155), light, pal, tileRows: 32),
-            FractalType.Hybrid => _hybridRenderer!.Render(Hybrid.ToParams(), cam,
-                width, height, HeroSettings(), bg, Color.Rgb(190, 170, 145), light, pal, tileRows: 32),
+            FractalType.RotBox => OperatingSystem.IsMacOS()
+                ? PixelsToSkBitmap(_metalRotBoxRenderer!.RenderRotBox(RotBox.ToParams(), cam, width, height, HeroSettings(), bg, Color.Rgb(190, 175, 155), light, pal), width, height)
+                : _rotboxRenderer!.Render(RotBox.ToParams(), cam, width, height, HeroSettings(), bg, Color.Rgb(190, 175, 155), light, pal, tileRows: 32),
+            FractalType.Hybrid => OperatingSystem.IsMacOS()
+                ? PixelsToSkBitmap(_metalHybridRenderer!.RenderHybrid(Hybrid.ToParams(), cam, width, height, HeroSettings(), bg, Color.Rgb(190, 170, 145), light, pal), width, height)
+                : _hybridRenderer!.Render(Hybrid.ToParams(), cam, width, height, HeroSettings(), bg, Color.Rgb(190, 170, 145), light, pal, tileRows: 32),
             FractalType.QJBox => _qjboxRenderer!.Render(QJBox.ToParams(), cam,
                 width, height, HeroSettings(), bg, Color.Rgb(195, 170, 145), light, pal, tileRows: 32),
             FractalType.Menger => _mengerRenderer!.Render(Menger.ToParams(), cam,
@@ -1195,10 +1198,12 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
                 width, height, HeroSettings(), bg, Color.Rgb(220, 180, 140), light, pal, tileRows: 32),
             FractalType.Attractor => _attractorRenderer!.Render(Attractor.ToRenderParams(), cam,
                 width, height, HeroSettings(), bg, Color.Rgb(230, 120, 70), light, pal, tileRows: 32),
-            FractalType.Kleinian => _kleinianRenderer!.Render(Kleinian.ToParams(), cam,
-                width, height, HeroSettings(), bg, Color.Rgb(150, 125, 100), light, pal, tileRows: 32),
-            FractalType.Kifs => _kifsRenderer!.Render(Kifs.ToParams(), cam,
-                width, height, HeroSettings(), bg, Color.Rgb(150, 125, 100), light, pal, tileRows: 32),
+            FractalType.Kleinian => OperatingSystem.IsMacOS()
+                ? PixelsToSkBitmap(_metalKleinianRenderer!.RenderKleinian(Kleinian.ToParams(), cam, width, height, HeroSettings(), bg, Color.Rgb(150, 125, 100), light, pal), width, height)
+                : _kleinianRenderer!.Render(Kleinian.ToParams(), cam, width, height, HeroSettings(), bg, Color.Rgb(150, 125, 100), light, pal, tileRows: 32),
+            FractalType.Kifs => OperatingSystem.IsMacOS()
+                ? PixelsToSkBitmap(_metalKifsRenderer!.RenderKifs(Kifs.ToParams(), cam, width, height, HeroSettings(), bg, Color.Rgb(150, 125, 100), light, pal), width, height)
+                : _kifsRenderer!.Render(Kifs.ToParams(), cam, width, height, HeroSettings(), bg, Color.Rgb(150, 125, 100), light, pal, tileRows: 32),
             FractalType.Mosely => _moselyRenderer!.Render(Mosely.ToParams(), cam,
                 width, height, HeroSettings(), bg, Color.Rgb(170, 150, 130), light, pal, tileRows: 32),
             FractalType.PseudoKleinian4D => _pk4dRenderer!.Render(PseudoKleinian4D.ToParams(), cam,
@@ -1211,8 +1216,9 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
                 width, height, HeroSettings(), bg, Color.Rgb(160, 158, 170), light, pal, tileRows: 32),
             FractalType.OrbitHybrid => _orbitHybridRenderer!.Render(OrbitHybrid.ToParams(), cam,
                 width, height, HeroSettings(), bg, Color.Rgb(195, 170, 135), light, pal, tileRows: 32),
-            FractalType.Mandelbox => _boxRenderer!.Render(Mandelbox.ToParams(), cam,
-                width, height, HeroSettings(), bg, Color.Rgb(170, 150, 130), light, pal, tileRows: 32),
+            FractalType.Mandelbox => OperatingSystem.IsMacOS()
+                ? PixelsToSkBitmap(_metalRenderer!.RenderMandelbox(Mandelbox.ToParams(), cam, width, height, HeroSettings(), bg, Color.Rgb(170, 150, 130), light, pal), width, height)
+                : _boxRenderer!.Render(Mandelbox.ToParams(), cam, width, height, HeroSettings(), bg, Color.Rgb(170, 150, 130), light, pal, tileRows: 32),
             _ => _boxRenderer!.Render(Fractal.ToParams(), cam,
                 width, height, HeroSettings(), bg, Color.Rgb(150, 125, 100), light, pal, tileRows: 32),
         };
@@ -1225,6 +1231,11 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
         uint[] pixels = _deepPipeline!.Render(_deepView, width, height,
             Palette.ToParams(), new Color(0.02f, 0.03f, 0.07f),
             heroSamples: Math.Max(1, HeroSampleCount), tileRows: 32);
+        return PixelsToSkBitmap(pixels, width, height);
+    }
+
+    private static SkiaSharp.SKBitmap PixelsToSkBitmap(uint[] pixels, int width, int height)
+    {
         var info = new SkiaSharp.SKImageInfo(width, height,
             SkiaSharp.SKColorType.Rgba8888, SkiaSharp.SKAlphaType.Premul);
         var bitmap = new SkiaSharp.SKBitmap(info);
