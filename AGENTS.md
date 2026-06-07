@@ -57,9 +57,14 @@ Note: every project targets `net9.0`. If `dotnet` is unavailable, fix the SDK en
 
 ## Current macOS 3D-Only Scope
 
-Milestones 1–4B are complete. Metal Mandelbox and Metal Mandelbulb both render on macOS. Measured at 640×480 on Apple Silicon: Mandelbox 5 ms GPU compute, Mandelbulb 7 ms GPU compute, <1 ms readback for both.
+Milestones 1–5 complete. Metal Mandelbox and Metal Mandelbulb render on macOS. Measured: Mandelbox 5 ms GPU compute, Mandelbulb 7 ms GPU compute, <1 ms readback, <1 ms TexImage2D upload at all preview sizes on M4 Pro. Decision: keep the TexImage2D presentation path; no CAMetalLayer needed.
 
-Current work: Milestone 5 (confirm GL texture upload cost — requires live app with active display; HDMI dummy plug pending) and Milestone 6 in parallel (port remaining fp32 3D shaders — see `skills.md` for the full recipe, two fractals done).
+Key macOS-specific constraints now handled in the codebase:
+- macOS GL caps at 4.1 — `Gl.SupportsCompute` is false; `RaymarchPipeline` and `Gpu*Renderer` are not constructed on macOS
+- Blit shaders at `#version 330 core` (was 430, caused compile failure on macOS driver)
+- `AvaloniaNativePlatformOptions { RenderingMode = [OpenGl, Software] }` prevents Avalonia Metal UI crash on dummy plugs
+
+Current work: Milestone 6 — port remaining fp32 3D shaders to Metal (see `skills.md` 7-step recipe). Two done: Mandelbox, Mandelbulb. Remaining: RotBox, Kifs, Kleinian, Hybrid, others.
 
 Non-goals (still deferred):
 

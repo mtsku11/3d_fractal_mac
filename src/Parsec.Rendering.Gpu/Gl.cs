@@ -92,8 +92,8 @@ public sealed class Gl
     private readonly D_BindBufferBase _bindBufferBase;
     private readonly D_GetBufferSubData _getBufferSubData;
     private readonly D_DeleteBuffers _deleteBuffers;
-    private readonly D_DispatchCompute _dispatchCompute;
-    private readonly D_MemoryBarrier _memoryBarrier;
+    private readonly D_DispatchCompute? _dispatchCompute;
+    private readonly D_MemoryBarrier? _memoryBarrier;
     private readonly D_Finish _finish;
     private readonly D_GetString _getString;
     private readonly D_GenTextures _genTextures;
@@ -128,6 +128,11 @@ public sealed class Gl
                     $"support OpenGL 4.3 core (compute shaders / SSBOs).");
             return Marshal.GetDelegateForFunctionPointer<T>(ptr);
         }
+        T? TryLoad<T>(string name) where T : Delegate
+        {
+            var ptr = getProcAddress(name);
+            return ptr == IntPtr.Zero ? null : Marshal.GetDelegateForFunctionPointer<T>(ptr);
+        }
 
         _createShader = Load<D_CreateShader>("glCreateShader");
         _shaderSource = Load<D_ShaderSource>("glShaderSource");
@@ -150,8 +155,8 @@ public sealed class Gl
         _bindBufferBase = Load<D_BindBufferBase>("glBindBufferBase");
         _getBufferSubData = Load<D_GetBufferSubData>("glGetBufferSubData");
         _deleteBuffers = Load<D_DeleteBuffers>("glDeleteBuffers");
-        _dispatchCompute = Load<D_DispatchCompute>("glDispatchCompute");
-        _memoryBarrier = Load<D_MemoryBarrier>("glMemoryBarrier");
+        _dispatchCompute = TryLoad<D_DispatchCompute>("glDispatchCompute");
+        _memoryBarrier = TryLoad<D_MemoryBarrier>("glMemoryBarrier");
         _finish = Load<D_Finish>("glFinish");
         _getString = Load<D_GetString>("glGetString");
 
@@ -214,8 +219,17 @@ public sealed class Gl
     public void DeleteBuffer(uint buffer) => _deleteBuffers(1, new[] { buffer });
 
     // ---- compute / sync / query ----
-    public void DispatchCompute(uint x, uint y, uint z) => _dispatchCompute(x, y, z);
-    public void MemoryBarrier(uint barriers) => _memoryBarrier(barriers);
+    public bool SupportsCompute => _dispatchCompute != null;
+    public void DispatchCompute(uint x, uint y, uint z)
+    {
+        if (_dispatchCompute == null) throw new NotSupportedException("glDispatchCompute not available (context < 4.3)");
+        _dispatchCompute(x, y, z);
+    }
+    public void MemoryBarrier(uint barriers)
+    {
+        if (_memoryBarrier == null) throw new NotSupportedException("glMemoryBarrier not available (context < 4.2)");
+        _memoryBarrier(barriers);
+    }
     public void Finish() => _finish();
 
     public string GetString(uint name)

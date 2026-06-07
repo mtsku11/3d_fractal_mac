@@ -155,19 +155,22 @@ Goal: complete and keep this plan current.
 
 **4B:** Per-phase timing exposed. `MetalMandelboxRenderer.LastComputeMs` / `LastReadbackMs` set internally after `WaitUntilCompleted` and `MemoryCopy`. `FractalView` adds `TexImage2D` and total-frame stopwatches. Status bar shows: `compute N ms · readback N ms · upload N ms · total N ms`.
 
-### 5. Performance measurement
+### 5. Performance measurement ✓ COMPLETE
 
-Goal: determine whether offscreen readback/display is acceptable for interactive preview.
+**Measured on Apple Silicon M4 Pro (Release build):**
 
-Expected files touched:
+| Size | Compute | Readback | TexImage2D upload | Total |
+|------|---------|----------|-------------------|-------|
+| 640×480 | 5 ms | 0 ms | 0 ms | ~5 ms |
+| 1280×720 | 7 ms | 0 ms | 0 ms | ~7 ms |
+| 1920×1080 | 12 ms | 1 ms | 1 ms | ~14 ms |
 
-- lightweight timing/logging in the Metal backend or `FractalView`
-- docs update with measured frame times
+**Decision:** `TexImage2D` upload is negligible on unified memory. The current Metal→CPU readback→`TexImage2D` presentation path is acceptable for interactive preview at all sizes. `CAMetalLayer` is not needed.
 
-Acceptance criteria:
-
-- preview frame time is measured at representative sizes
-- next presentation step is chosen from data
+**Findings from Milestone 5 work (bugs fixed):**
+- macOS caps OpenGL at 4.1 — `glDispatchCompute`/`glMemoryBarrier` are absent. Fixed in `Gl.cs` (optional load via `TryLoad`, `SupportsCompute` property). `RaymarchPipeline` and all `Gpu*Renderer` construction now skipped on macOS in `FractalView.OnOpenGlInit`.
+- Blit shaders lowered from `#version 430 core` to `#version 330 core` — the shaders use no 4.3 features and the macOS GL 4.1 driver rejected the higher version directive.
+- Avalonia's Metal UI renderer crashes on HDMI dummy plugs (`gr_backendrendertarget_new_metal` null drawable). Fixed by adding `AvaloniaNativePlatformOptions { RenderingMode = [OpenGl, Software] }` in `Program.cs`.
 
 ### 6. Port remaining fp32 3D shaders (in progress)
 

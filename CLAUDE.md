@@ -56,12 +56,13 @@ The macOS-native 3D-only build is underway. Milestones 1–4B are complete:
 - **Milestone 1–2 (done):** repository audit, `IThreeDimensionalRenderBackend` seam added to `Parsec.Rendering.Gpu`.
 - **Milestone 3 (done):** `MetalMandelboxRenderer` with full MSL compute kernel (`mandelbox_raymarch.metal`). Manual port of `mandelbox_core.glsl` + `raymarch_main.glsl`. Renders correctly; 5 ms GPU compute at 640×480 on Apple Silicon.
 - **Milestone 4A (done):** `MetalMandelboxRenderer` wired into `FractalView`. Selecting Mandelbox on macOS uses Metal automatically; all other fractals and non-macOS platforms use the OpenGL path unchanged.
-- **Milestone 4B (done):** per-phase timing in the status bar — `compute N ms · readback N ms · upload N ms · total N ms`. CPU readback from unified memory is <1 ms; GL texture upload is the remaining unknown (visible in the live app only).
+- **Milestone 4B (done):** per-phase timing in the status bar — `compute N ms · readback N ms · upload N ms · total N ms`. CPU readback from unified memory is <1 ms.
+- **Milestone 5 (done):** `TexImage2D` upload measured: 0 ms at 640×480/1280×720, 1 ms at 1920×1080. Decision: stay with current `TexImage2D` path. Also fixed: macOS GL 4.1 cap (`glDispatchCompute` optional, compute pipeline skipped on macOS, blit shaders at `#version 330`, Avalonia Metal UI renderer crash on HDMI dummy plugs).
 - **Milestone 6 (in progress):** Mandelbulb Metal port complete. `MetalMandelbulbRenderer` + `mandelbulb_raymarch.metal`. 7 ms GPU compute at 640×480. Remaining fp32 3D shaders are next.
 
 ## Current Milestone
 
-Milestone 5 is pending hardware (HDMI dummy plug required to run the live GUI app and read the `upload N ms` value from the status bar). In parallel, Milestone 6 has started — Mandelbulb Metal port is done and validated headlessly. Once Milestone 5 data is in hand, the upload-path decision (stay with `TexImage2D` or move to `CAMetalLayer`) will be made, then remaining fp32 3D shaders will be ported.
+Milestone 5 is complete. Upload cost is negligible; staying with `TexImage2D`. Milestone 6 is in progress — Mandelbulb done, remaining fp32 3D shaders to port (RotBox, Kifs, Kleinian, Hybrid, others). See `skills.md` for the 7-step porting recipe.
 
 See `skills.md` for Metal porting recipes and gotchas from the spike. See `docs/macos-3d-only-build-plan.md` for the full milestone breakdown.
 

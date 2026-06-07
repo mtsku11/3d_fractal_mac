@@ -514,29 +514,35 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
         {
             _gl = new Gl(gl.GetProcAddress);
             Status($"GL {_gl.GetString(GlConst.Version)} | {_gl.GetString(GlConst.Renderer)}");
-            _pipeline = new RaymarchPipeline(_gl);
-            _boxRenderer = new GpuMandelboxRenderer(_gl, _pipeline);
-            _kifsRenderer = new GpuKifsRenderer(_gl, _pipeline);
-            _kleinianRenderer = new GpuKleinianRenderer(_gl, _pipeline);
-            _attractorRenderer = new GpuAttractorRenderer(_gl, _pipeline);
-            _mandelbulbRenderer = new GpuMandelbulbRenderer(_gl, _pipeline);
-            _qjuliaRenderer = new GpuQuaternionJuliaRenderer(_gl, _pipeline);
-            _rotboxRenderer = new GpuRotBoxRenderer(_gl, _pipeline);
-            _hybridRenderer = new GpuHybridRenderer(_gl, _pipeline);
-            _qjboxRenderer = new GpuQJBoxRenderer(_gl, _pipeline);
-            _mengerRenderer = new GpuMengerRenderer(_gl, _pipeline);
-            _bicomplexRenderer = new GpuBicomplexRenderer(_gl, _pipeline);
-            _apollonianRenderer = new GpuApollonianRenderer(_gl, _pipeline);
-            _phoenixRenderer = new GpuPhoenixRenderer(_gl, _pipeline);
-            _biomorphRenderer = new GpuBiomorphRenderer(_gl, _pipeline);
-            _moselyRenderer = new GpuMoselyRenderer(_gl, _pipeline);
-            _pk4dRenderer = new GpuPseudoKleinian4DRenderer(_gl, _pipeline);
-            _riemannRenderer = new GpuRiemannSphereRenderer(_gl, _pipeline);
-            _mandalayRenderer = new GpuMandalayRenderer(_gl, _pipeline);
-            _anisoRenderer = new GpuAnisotropicRenderer(_gl, _pipeline);
-            _orbitHybridRenderer = new GpuOrbitHybridRenderer(_gl, _pipeline);
-            _burningShipRenderer = new GpuBurningShipRenderer(_gl, _pipeline);
-            _deepPipeline = new DeepZoomPipeline(_gl);
+
+            // The GL compute pipeline (OpenGL 4.3) is unavailable on macOS, which
+            // caps at 4.1. On macOS all 3D rendering goes through the Metal path.
+            if (!OperatingSystem.IsMacOS())
+            {
+                _pipeline = new RaymarchPipeline(_gl);
+                _boxRenderer = new GpuMandelboxRenderer(_gl, _pipeline);
+                _kifsRenderer = new GpuKifsRenderer(_gl, _pipeline);
+                _kleinianRenderer = new GpuKleinianRenderer(_gl, _pipeline);
+                _attractorRenderer = new GpuAttractorRenderer(_gl, _pipeline);
+                _mandelbulbRenderer = new GpuMandelbulbRenderer(_gl, _pipeline);
+                _qjuliaRenderer = new GpuQuaternionJuliaRenderer(_gl, _pipeline);
+                _rotboxRenderer = new GpuRotBoxRenderer(_gl, _pipeline);
+                _hybridRenderer = new GpuHybridRenderer(_gl, _pipeline);
+                _qjboxRenderer = new GpuQJBoxRenderer(_gl, _pipeline);
+                _mengerRenderer = new GpuMengerRenderer(_gl, _pipeline);
+                _bicomplexRenderer = new GpuBicomplexRenderer(_gl, _pipeline);
+                _apollonianRenderer = new GpuApollonianRenderer(_gl, _pipeline);
+                _phoenixRenderer = new GpuPhoenixRenderer(_gl, _pipeline);
+                _biomorphRenderer = new GpuBiomorphRenderer(_gl, _pipeline);
+                _moselyRenderer = new GpuMoselyRenderer(_gl, _pipeline);
+                _pk4dRenderer = new GpuPseudoKleinian4DRenderer(_gl, _pipeline);
+                _riemannRenderer = new GpuRiemannSphereRenderer(_gl, _pipeline);
+                _mandalayRenderer = new GpuMandalayRenderer(_gl, _pipeline);
+                _anisoRenderer = new GpuAnisotropicRenderer(_gl, _pipeline);
+                _orbitHybridRenderer = new GpuOrbitHybridRenderer(_gl, _pipeline);
+                _burningShipRenderer = new GpuBurningShipRenderer(_gl, _pipeline);
+                _deepPipeline = new DeepZoomPipeline(_gl);
+            }
 
             if (OperatingSystem.IsMacOS())
             {
@@ -566,7 +572,11 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
 
     protected override void OnOpenGlRender(GlInterface gl, int fb)
     {
-        if (!_ready || _gl == null || _pipeline == null || _boxRenderer == null || _kifsRenderer == null || _kleinianRenderer == null || _attractorRenderer == null || _mandelbulbRenderer == null || _qjuliaRenderer == null || _rotboxRenderer == null || _hybridRenderer == null || _qjboxRenderer == null || _mengerRenderer == null || _bicomplexRenderer == null || _apollonianRenderer == null || _phoenixRenderer == null || _biomorphRenderer == null || _moselyRenderer == null || _pk4dRenderer == null || _riemannRenderer == null || _mandalayRenderer == null || _anisoRenderer == null || _orbitHybridRenderer == null || _burningShipRenderer == null || _deepPipeline == null)
+        bool notReady = !_ready || _gl == null
+            || (OperatingSystem.IsMacOS()
+                ? _metalRenderer == null && _metalMandelbulbRenderer == null
+                : _pipeline == null || _boxRenderer == null || _kifsRenderer == null || _kleinianRenderer == null || _attractorRenderer == null || _mandelbulbRenderer == null || _qjuliaRenderer == null || _rotboxRenderer == null || _hybridRenderer == null || _qjboxRenderer == null || _mengerRenderer == null || _bicomplexRenderer == null || _apollonianRenderer == null || _phoenixRenderer == null || _biomorphRenderer == null || _moselyRenderer == null || _pk4dRenderer == null || _riemannRenderer == null || _mandalayRenderer == null || _anisoRenderer == null || _orbitHybridRenderer == null || _burningShipRenderer == null || _deepPipeline == null);
+        if (notReady)
         {
             _gl?.BindFramebuffer(GlConst.Framebuffer, (uint)fb);
             _gl?.ClearColor(0.1f, 0.1f, 0.1f, 1f);
@@ -1156,7 +1166,7 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
         F0: Reflection.F0,
         LightIntensity: Light.Intensity);
 
-    private const string BlitVertexSrc = @"#version 430 core
+    private const string BlitVertexSrc = @"#version 330 core
 out vec2 vUv;
 void main() {
     vec2 p = vec2((gl_VertexID << 1) & 2, gl_VertexID & 2);
@@ -1164,7 +1174,7 @@ void main() {
     gl_Position = vec4(p * 2.0 - 1.0, 0.0, 1.0);
 }";
 
-    private const string BlitFragmentSrc = @"#version 430 core
+    private const string BlitFragmentSrc = @"#version 330 core
 in vec2 vUv;
 out vec4 fragColor;
 uniform sampler2D uTex;

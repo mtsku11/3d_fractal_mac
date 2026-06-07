@@ -42,6 +42,13 @@ internal static class Program
             {
                 RenderingMode = new[] { X11RenderingMode.Glx, X11RenderingMode.Software }
             })
+            .With(new AvaloniaNativePlatformOptions
+            {
+                // Skia-Metal crashes on HDMI dummy plugs (gr_backendrendertarget_new_metal
+                // gets a null drawable). OpenGl is the default but explicitly listed here
+                // so Software is the fallback if OpenGl also fails.
+                RenderingMode = new[] { AvaloniaNativeRenderingMode.OpenGl, AvaloniaNativeRenderingMode.Software }
+            })
             .WithInterFont()
             .LogToTrace();
 }

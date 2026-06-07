@@ -11,7 +11,7 @@ dotnet build Parsec.sln -v quiet
 ```
 dotnet run --project src/Parsec.App/Parsec.App.csproj -c Debug
 ```
-Requires an active display on macOS — will fail with `activeDisplays=0` error in headless environments.
+Requires an **active** display on macOS — will fail with `activeDisplays=0` if no display is powered on. An HDMI dummy plug satisfies this only if macOS treats it as active (not asleep). Go to System Settings → Displays → set display sleep to Never before first use.
 
 **Run the CLI**
 ```
@@ -46,11 +46,16 @@ Alpha is the high byte. Using `(a << 24) | (r << 16) | (g << 8) | b` (ARGB) prod
 **Readback from Metal shared memory is free on Apple Silicon.**
 Unified memory means `Buffer.MemoryCopy` from `MTLBuffer.Contents` to a managed `uint[]` costs <1 ms at 640×480. No DMA copy occurs. CPU readback is not a bottleneck; the GPU kernel dispatch (`WaitUntilCompleted`) dominates.
 
-**Measured timings at 640×480 on Apple Silicon (Release build):**
-- Mandelbox GPU compute: ~5 ms
-- Mandelbulb GPU compute: ~7 ms (log-space trig is heavier than fold math)
-- CPU readback: <1 ms for both
-- GL `TexImage2D` upload: measure via status bar in the live app
+**Measured timings on Apple Silicon M4 Pro (Release build):**
+
+| Size | Compute | Readback | TexImage2D upload |
+|------|---------|----------|-------------------|
+| Mandelbox 640×480 | 5 ms | 0 ms | 0 ms |
+| Mandelbox 1280×720 | 7 ms | 0 ms | 0 ms |
+| Mandelbox 1920×1080 | 12 ms | 1 ms | 1 ms |
+| Mandelbulb 640×480 | 7 ms | 0 ms | — |
+
+**Decision (Milestone 5):** `TexImage2D` upload is negligible at all preview sizes on unified memory. Stay with the current Metal→CPU readback→TexImage2D path. No `CAMetalLayer` needed.
 
 **MSL port from GLSL: key differences.**
 - No global variables → pass orbit trap as `thread float4& outTrap` parameter
@@ -123,3 +128,42 @@ A hardcoded `0xFF000000` will mis-count any non-pure-black background.
 
 **Add a pixel dump for small renders.**
 Pass `w <= 16` to trigger a hex dump of every pixel — useful for verifying the fractal structure is actually present vs. a uniform field.
+
+---
+
+## macOS OpenGL constraints (Apple caps GL at 4.1)
+
+**`glDispatchCompute` and `glMemoryBarrier` do not exist on macOS.**
+macOS OpenGL support is frozen at 4.1 (deprecated since 10.14). Any code that requires GL 4.3 compute shaders will fail at runtime. In `Gl.cs`, these two entrypoints are loaded with `TryLoad` (null if missing) and `Gl.SupportsCompute` reports whether they are available. The `RaymarchPipeline` and all `Gpu*Renderer` classes must NOT be constructed on macOS — their GLSL shaders use `#version 430 core` which the macOS driver rejects at compile time.
+
+**`FractalView.OnOpenGlInit` skips the compute pipeline on macOS.**
+```csharp
+if (!OperatingSystem.IsMacOS())
+{
+    _pipeline = new RaymarchPipeline(_gl);
+    _boxRenderer = new GpuMandelboxRenderer(_gl, _pipeline);
+    // ... all Gpu*Renderer instances ...
+    _deepPipeline = new DeepZoomPipeline(_gl);
+}
+```
+All renderer fields stay null on macOS; the render guard is platform-aware and only checks for Metal renderers on macOS.
+
+**Blit shaders must use `#version 330 core`, not `#version 430 core`.**
+The vertex/fragment shaders that blit the Metal-computed texture to the Avalonia framebuffer use only GLSL 3.30 features (`gl_VertexID`, `texture()`). Using `#version 430 core` causes a compile error on the macOS 4.1 context. `330 core` compiles on both macOS and Windows/Linux GL 4.3 contexts.
+
+**Avalonia's Metal UI renderer crashes on HDMI dummy plugs.**
+`gr_backendrendertarget_new_metal` gets a null drawable and segfaults (KERN_INVALID_ADDRESS 0x1). Fix: add `AvaloniaNativePlatformOptions` in `Program.cs`:
+```csharp
+.With(new AvaloniaNativePlatformOptions
+{
+    RenderingMode = new[] { AvaloniaNativeRenderingMode.OpenGl, AvaloniaNativeRenderingMode.Software }
+})
+```
+This tells Avalonia's own UI renderer to use OpenGL (or Software fallback) instead of Metal, which avoids the crash. Our Metal compute work is unaffected — it bypasses Avalonia's renderer entirely.
+
+**Diagnosing headless macOS app startup with no physical display.**
+When running the GUI app headlessly (HDMI dummy, no physical screen), the app window opens on the virtual display but is not visible. Use these techniques:
+- `screencapture -x /tmp/screen.png` → captures the virtual framebuffer; read it with the `Read` tool
+- `system_profiler SPDisplaysDataType` → shows attached displays and whether each is asleep
+- Add `Console.WriteLine` to `OnOpenGlInit`/`OnOpenGlRender` and redirect stdout to a log file to diagnose GL init failures
+- `MacDisplayPreflight` checks `CGGetActiveDisplayList` — requires the display to be **active** (not sleeping), not just online
