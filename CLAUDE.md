@@ -23,11 +23,12 @@ Shaders are embedded resources listed explicitly in `Parsec.Rendering.Gpu.csproj
 
 ## Architecture
 
-Six projects in the solution, layered bottom-up:
+Seven projects in the solution, layered bottom-up:
 
 - **Parsec.Core** -- pure math: IFS transforms, attractors, geometry primitives. No GPU or UI dependencies.
 - **Parsec.Rendering** -- CPU-side rendering abstractions: `Camera3D`, raymarching settings, `BinaryFixed` (arbitrary-precision for deep zoom), `ReferenceOrbit`, `ImageOutput` (PNG via SkiaSharp). Depends on Core.
 - **Parsec.Rendering.Gpu** -- OpenGL 4.3 compute shader pipeline. Each fractal has a `Gpu*Renderer` class + a `*_core.glsl` shader (distance estimator). `RaymarchPipeline` owns shared SSBOs and the clear/finalize shaders; renderers own only their per-fractal compute shader. `DeepZoomPipeline` handles 2D perturbation rendering. `ShaderLoader` reads shaders from embedded resources and strips non-ASCII (NVIDIA's GLSL compiler rejects it). Depends on Core, Rendering.
+- **Parsec.Rendering.Metal** -- macOS-only Metal compute backend. `MetalMandelboxRenderer` compiles `mandelbox_raymarch.metal` (embedded resource) at startup via SharpMetal 1.1.0, dispatches an 8×8 threadgroup compute pass, and returns packed RGBA8 `uint[]` matching the OpenGL backend's output contract. Exposes `LastComputeMs`/`LastReadbackMs` for frame-time diagnostics. Depends on Core, Rendering, Rendering.Gpu (for `IThreeDimensionalRenderBackend`).
 - **Parsec.Audio** -- audio playback and analysis. `AudioTransportController` is the backend-neutral playback facade. Currently OpenAL + managed WAV decode only (`OpenALAudioPlaybackSession`). Feature extraction types (`AudioFeatureFrame`, `AudioFeatureTrack`, `IAudioAnalyzer`) exist for the audio-reactive pipeline. Depends on OpenTK.Audio.OpenAL.
 - **Parsec.App** -- Avalonia desktop UI. `FractalView` (OpenGL control) dispatches to the active renderer. `MainWindow` orchestrates timeline, playback, hero renders, animation export. `AudioTransportPanel` is the audio UI. No MVVM framework -- controls are built in code-behind.
 - **Parsec.Cli** -- headless CLI with IFS rendering examples. Separate entry point.
@@ -50,21 +51,18 @@ The existing Windows/Linux backend requires OpenGL 4.3+ with compute shaders. Th
 
 ## Current project direction
 
-The current priority is a focused **macOS-native 3D-only build**. The first milestone is not feature parity. It is to get one existing fp32 3D raymarched fractal rendering natively on macOS through a Metal backend while preserving the current OpenGL backend for Windows/Linux.
+The macOS-native 3D-only build is underway. Milestones 1–4B are complete:
 
-Treat the current OpenGL compute renderer as the source implementation. Study it, mirror its data flow where practical, and avoid destabilizing it. The initial target should be one representative 3D shader, preferably Mandelbox, because `GpuMandelboxRenderer` has a compact parameter pack and uses the shared `RaymarchPipeline` shape without deep-zoom fp64 requirements.
+- **Milestone 1–2 (done):** repository audit, `IThreeDimensionalRenderBackend` seam added to `Parsec.Rendering.Gpu`.
+- **Milestone 3 (done):** `MetalMandelboxRenderer` with full MSL compute kernel (`mandelbox_raymarch.metal`). Manual port of `mandelbox_core.glsl` + `raymarch_main.glsl`. Renders correctly; 5 ms GPU compute at 640×480 on Apple Silicon.
+- **Milestone 4A (done):** `MetalMandelboxRenderer` wired into `FractalView`. Selecting Mandelbox on macOS uses Metal automatically; all other fractals and non-macOS platforms use the OpenGL path unchanged.
+- **Milestone 4B (done):** per-phase timing in the status bar — `compute N ms · readback N ms · upload N ms · total N ms`. CPU readback from unified memory is <1 ms; GL texture upload is the remaining unknown (visible in the live app only).
 
 ## Current Milestone
 
-Build a one-fractal Metal spike:
+Milestone 5 — performance data in hand, decide whether CPU readback + `TexImage2D` is fast enough for interactive preview at target resolution, or whether a `CAMetalLayer` presentation path is needed. Then Milestone 6: port remaining fp32 3D shaders to Metal using the Mandelbox spike as the template.
 
-- add a small backend abstraction at the 3D raymarch output boundary, not a full renderer rewrite
-- port or translate `mandelbox_core.glsl` plus the needed `raymarch_main.glsl` path to Metal Shading Language
-- run the Metal compute path offscreen into a packed RGBA8 buffer
-- display that buffer in Avalonia by the simplest working path first
-- measure preview performance before adding a native Metal view or porting more shaders
-
-Success means a usable macOS build can show one fp32 3D fractal interactively enough to validate the backend, shader path, and presentation path.
+See `skills.md` for Metal porting recipes and gotchas from the spike. See `docs/macos-3d-only-build-plan.md` for the full milestone breakdown.
 
 ## Deferred
 
@@ -79,12 +77,12 @@ Existing audio branch code can remain, but do not expand it until the macOS 3D r
 
 ## Technical Strategy
 
-- **Metal backend:** prefer a native Metal compute backend for macOS. SharpMetal is the most direct C# candidate to spike because its NuGet package is net9-compatible; do not add it until the backend shape is decided.
-- **OpenGL preservation:** keep `Parsec.Rendering.Gpu` as the existing backend. Do not rewrite `RaymarchPipeline`, `ComputeShader`, or every `Gpu*Renderer` just to make room for Metal.
-- **Backend seam:** start near the existing `uint[] RenderToBuffer(...)` / packed RGBA8 output contract. A minimal interface such as a 3D render backend that accepts typed Mandelbox parameters, camera, raymarch settings, palette, lighting, and dimensions is likely enough for the first spike.
-- **Shader translation:** evaluate GLSL -> SPIR-V -> MSL via SPIRV-Cross against one composite shader only. If bindings, std430 layout, workgroup sizes, image writes, barriers, or math semantics become brittle, manually port Mandelbox to MSL for the spike and document the differences.
-- **Avalonia presentation:** first render offscreen and display the resulting pixels through the existing UI path or a simple bitmap path. If CPU readback/upload is too slow for interactive previews, the next milestone is a Metal-backed/native-view presentation path.
-- **Deep zoom:** do not chase Metal deep zoom now. Metal's shader model does not support the existing fp64 path in the way OpenGL does, so hide, stub, or disable deep zoom for the first macOS build if needed.
+- **Metal backend:** SharpMetal 1.1.0 (net9-compatible) is in use. Types are value-type structs — see `skills.md` for SharpMetal-specific gotchas.
+- **OpenGL preservation:** `Parsec.Rendering.Gpu` is the existing backend. Do not rewrite `RaymarchPipeline`, `ComputeShader`, or `Gpu*Renderer` classes.
+- **Backend seam:** `IThreeDimensionalRenderBackend` in `Parsec.Rendering.Gpu` is the dispatch interface. `FractalView` uses a `when` guard on the switch arm to route Mandelbox to Metal; all other fractals fall through to OpenGL.
+- **Shader translation:** SPIRV-Cross was not used. The Mandelbox shader was manually ported to MSL (`mandelbox_raymarch.metal`). For additional shaders, use the Mandelbox MSL as the template — see `skills.md`.
+- **Avalonia presentation:** Metal renders offscreen into `uint[]`, uploaded into the existing GL texture via `TexImage2D`. CPU readback from unified memory is <1 ms. If GL upload proves too slow, the next step is `CAMetalLayer`.
+- **Deep zoom:** disabled on macOS 3D-only path. Metal's shader model does not support the existing fp64 path.
 
 ## Do Not Do Yet
 

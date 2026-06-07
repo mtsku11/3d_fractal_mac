@@ -25,9 +25,11 @@ Note: every project targets `net9.0`. If `dotnet` is unavailable, fix the SDK en
 - `src/Parsec.App/ParamSchema.cs`: generic parameter descriptor model shared by UI and animation.
 - `src/Parsec.App/Timeline.cs`: keyframe interpolation and timeline serialization.
 - `src/Parsec.Rendering.Gpu/RaymarchPipeline.cs`: shared OpenGL compute raymarch pipeline for fp32 3D fractals.
-- `src/Parsec.Rendering.Gpu/GpuMandelboxRenderer.cs`: recommended first source renderer for the Metal spike.
-- `src/Parsec.Rendering.Gpu/Shaders/mandelbox_core.glsl`: recommended first source distance-estimator shader.
+- `src/Parsec.Rendering.Gpu/GpuMandelboxRenderer.cs`: source renderer for the Metal spike; reference for porting other shaders.
+- `src/Parsec.Rendering.Gpu/Shaders/mandelbox_core.glsl`: source distance-estimator shader.
 - `src/Parsec.Rendering.Gpu/Shaders/raymarch_main.glsl`: shared raymarch/shading compute entry path.
+- `src/Parsec.Rendering.Metal/MetalMandelboxRenderer.cs`: Metal compute backend for Mandelbox. Template for porting other fp32 3D shaders.
+- `src/Parsec.Rendering.Metal/Shaders/mandelbox_raymarch.metal`: MSL compute kernel; reference for future MSL ports.
 - `src/Parsec.Rendering.Gpu/DeepZoomPipeline.cs`: OpenGL fp64/floatexp 2D deep-zoom path; defer for macOS first milestone.
 - `src/Parsec.Rendering/Output/ImageOutput.cs`: PNG export helper.
 - `docs/macos-3d-only-build-plan.md`: current macOS 3D-only implementation plan.
@@ -53,24 +55,23 @@ Note: every project targets `net9.0`. If `dotnet` is unavailable, fix the SDK en
 
 ## Current macOS 3D-Only Scope
 
-- Native Metal compute spike for one existing fp32 3D fractal.
-- Prefer Mandelbox as the first candidate.
-- Offscreen render into packed RGBA8 first.
-- Display in Avalonia through the simplest working path, then measure.
-- Add only the smallest backend seam needed to keep OpenGL and Metal side by side.
+Milestones 1–4B are complete. Metal Mandelbox renders in the live app on macOS. Measured: 5 ms GPU compute, <1 ms readback, at 640×480 on Apple Silicon.
 
-Non-goals for the current milestone:
+Current work: Milestone 5 (confirm GL texture upload cost from live app status bar), then Milestone 6 (port remaining fp32 3D shaders using `MetalMandelboxRenderer` as the template — see `skills.md`).
 
-- no audio-reactive feature expansion
-- no synth engine
-- no deep-zoom parity
-- no full shader parity
-- no invasive renderer rewrite
+Non-goals (still deferred):
+
+- audio-reactive feature expansion
+- synth engine
+- deep-zoom parity on macOS
+- full shader parity before the upload-path decision is made
+- `CAMetalLayer` presentation unless GL upload proves too slow
 
 ## Context-Loading Order
 
 1. `AGENTS.md`
 2. `README.md`
 3. `CLAUDE.md`
-4. `docs/macos-3d-only-build-plan.md`
-5. `docs/audio-reactive/00-repo-inspection.md` only if touching deferred audio code
+4. `skills.md`
+5. `docs/macos-3d-only-build-plan.md`
+6. `docs/audio-reactive/00-repo-inspection.md` only if touching deferred audio code

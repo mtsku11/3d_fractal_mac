@@ -102,27 +102,20 @@ Suggested project shape:
 - Add a separate macOS-only backend project only when implementation starts, likely `src/Parsec.Rendering.Metal`.
 - Keep shared renderer-neutral request/parameter types in `src/Parsec.Rendering` or a very small abstraction file if needed.
 
-## Shader Translation Plan
+## Shader Translation Plan ✓ RESOLVED
 
-First evaluate automated translation against a single composite shader:
+SPIRV-Cross was not used — manual port was chosen because resource layout differences and struct alignment were easier to control by hand. See `skills.md` for the full recipe.
 
-1. Produce the same composite GLSL source that `ShaderLoader.LoadComposite("mandelbox_core.glsl", "raymarch_main.glsl")` uses.
-2. Try GLSL -> SPIR-V -> MSL with `glslangValidator` and SPIRV-Cross.
-3. Inspect resource bindings and generated MSL before wiring it into runtime code.
-4. If translation is brittle, manually port Mandelbox plus the necessary raymarch path to MSL.
+Resolved issues from the spike:
 
-Issues to document during the spike:
-
-- `layout(std430, binding = N)` SSBO layout versus Metal buffer indices and struct alignment
-- workgroup size mapping from `layout(local_size_x = 8, local_size_y = 8)` to Metal threadgroup sizing
-- output strategy: buffer writes first, texture writes later only if needed
-- barriers and synchronization differences between OpenGL `MemoryBarrier` and Metal command-buffer ordering
-- vector/matrix constructor ordering and matrix multiplication semantics
-- `uint` packed RGBA8 byte order
-- differences in precision assumptions and fast-math behavior
-- availability of helper intrinsics used by the GLSL path
-
-SPIRV-Cross is relevant because the upstream project describes MSL output support, but Parsec should not assume the generated code is production-ready until Mandelbox compiles and renders correctly.
+- **SSBO layout vs Metal buffer alignment:** `[StructLayout(Sequential, Pack=1)]` with `System.Numerics.Vector4` satisfies MSL 16-byte `float4` alignment as long as the int fields before the first Vector4 sum to a multiple of 16 (4 ints = 16 bytes ✓). No explicit padding needed for the current structs.
+- **Workgroup size:** `layout(local_size_x = 8, local_size_y = 8)` maps directly to `MTLSize { width=8, height=8, depth=1 }` threadgroup size; threadgroup count is `ceil(w/8) × ceil(h/8)`.
+- **Output strategy:** buffer writes. `device uint* output [[buffer(2)]]`, direct RGBA8 pack at end of kernel. No texture writes needed.
+- **Barriers/synchronization:** not needed. Metal command buffer ordering (`cmd.Commit(); cmd.WaitUntilCompleted()`) serializes compute and readback.
+- **Vector/matrix constructors:** identical between GLSL and MSL — both use column-major `float3x3(col0, col1, col2)`.
+- **RGBA8 byte order:** `(255u << 24) | (b << 16) | (g << 8) | r` — little-endian, alpha is high byte, matches `SKColorType.Rgba8888`.
+- **Precision:** no observable differences in fp32 math between GLSL and MSL at preview quality.
+- **Intrinsics:** all used GLSL intrinsics (`clamp`, `mix`, `smoothstep`, `reflect`, `normalize`, `dot`, `cross`, `length`, `sign`, `abs`, `max`, `min`, `mod`, `floor`, `fract`, `pow`, `exp`, `sqrt`) have direct MSL equivalents with identical signatures.
 
 ## Avalonia Display Path
 
@@ -144,68 +137,23 @@ If readback/upload is too slow:
 
 ## Milestones
 
-### 1. Repository audit
+### 1. Repository audit ✓ COMPLETE
 
 Goal: complete and keep this plan current.
 
-Expected files touched:
+### 2. Backend abstraction seam ✓ COMPLETE
 
-- `CLAUDE.md`
-- `AGENTS.md`
-- `docs/macos-3d-only-build-plan.md`
+`IThreeDimensionalRenderBackend` added to `Parsec.Rendering.Gpu`. `src/Parsec.Rendering.Metal/` project created with SharpMetal 1.1.0 reference. OpenGL Mandelbox renders unchanged.
 
-Acceptance criteria:
+### 3. One-shader Metal spike ✓ COMPLETE
 
-- future agents clearly see macOS 3D-only as the current priority
-- first shader candidate and backend seam are identified
-- deferred items are explicit
+`mandelbox_raymarch.metal` — full manual MSL port of `mandelbox_core.glsl` + `raymarch_main.glsl`. `MetalMandelboxRenderer` compiles it at startup via SharpMetal, dispatches 8×8 threadgroup compute pass, returns `uint[]` RGBA8. CLI `metal-smoke` command verifies headlessly. 5 ms GPU compute at 640×480 on Apple Silicon; 51,223 non-background pixels at that size.
 
-### 2. Backend abstraction seam
+### 4. Avalonia display path ✓ COMPLETE
 
-Goal: add the smallest 3D render-output abstraction needed to select OpenGL or Metal.
+**4A:** `MetalMandelboxRenderer` wired into `FractalView`. On macOS, Mandelbox automatically routes to Metal via a `when _metalRenderer?.IsAvailable == true` guard in the `ActiveType switch`. Packed `uint[]` uploads into the existing GL texture via `TexImage2D` — no change to the blit path.
 
-Expected files touched:
-
-- `src/Parsec.Rendering/` for shared request/output contracts if needed
-- `src/Parsec.App/FractalView.cs` for selection and dispatch
-- optionally a new `src/Parsec.Rendering.Metal/` project
-
-Acceptance criteria:
-
-- OpenGL Mandelbox behavior still builds and renders
-- no broad changes to every renderer
-- Deep Zoom remains OpenGL-only or disabled on macOS 3D-only mode
-
-### 3. One-shader Metal spike
-
-Goal: render Mandelbox through Metal into packed RGBA8.
-
-Expected files touched:
-
-- new Metal backend project/files
-- first `.metal` shader or generated MSL artifact
-- solution/project references
-
-Acceptance criteria:
-
-- Mandelbox renders at a fixed preview size on macOS
-- CPU-side parameters match existing Mandelbox defaults closely enough for visual comparison
-- no attempt to port all 3D shaders yet
-
-### 4. Avalonia display path
-
-Goal: show the Metal output in the app.
-
-Expected files touched:
-
-- `src/Parsec.App/FractalView.cs`
-- possibly a new macOS presentation adapter
-
-Acceptance criteria:
-
-- app shows the Metal Mandelbox path on macOS
-- OpenGL path remains available where supported
-- UI does not expose unsupported deep-zoom assumptions in the macOS 3D-only path
+**4B:** Per-phase timing exposed. `MetalMandelboxRenderer.LastComputeMs` / `LastReadbackMs` set internally after `WaitUntilCompleted` and `MemoryCopy`. `FractalView` adds `TexImage2D` and total-frame stopwatches. Status bar shows: `compute N ms · readback N ms · upload N ms · total N ms`.
 
 ### 5. Performance measurement
 
