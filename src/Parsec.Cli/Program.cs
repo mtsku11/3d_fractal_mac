@@ -168,6 +168,8 @@ public static class Program
                 int nonBg = pixels.Count(p => p != bgPacked);
 
                 Console.WriteLine($"  {w*h} pixels rendered in {sw.ElapsedMilliseconds} ms");
+                Console.WriteLine($"    compute:  {renderer.LastComputeMs} ms");
+                Console.WriteLine($"    readback: {renderer.LastReadbackMs} ms");
                 Console.WriteLine($"  Background packed: 0x{bgPacked:X8}");
                 Console.WriteLine($"  Non-background pixels: {nonBg}");
                 if (w <= 16)
