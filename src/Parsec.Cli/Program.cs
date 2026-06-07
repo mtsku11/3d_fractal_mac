@@ -369,6 +369,141 @@ public static class Program
             }
         }
 
+        if (args[0] is "metal-kifs-smoke")
+        {
+            if (!OperatingSystem.IsMacOS()) { Console.Error.WriteLine("metal-kifs-smoke requires macOS."); return 1; }
+            try
+            {
+                int w = args.Length > 1 ? int.Parse(args[1]) : 64;
+                int h = args.Length > 2 ? int.Parse(args[2]) : w;
+                Console.WriteLine($"Metal KIFS smoke test — rendering at {w}x{h}...");
+                using var renderer = new MetalKifsRenderer();
+                Console.WriteLine($"  IsAvailable: {renderer.IsAvailable}");
+                if (!renderer.IsAvailable) { Console.Error.WriteLine("Metal backend not available."); return 1; }
+
+                var camera = new Camera3D(new Vector3(0f, 3f, 12f), Vector3.Zero, Vector3.UnitY, MathF.PI / 4f, (float)w / h);
+                var kf = new KifsParams();
+                var settings = new RaymarchSettings();
+                var palette = PaletteParams.Default;
+                var bg = new Color(0.05f, 0.05f, 0.08f);
+                var sf = new Color(0.6f, 0.6f, 0.6f);
+                var light = Vector3.Normalize(new Vector3(1f, 2f, 1.5f));
+
+                var sw = System.Diagnostics.Stopwatch.StartNew();
+                uint[] pixels = renderer.RenderKifs(kf, camera, w, h, settings, bg, sf, light, palette);
+                sw.Stop();
+
+                uint bgR = (uint)(bg.R * 255f + 0.5f); uint bgG = (uint)(bg.G * 255f + 0.5f); uint bgB = (uint)(bg.B * 255f + 0.5f);
+                uint bgPacked = (255u << 24) | (bgB << 16) | (bgG << 8) | bgR;
+                int nonBg = pixels.Count(p => p != bgPacked);
+                Console.WriteLine($"  {w*h} pixels rendered in {sw.ElapsedMilliseconds} ms");
+                Console.WriteLine($"    compute:  {renderer.LastComputeMs} ms");
+                Console.WriteLine($"    readback: {renderer.LastReadbackMs} ms");
+                Console.WriteLine($"  Non-background pixels: {nonBg}");
+
+                var info = new SKImageInfo(w, h, SKColorType.Rgba8888, SKAlphaType.Premul);
+                var bmp = new SKBitmap(info);
+                var bytes = new byte[pixels.Length * 4];
+                Buffer.BlockCopy(pixels, 0, bytes, 0, bytes.Length);
+                Marshal.Copy(bytes, 0, bmp.GetPixels(), bytes.Length);
+                var outPath = ResolveOutputPath("metal-kifs.png");
+                ImageOutput.SavePng(bmp, outPath);
+                Console.WriteLine($"  -> {outPath}");
+                return nonBg > 0 ? 0 : 1;
+            }
+            catch (Exception ex) { Console.Error.WriteLine($"metal-kifs-smoke FAILED: {ex.Message}"); return 1; }
+        }
+
+        if (args[0] is "metal-kleinian-smoke")
+        {
+            if (!OperatingSystem.IsMacOS()) { Console.Error.WriteLine("metal-kleinian-smoke requires macOS."); return 1; }
+            try
+            {
+                int w = args.Length > 1 ? int.Parse(args[1]) : 64;
+                int h = args.Length > 2 ? int.Parse(args[2]) : w;
+                Console.WriteLine($"Metal Kleinian smoke test — rendering at {w}x{h}...");
+                using var renderer = new MetalKleinianRenderer();
+                Console.WriteLine($"  IsAvailable: {renderer.IsAvailable}");
+                if (!renderer.IsAvailable) { Console.Error.WriteLine("Metal backend not available."); return 1; }
+
+                var camera = new Camera3D(new Vector3(0f, 3f, 12f), Vector3.Zero, Vector3.UnitY, MathF.PI / 4f, (float)w / h);
+                var kl = new KleinianParams();
+                var settings = new RaymarchSettings();
+                var palette = PaletteParams.Default;
+                var bg = new Color(0.05f, 0.05f, 0.08f);
+                var sf = new Color(0.6f, 0.6f, 0.6f);
+                var light = Vector3.Normalize(new Vector3(1f, 2f, 1.5f));
+
+                var sw = System.Diagnostics.Stopwatch.StartNew();
+                uint[] pixels = renderer.RenderKleinian(kl, camera, w, h, settings, bg, sf, light, palette);
+                sw.Stop();
+
+                uint bgR = (uint)(bg.R * 255f + 0.5f); uint bgG = (uint)(bg.G * 255f + 0.5f); uint bgB = (uint)(bg.B * 255f + 0.5f);
+                uint bgPacked = (255u << 24) | (bgB << 16) | (bgG << 8) | bgR;
+                int nonBg = pixels.Count(p => p != bgPacked);
+                Console.WriteLine($"  {w*h} pixels rendered in {sw.ElapsedMilliseconds} ms");
+                Console.WriteLine($"    compute:  {renderer.LastComputeMs} ms");
+                Console.WriteLine($"    readback: {renderer.LastReadbackMs} ms");
+                Console.WriteLine($"  Non-background pixels: {nonBg}");
+
+                var info = new SKImageInfo(w, h, SKColorType.Rgba8888, SKAlphaType.Premul);
+                var bmp = new SKBitmap(info);
+                var bytes = new byte[pixels.Length * 4];
+                Buffer.BlockCopy(pixels, 0, bytes, 0, bytes.Length);
+                Marshal.Copy(bytes, 0, bmp.GetPixels(), bytes.Length);
+                var outPath = ResolveOutputPath("metal-kleinian.png");
+                ImageOutput.SavePng(bmp, outPath);
+                Console.WriteLine($"  -> {outPath}");
+                return nonBg > 0 ? 0 : 1;
+            }
+            catch (Exception ex) { Console.Error.WriteLine($"metal-kleinian-smoke FAILED: {ex.Message}"); return 1; }
+        }
+
+        if (args[0] is "metal-hybrid-smoke")
+        {
+            if (!OperatingSystem.IsMacOS()) { Console.Error.WriteLine("metal-hybrid-smoke requires macOS."); return 1; }
+            try
+            {
+                int w = args.Length > 1 ? int.Parse(args[1]) : 64;
+                int h = args.Length > 2 ? int.Parse(args[2]) : w;
+                Console.WriteLine($"Metal Hybrid smoke test — rendering at {w}x{h}...");
+                using var renderer = new MetalHybridRenderer();
+                Console.WriteLine($"  IsAvailable: {renderer.IsAvailable}");
+                if (!renderer.IsAvailable) { Console.Error.WriteLine("Metal backend not available."); return 1; }
+
+                var camera = new Camera3D(new Vector3(0f, 2f, 8f), Vector3.Zero, Vector3.UnitY, MathF.PI / 4f, (float)w / h);
+                var hp = new HybridParams();
+                var settings = new RaymarchSettings();
+                var palette = PaletteParams.Default;
+                var bg = new Color(0.05f, 0.05f, 0.08f);
+                var sf = new Color(0.6f, 0.6f, 0.6f);
+                var light = Vector3.Normalize(new Vector3(1f, 2f, 1.5f));
+
+                var sw = System.Diagnostics.Stopwatch.StartNew();
+                uint[] pixels = renderer.RenderHybrid(hp, camera, w, h, settings, bg, sf, light, palette);
+                sw.Stop();
+
+                uint bgR = (uint)(bg.R * 255f + 0.5f); uint bgG = (uint)(bg.G * 255f + 0.5f); uint bgB = (uint)(bg.B * 255f + 0.5f);
+                uint bgPacked = (255u << 24) | (bgB << 16) | (bgG << 8) | bgR;
+                int nonBg = pixels.Count(p => p != bgPacked);
+                Console.WriteLine($"  {w*h} pixels rendered in {sw.ElapsedMilliseconds} ms");
+                Console.WriteLine($"    compute:  {renderer.LastComputeMs} ms");
+                Console.WriteLine($"    readback: {renderer.LastReadbackMs} ms");
+                Console.WriteLine($"  Non-background pixels: {nonBg}");
+
+                var info = new SKImageInfo(w, h, SKColorType.Rgba8888, SKAlphaType.Premul);
+                var bmp = new SKBitmap(info);
+                var bytes = new byte[pixels.Length * 4];
+                Buffer.BlockCopy(pixels, 0, bytes, 0, bytes.Length);
+                Marshal.Copy(bytes, 0, bmp.GetPixels(), bytes.Length);
+                var outPath = ResolveOutputPath("metal-hybrid.png");
+                ImageOutput.SavePng(bmp, outPath);
+                Console.WriteLine($"  -> {outPath}");
+                return nonBg > 0 ? 0 : 1;
+            }
+            catch (Exception ex) { Console.Error.WriteLine($"metal-hybrid-smoke FAILED: {ex.Message}"); return 1; }
+        }
+
         if (args[0] is "gpu-render")
         {
             if (args.Length < 2)
@@ -473,6 +608,9 @@ public static class Program
         Console.WriteLine("  parsec metal-smoke [w] [h]            Metal Mandelbox spike test (macOS only)");
         Console.WriteLine("  parsec metal-bulb-smoke [w] [h]      Metal Mandelbulb smoke test (macOS only)");
         Console.WriteLine("  parsec metal-rotbox-smoke [w] [h]    Metal RotBox smoke test (macOS only)");
+        Console.WriteLine("  parsec metal-kifs-smoke [w] [h]      Metal KIFS smoke test (macOS only)");
+        Console.WriteLine("  parsec metal-kleinian-smoke [w] [h]  Metal Kleinian smoke test (macOS only)");
+        Console.WriteLine("  parsec metal-hybrid-smoke [w] [h]    Metal Hybrid smoke test (macOS only)");
         Console.WriteLine("  parsec help           Show this help");
         Console.WriteLine();
         Console.WriteLine("Available examples:");

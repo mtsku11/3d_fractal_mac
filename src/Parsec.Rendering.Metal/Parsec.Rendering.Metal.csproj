@@ -15,6 +15,9 @@
     <EmbeddedResource Include="Shaders\mandelbox_raymarch.metal" />
     <EmbeddedResource Include="Shaders\mandelbulb_raymarch.metal" />
     <EmbeddedResource Include="Shaders\rotbox_raymarch.metal" />
+    <EmbeddedResource Include="Shaders\kifs_raymarch.metal" />
+    <EmbeddedResource Include="Shaders\kleinian_raymarch.metal" />
+    <EmbeddedResource Include="Shaders\hybrid_raymarch.metal" />
   </ItemGroup>
 
   <ItemGroup>

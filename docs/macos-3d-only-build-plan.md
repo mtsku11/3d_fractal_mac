@@ -180,12 +180,18 @@ Goal: expand only after Mandelbox proves the stack.
 
 **RotBox ✓ COMPLETE** — `rotbox_raymarch.metal` + `MetalRotBoxRenderer`. Standard Mandelbox + per-iteration Euler rotation (`z = R * z` before folds). Key differences: Euler angles in `surfParams.xyz` (not `rot.xyz`); `boxParams` order `(scale, minRadius, fixedRadius, foldLimit)` differs from Mandelbox `(scale, foldingLimit, minRadius, fixedRadius)`. Measured: 6 ms GPU compute at 640×480. CLI: `metal-rotbox-smoke [w] [h]`.
 
+**KIFS ✓ COMPLETE** — `kifs_raymarch.metal` + `MetalKifsRenderer`. Pre-rotation (`rot.xyz`), abs fold, post-rotation (`surfParams.xyz`), sphere fold, scale toward pivot (`juliaC.xyz`). `boxParams = (scale, _, minRadius, fixedRadius)` — slot .y unused. Measured: 5 ms GPU compute at 640×480. CLI: `metal-kifs-smoke [w] [h]`.
+
+**Kleinian ✓ COMPLETE** — `kleinian_raymarch.metal` + `MetalKleinianRenderer`. Numerical-gradient DE: `estimateDE` calls `kleinianPotential` 7 times (central differences). `boxParams = (scale, cell, minRadius, fixedRadius)`, offset in `juliaC.xyz`. Measured: 23 ms GPU compute at 640×480 (expected — 7× potential evaluations per estimate call). CLI: `metal-kleinian-smoke [w] [h]`.
+
+**Hybrid ✓ COMPLETE** — `hybrid_raymarch.metal` + `MetalHybridRenderer`. Per-iteration: rotate, Mandelbox half, Mandelbulb half. `surfParams = (rotX, rotY, rotZ, power)`. Key: GLSL `atan(z.y, z.x)` → MSL `atan2(z.y, z.x)`. DE = 0.25 × log(r)·r/dr (heuristic safety factor). Measured: 11 ms GPU compute at 640×480. CLI: `metal-hybrid-smoke [w] [h]`.
+
 Remaining fp32 3D shaders to port (candidates in rough priority order based on parameter pack complexity):
 - GpuMandelbulbRenderer ✓ done
 - GpuRotBoxRenderer ✓ done
-- GpuKifsRenderer
-- GpuKleinianRenderer
-- GpuHybridRenderer
+- GpuKifsRenderer ✓ done
+- GpuKleinianRenderer ✓ done
+- GpuHybridRenderer ✓ done
 - others as needed
 
 Expected files touched per port:

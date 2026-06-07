@@ -64,7 +64,7 @@ Key macOS-specific constraints now handled in the codebase:
 - Blit shaders at `#version 330 core` (was 430, caused compile failure on macOS driver)
 - `AvaloniaNativePlatformOptions { RenderingMode = [OpenGl, Software] }` prevents Avalonia Metal UI crash on dummy plugs
 
-Current work: Milestone 6 — port remaining fp32 3D shaders to Metal (see `skills.md` 7-step recipe). Two done: Mandelbox, Mandelbulb. Remaining: RotBox, Kifs, Kleinian, Hybrid, others.
+Milestone 6 complete: all priority fp32 3D shaders ported to Metal. Mandelbox (5 ms), Mandelbulb (7 ms), RotBox (6 ms), KIFS (5 ms), Kleinian (23 ms — numerical-gradient DE), Hybrid (11 ms). All wired into `FractalView`; CLI smoke tests pass. See `skills.md` for porting recipe and per-fractal parameter notes.
 
 Non-goals (still deferred):
 

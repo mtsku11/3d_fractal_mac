@@ -28,6 +28,9 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
     private MetalMandelboxRenderer?  _metalRenderer;             // null on non-macOS or when Metal unavailable
     private MetalMandelbulbRenderer? _metalMandelbulbRenderer;   // null on non-macOS or when Metal unavailable
     private MetalRotBoxRenderer?     _metalRotBoxRenderer;        // null on non-macOS or when Metal unavailable
+    private MetalKifsRenderer?      _metalKifsRenderer;          // null on non-macOS or when Metal unavailable
+    private MetalKleinianRenderer?  _metalKleinianRenderer;      // null on non-macOS or when Metal unavailable
+    private MetalHybridRenderer?    _metalHybridRenderer;        // null on non-macOS or when Metal unavailable
     private long _metalComputeMs;
     private long _metalReadbackMs;
     private long _texUploadMs;
@@ -550,6 +553,9 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
                 _metalRenderer = new MetalMandelboxRenderer();
                 _metalMandelbulbRenderer = new MetalMandelbulbRenderer();
                 _metalRotBoxRenderer = new MetalRotBoxRenderer();
+                _metalKifsRenderer = new MetalKifsRenderer();
+                _metalKleinianRenderer = new MetalKleinianRenderer();
+                _metalHybridRenderer = new MetalHybridRenderer();
             }
 
             _texture = _gl.GenTexture();
@@ -576,7 +582,7 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
     {
         bool notReady = !_ready || _gl == null
             || (OperatingSystem.IsMacOS()
-                ? _metalRenderer == null && _metalMandelbulbRenderer == null && _metalRotBoxRenderer == null
+                ? _metalRenderer == null && _metalMandelbulbRenderer == null && _metalRotBoxRenderer == null && _metalKifsRenderer == null && _metalKleinianRenderer == null && _metalHybridRenderer == null
                 : _pipeline == null || _boxRenderer == null || _kifsRenderer == null || _kleinianRenderer == null || _attractorRenderer == null || _mandelbulbRenderer == null || _qjuliaRenderer == null || _rotboxRenderer == null || _hybridRenderer == null || _qjboxRenderer == null || _mengerRenderer == null || _bicomplexRenderer == null || _apollonianRenderer == null || _phoenixRenderer == null || _biomorphRenderer == null || _moselyRenderer == null || _pk4dRenderer == null || _riemannRenderer == null || _mandalayRenderer == null || _anisoRenderer == null || _orbitHybridRenderer == null || _burningShipRenderer == null || _deepPipeline == null);
         if (notReady)
         {
@@ -765,6 +771,8 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
                     lightDirection: Light.ToDirection(),
                     palette: Palette.ToParams(),
                     tileRows: 64),
+                FractalType.Hybrid when _metalHybridRenderer?.IsAvailable == true =>
+                    RenderWithMetalHybrid(camera, rw, rh),
                 FractalType.Hybrid => _hybridRenderer.RenderToBuffer(Hybrid.ToParams(), camera,
                     PreviewWidth, PreviewHeight, PreviewSettings(),
                     background: new Color(0.02f, 0.03f, 0.07f),
@@ -821,6 +829,8 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
                     lightDirection: Light.ToDirection(),
                     palette: Palette.ToParams(),
                     tileRows: 64),
+                FractalType.Kleinian when _metalKleinianRenderer?.IsAvailable == true =>
+                    RenderWithMetalKleinian(camera, rw, rh),
                 FractalType.Kleinian => _kleinianRenderer.RenderToBuffer(Kleinian.ToParams(), camera,
                     PreviewWidth, PreviewHeight, PreviewSettings(),
                     background: new Color(0.02f, 0.03f, 0.07f),
@@ -828,6 +838,8 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
                     lightDirection: Light.ToDirection(),
                     palette: Palette.ToParams(),
                     tileRows: 64),
+                FractalType.Kifs when _metalKifsRenderer?.IsAvailable == true =>
+                    RenderWithMetalKifs(camera, rw, rh),
                 FractalType.Kifs => _kifsRenderer.RenderToBuffer(Kifs.ToParams(), camera,
                     PreviewWidth, PreviewHeight, PreviewSettings(),
                     background: new Color(0.02f, 0.03f, 0.07f),
@@ -920,6 +932,12 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
                 ? $"Metal Mandelbulb · {rw}x{rh} · compute {_metalComputeMs} ms · readback {_metalReadbackMs} ms · upload {_texUploadMs} ms · total {_totalFrameMs} ms  ·  WASD+QE move · drag to look"
                 : ActiveType == FractalType.RotBox && _metalRotBoxRenderer?.IsAvailable == true
                 ? $"Metal RotBox · {rw}x{rh} · compute {_metalComputeMs} ms · readback {_metalReadbackMs} ms · upload {_texUploadMs} ms · total {_totalFrameMs} ms  ·  WASD+QE move · drag to look"
+                : ActiveType == FractalType.Kifs && _metalKifsRenderer?.IsAvailable == true
+                ? $"Metal KIFS · {rw}x{rh} · compute {_metalComputeMs} ms · readback {_metalReadbackMs} ms · upload {_texUploadMs} ms · total {_totalFrameMs} ms  ·  WASD+QE move · drag to look"
+                : ActiveType == FractalType.Kleinian && _metalKleinianRenderer?.IsAvailable == true
+                ? $"Metal Kleinian · {rw}x{rh} · compute {_metalComputeMs} ms · readback {_metalReadbackMs} ms · upload {_texUploadMs} ms · total {_totalFrameMs} ms  ·  WASD+QE move · drag to look"
+                : ActiveType == FractalType.Hybrid && _metalHybridRenderer?.IsAvailable == true
+                ? $"Metal Hybrid · {rw}x{rh} · compute {_metalComputeMs} ms · readback {_metalReadbackMs} ms · upload {_texUploadMs} ms · total {_totalFrameMs} ms  ·  WASD+QE move · drag to look"
                 : $"pos ({_cam.Position.X:F2}, {_cam.Position.Y:F2}, {_cam.Position.Z:F2})  ·  WASD+QE move · drag to look");
         }
 
@@ -996,11 +1014,17 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
         _metalRenderer?.Dispose();
         _metalMandelbulbRenderer?.Dispose();
         _metalRotBoxRenderer?.Dispose();
+        _metalKifsRenderer?.Dispose();
+        _metalKleinianRenderer?.Dispose();
+        _metalHybridRenderer?.Dispose();
         _texture = _vao = _blitProgram = 0;
         _boxRenderer = null;
         _metalRenderer = null;
         _metalMandelbulbRenderer = null;
         _metalRotBoxRenderer = null;
+        _metalKifsRenderer = null;
+        _metalKleinianRenderer = null;
+        _metalHybridRenderer = null;
         _kifsRenderer = null;
         _kleinianRenderer = null;
         _attractorRenderer = null;
@@ -1074,6 +1098,48 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
             palette: Palette.ToParams());
         _metalComputeMs  = _metalRotBoxRenderer!.LastComputeMs;
         _metalReadbackMs = _metalRotBoxRenderer!.LastReadbackMs;
+        return pixels;
+    }
+
+    private uint[] RenderWithMetalKifs(Camera3D camera, int width, int height)
+    {
+        var pixels = _metalKifsRenderer!.RenderKifs(
+            Kifs.ToParams(), camera, width, height,
+            PreviewSettings(),
+            background: new Color(0.02f, 0.03f, 0.07f),
+            surface: Color.Rgb(150, 125, 100),
+            lightDirection: Light.ToDirection(),
+            palette: Palette.ToParams());
+        _metalComputeMs  = _metalKifsRenderer!.LastComputeMs;
+        _metalReadbackMs = _metalKifsRenderer!.LastReadbackMs;
+        return pixels;
+    }
+
+    private uint[] RenderWithMetalKleinian(Camera3D camera, int width, int height)
+    {
+        var pixels = _metalKleinianRenderer!.RenderKleinian(
+            Kleinian.ToParams(), camera, width, height,
+            PreviewSettings(),
+            background: new Color(0.02f, 0.03f, 0.07f),
+            surface: Color.Rgb(150, 125, 100),
+            lightDirection: Light.ToDirection(),
+            palette: Palette.ToParams());
+        _metalComputeMs  = _metalKleinianRenderer!.LastComputeMs;
+        _metalReadbackMs = _metalKleinianRenderer!.LastReadbackMs;
+        return pixels;
+    }
+
+    private uint[] RenderWithMetalHybrid(Camera3D camera, int width, int height)
+    {
+        var pixels = _metalHybridRenderer!.RenderHybrid(
+            Hybrid.ToParams(), camera, width, height,
+            PreviewSettings(),
+            background: new Color(0.02f, 0.03f, 0.07f),
+            surface: Color.Rgb(190, 170, 145),
+            lightDirection: Light.ToDirection(),
+            palette: Palette.ToParams());
+        _metalComputeMs  = _metalHybridRenderer!.LastComputeMs;
+        _metalReadbackMs = _metalHybridRenderer!.LastReadbackMs;
         return pixels;
     }
 

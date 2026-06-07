@@ -55,6 +55,9 @@ Unified memory means `Buffer.MemoryCopy` from `MTLBuffer.Contents` to a managed 
 | Mandelbox 1920×1080 | 12 ms | 1 ms | 1 ms |
 | Mandelbulb 640×480 | 7 ms | 0 ms | — |
 | RotBox 640×480     | 6 ms | 0 ms | — |
+| KIFS 640×480       | 5 ms | 0 ms | — |
+| Kleinian 640×480   | 23 ms | 0 ms | — |
+| Hybrid 640×480     | 11 ms | 0 ms | — |
 
 **Decision (Milestone 5):** `TexImage2D` upload is negligible at all preview sizes on unified memory. Stay with the current Metal→CPU readback→TexImage2D path. No `CAMetalLayer` needed.
 
@@ -104,6 +107,12 @@ The Mandelbox MSL shader is the template. For each new fractal:
 **Camera position matters.** Mandelbox: `(0, 3, 12)` looking at origin. Mandelbulb: `(0, 0, 4)` looking at origin (the bulb fits in a ~1.3 unit sphere; pulling back to 12 renders it tiny). RotBox: `(0, 3, 12)` — same as Mandelbox, the default bounding sphere is radius 8.
 
 **RotBox vs Mandelbox parameter order:** RotBox `boxParams = (scale, minRadius, fixedRadius, foldLimit)` — different from Mandelbox `(scale, foldingLimit, minRadius, fixedRadius)`. Also, RotBox Euler angles go in `surfParams.xyz`, not `rot.xyz` (which is where Mandelbox uses its optional rotation). The per-iteration `z = R * z` rotation is what makes RotBox different from a plain Mandelbox.
+
+**KIFS parameter layout:** `boxParams = (scale, _, minRadius, fixedRadius)` — slot .y is unused (zero). Pre-rotation angles in `rot.xyz` (with fudge in `rot.w`); post-rotation angles in `surfParams.xyz`; scale pivot in `juliaC.xyz`. `eulerRotation` takes a `float3`, unlike RotBox/Hybrid which take 3 separate floats.
+
+**Kleinian DE is numerical gradient, not analytic:** `estimate()` calls `kleinianPotential()` 7 times (1 center + 6 axis offsets for central differences). This makes each estimate call ~7× more expensive — Kleinian renders at 23 ms vs 5–11 ms for the other fractals. This is correct and expected; the analytic scalar-derivative DE collapses for inversive systems.
+
+**Hybrid GLSL `atan(y,x)` → MSL `atan2(y,x)`:** MSL's `atan` is single-arg only. Hybrid's Mandelbulb half uses `phi = atan(z.y, z.x)` in GLSL — must be `atan2(z.y, z.x)` in MSL. The same applies to any future fractal using the spherical-coordinates power step.
 
 **The DE shape determines which GLSL helpers are needed.** Mandelbox needs `boxFold`, `sphereFold`, `rotationFromEuler`. Mandelbulb needs only `estimateFull`/`estimate` — no helper functions at all. Remove unused helpers; they add compile time.
 

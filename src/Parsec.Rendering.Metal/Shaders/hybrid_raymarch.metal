@@ -1,0 +1,373 @@
+#include <metal_stdlib>
+using namespace metal;
+
+// ============================================================================
+// Parameter structs — layout must match MetalFoldParams / MetalRenderParams
+// ============================================================================
+
+struct FoldParams {
+    int   iterations;
+    int   mode;       // unused
+    int   juliaMode;  // unused
+    int   pad0;
+    float4 boxParams;    // (scale, minRadius, fixedRadius, foldLimit)
+    float4 surfParams;   // (rotX, rotY, rotZ, power)
+    float4 juliaC;       // unused
+    float4 rot;          // (_, _, _, fudge)
+    float4 boundSphere;  // (cx, cy, cz, r)
+};
+
+struct RenderParams {
+    int   imageWidth;
+    int   imageHeight;
+    int   rowOffset;
+    int   rowCount;
+    float4 camPos;
+    float4 camForward;
+    float4 camRight;
+    float4 camUp;
+    float4 tanFov;
+    float4 lightDir;
+    float4 background;
+    float4 surface;
+    float4 marchA;
+    float4 marchB;
+    int   marchI0;
+    int   marchI1;
+    int   marchI2;
+    int   marchI3;
+    float4 palBase;
+    float4 palAmp;
+    float4 palPhase;
+    float4 trapMix;
+    float4 subpixelJitter;
+    float4 reflectParams;
+};
+
+// ============================================================================
+// Hybrid Mandelbox + Mandelbulb distance estimator
+// ============================================================================
+//
+// Per iteration: rotate (compounding), Mandelbox half (box fold + sphere fold
+// + scale), Mandelbulb half (spherical power step). DE is heuristic with 0.25×
+// safety factor. GLSL atan(y,x) → MSL atan2(y,x).
+//
+// boxParams:  (scale, minRadius, fixedRadius, foldLimit)
+// surfParams: (rotX, rotY, rotZ, power)
+// rot.w:      fudge
+
+void sphereFold(thread float3& z, thread float& dr, float minR2, float fixedR2) {
+    float r2 = dot(z, z);
+    if (r2 < minR2) {
+        float t = fixedR2 / minR2;
+        z *= t; dr *= t;
+    } else if (r2 < fixedR2) {
+        float t = fixedR2 / r2;
+        z *= t; dr *= t;
+    }
+}
+
+float3x3 eulerRotation(float ax, float ay, float az) {
+    float cx = cos(ax), sx = sin(ax);
+    float cy = cos(ay), sy = sin(ay);
+    float cz = cos(az), sz = sin(az);
+    float3x3 rx = float3x3(float3(1,0,0),    float3(0,cx,-sx),  float3(0,sx,cx));
+    float3x3 ry = float3x3(float3(cy,0,sy),  float3(0,1,0),     float3(-sy,0,cy));
+    float3x3 rz = float3x3(float3(cz,-sz,0), float3(sz,cz,0),   float3(0,0,1));
+    return rz * ry * rx;
+}
+
+float estimateFull(float3 p, constant FoldParams& fp, thread float4& outTrap) {
+    float scale   = fp.boxParams.x;
+    float minR    = fp.boxParams.y;
+    float fixedR  = fp.boxParams.z;
+    float foldLim = fp.boxParams.w;
+    float minR2   = minR * minR;
+    float fixedR2 = fixedR * fixedR;
+    float power   = fp.surfParams.w;
+    const float bailout = 8.0f;
+
+    float3x3 R = eulerRotation(fp.surfParams.x, fp.surfParams.y, fp.surfParams.z);
+
+    float3 z = p;
+    float dr = 1.0f;
+    float r  = 0.0f;
+    outTrap = float4(1e20f);
+
+    for (int i = 0; i < fp.iterations; i++) {
+        z = R * z;
+
+        // Mandelbox half
+        z = clamp(z, -foldLim, foldLim) * 2.0f - z;
+        sphereFold(z, dr, minR2, fixedR2);
+        z = z * scale + p;
+        dr = dr * abs(scale) + 1.0f;
+
+        // Mandelbulb half
+        r = length(z);
+        if (r > bailout) break;
+        if (r > 1e-12f) {
+            float theta = acos(clamp(z.z / r, -1.0f, 1.0f));
+            float phi   = atan2(z.y, z.x);   // MSL: atan2, not atan(y,x)
+            dr = power * pow(r, power - 1.0f) * dr + 1.0f;
+            float zr = pow(r, power);
+            theta *= power; phi *= power;
+            z = zr * float3(sin(theta) * cos(phi),
+                            sin(theta) * sin(phi),
+                            cos(theta)) + p;
+        }
+
+        outTrap.x = min(outTrap.x, length(z));
+        outTrap.y = min(outTrap.y, abs(z.x));
+        outTrap.z = min(outTrap.z, length(z.xy));
+        outTrap.w = min(outTrap.w, abs(length(z) - 1.0f));
+    }
+
+    r = length(z);
+    return 0.5f * 0.5f * log(max(r, 1e-12f)) * r / max(dr, 1e-12f);
+}
+
+float estimate(float3 p, constant FoldParams& fp) {
+    float4 dummy;
+    return estimateFull(p, fp, dummy);
+}
+
+// ============================================================================
+// Shading helpers
+// ============================================================================
+
+float3 estimateNormal(float3 p, float eps, float3 viewDir, thread bool& degenerate,
+                      constant FoldParams& fp) {
+    float2 k = float2(1.0f, -1.0f);
+    float3 n =
+        k.xyy * estimate(p + k.xyy * eps, fp) +
+        k.yyx * estimate(p + k.yyx * eps, fp) +
+        k.yxy * estimate(p + k.yxy * eps, fp) +
+        k.xxx * estimate(p + k.xxx * eps, fp);
+    float len = length(n);
+    degenerate = !(len > 1e-6f);
+    return degenerate ? -viewDir : n / len;
+}
+
+float softShadow(float3 origin, float3 dir, float hitEps, float maxDist,
+                 int steps, float softness, constant FoldParams& fp) {
+    float result = 1.0f;
+    float t = hitEps * 4.0f;
+    for (int i = 0; i < steps; i++) {
+        float3 p = origin + dir * t;
+        float d = estimate(p, fp);
+        if (d < hitEps) return 0.0f;
+        result = min(result, softness * d / t);
+        t += d;
+        if (t > maxDist) break;
+    }
+    return max(0.0f, result);
+}
+
+float ambientOcclusion(float3 p, float3 normal, float stepDist, float intensity,
+                       int samples, constant FoldParams& fp) {
+    float occ = 0.0f;
+    float weight = 1.0f;
+    for (int i = 1; i <= samples; i++) {
+        float stepLen = float(i) * stepDist;
+        float3 samplePoint = p + normal * stepLen;
+        float d = estimate(samplePoint, fp);
+        occ += (stepLen - d) * weight;
+        weight *= 0.5f;
+    }
+    return clamp(1.0f - intensity * max(0.0f, occ), 0.0f, 1.0f);
+}
+
+bool intersectSphereForward(float3 ro, float3 rd, float3 center, float radius, thread float& tOut) {
+    float3 oc = ro - center;
+    float b = dot(oc, rd);
+    float c = dot(oc, oc) - radius * radius;
+    if (c <= 0.0f) { tOut = 0.0f; return true; }
+    float disc = b * b - c;
+    if (disc < 0.0f) { tOut = 0.0f; return false; }
+    float sq = sqrt(disc);
+    float t0 = -b - sq;
+    if (t0 >= 0.0f) { tOut = t0; return true; }
+    float t1 = -b + sq;
+    if (t1 >= 0.0f) { tOut = t1; return true; }
+    tOut = 0.0f;
+    return false;
+}
+
+float3 cosPalette(float t, float3 a, float3 b, float3 c, float3 d) {
+    return a + b * cos(6.28318530718f * (c * t + d));
+}
+
+float3 trapAlbedo(float4 trap, constant RenderParams& rp) {
+    float tIn = rp.trapMix.x * trap.x
+              + rp.trapMix.y * trap.z
+              + rp.trapMix.z * trap.y;
+    float t = fract(tIn * rp.palAmp.w);
+    float freq = rp.palBase.w;
+    float3 col = cosPalette(t, rp.palBase.xyz, rp.palAmp.xyz, float3(freq), rp.palPhase.xyz);
+    float shell = 1.0f - clamp(trap.w * 2.0f, 0.0f, 1.0f);
+    col = mix(col, float3(0.95f, 0.93f, 0.88f), shell * rp.palPhase.w);
+    return col;
+}
+
+float3 envGradient(float3 rd, constant RenderParams& rp) {
+    float h = clamp(rd.y * 0.5f + 0.5f, 0.0f, 1.0f);
+    float3 env = mix(float3(0.30f, 0.22f, 0.16f), float3(0.12f, 0.16f, 0.24f), h);
+    float sun = max(0.0f, dot(rd, rp.lightDir.xyz));
+    float intensity = rp.lightDir.w <= 0.0f ? 1.0f : rp.lightDir.w;
+    env += float3(0.60f, 0.50f, 0.40f) * pow(sun, 48.0f) * intensity;
+    return env;
+}
+
+// ============================================================================
+// Ray tracer
+// ============================================================================
+
+struct Hit {
+    bool   hit;
+    float3 pos;
+    float3 normal;
+    float3 albedo;
+    float  t;
+};
+
+Hit traceRay(float3 ro, float3 rd,
+             float hitEps, float maxDist, float normalEps, int maxSteps,
+             constant FoldParams& fp, constant RenderParams& rp) {
+    Hit h;
+    h.hit = false; h.pos = float3(0); h.normal = float3(0);
+    h.albedo = float3(0); h.t = maxDist;
+
+    float tEnter;
+    if (!intersectSphereForward(ro, rd, fp.boundSphere.xyz, fp.boundSphere.w, tEnter)) return h;
+
+    float t = max(0.0f, tEnter);
+    bool  didHit = false;
+    float fudge  = fp.rot.w;
+    int   i      = 0;
+    float lastD  = 1e9f;
+
+    for (i = 0; i < maxSteps; i++) {
+        float3 p = ro + rd * t;
+        float d = estimate(p, fp) * fudge;
+        float pixelWorld = (2.0f * rp.tanFov.y / float(rp.imageHeight)) * t;
+        float effectiveEps = max(hitEps, 0.5f * pixelWorld);
+        if (d < effectiveEps) { didHit = true; break; }
+        lastD = d;
+        t += d;
+        if (t > maxDist) break;
+    }
+    if (!didHit && i >= maxSteps && t <= maxDist && lastD < hitEps * 4.0f) didHit = true;
+    if (!didHit) return h;
+
+    float3 hitPoint = ro + rd * t;
+
+    float4 gTrap;
+    estimateFull(hitPoint, fp, gTrap);
+    float3 albedo = trapAlbedo(gTrap, rp);
+
+    float pixelWorldHit = (2.0f * rp.tanFov.y / float(rp.imageHeight)) * t;
+    float nEps = max(normalEps, 0.5f * pixelWorldHit);
+    bool degenerate;
+    float3 normal = estimateNormal(hitPoint, nEps, rd, degenerate, fp);
+
+    h.hit = true; h.pos = hitPoint; h.normal = normal; h.albedo = albedo; h.t = t;
+    return h;
+}
+
+float3 shadeDirect(Hit h, float hitEps, float maxDist,
+                   constant FoldParams& fp, constant RenderParams& rp) {
+    float shadowSoft  = rp.marchA.w;
+    float aoStep      = rp.marchB.x;
+    float aoIntensity = rp.marchB.y;
+    int   shadowSteps = rp.marchI1;
+    int   aoSamples   = rp.marchI2;
+    int   flags       = rp.marchI3;
+    bool  softShadowsOn = (flags & 1) != 0;
+    bool  aoOn          = (flags & 2) != 0;
+
+    float3 offsetPoint = h.pos + h.normal * hitEps * 4.0f;
+    float lambert = clamp(dot(h.normal, rp.lightDir.xyz), 0.0f, 1.0f);
+
+    float shadow = 1.0f;
+    if (softShadowsOn && lambert > 0.0f)
+        shadow = softShadow(offsetPoint, rp.lightDir.xyz, hitEps, maxDist,
+                            shadowSteps, shadowSoft, fp);
+
+    float ao = 1.0f;
+    if (aoOn)
+        ao = ambientOcclusion(offsetPoint, h.normal, aoStep, aoIntensity, aoSamples, fp);
+
+    float intensity = rp.lightDir.w <= 0.0f ? 1.0f : rp.lightDir.w;
+    const float ambient = 0.25f;
+    float lighting = ambient * ao + (1.0f - ambient) * lambert * shadow * ao * intensity;
+    lighting = clamp(lighting, 0.0f, 1.0f);
+    return h.albedo * lighting;
+}
+
+// ============================================================================
+// Kernel entry point
+// ============================================================================
+
+kernel void hybrid_raymarch(
+    constant FoldParams&   fp     [[buffer(0)]],
+    constant RenderParams& rp     [[buffer(1)]],
+    device   uint*         output [[buffer(2)]],
+    uint2 gid [[thread_position_in_grid]])
+{
+    int px = int(gid.x);
+    int py = int(gid.y);
+    if (px >= rp.imageWidth || py >= rp.imageHeight) return;
+
+    float hitEps    = rp.marchA.x;
+    float maxDist   = rp.marchA.y;
+    float normalEps = rp.marchA.z;
+    int   maxSteps  = rp.marchI0;
+
+    float u = (float(px) + 0.5f + rp.subpixelJitter.x) / float(rp.imageWidth);
+    float v = 1.0f - (float(py) + 0.5f + rp.subpixelJitter.y) / float(rp.imageHeight);
+    float x = (2.0f * u - 1.0f) * rp.tanFov.x;
+    float y = (2.0f * v - 1.0f) * rp.tanFov.y;
+    float3 ro = rp.camPos.xyz;
+    float3 rd = normalize(rp.camForward.xyz + x * rp.camRight.xyz + y * rp.camUp.xyz);
+
+    bool  reflectOn  = rp.reflectParams.x > 0.5f;
+    int   maxBounces = int(rp.reflectParams.y);
+    float gloss      = rp.reflectParams.z;
+    float F0         = rp.reflectParams.w;
+
+    float3 color      = float3(0);
+    float3 throughput = float3(1);
+
+    for (int bounce = 0; bounce <= maxBounces; bounce++) {
+        Hit h = traceRay(ro, rd, hitEps, maxDist, normalEps, maxSteps, fp, rp);
+
+        if (!h.hit) {
+            color += throughput * (bounce == 0 ? rp.background.xyz : envGradient(rd, rp));
+            break;
+        }
+
+        float3 direct = shadeDirect(h, hitEps, maxDist, fp, rp);
+
+        if (!reflectOn || bounce == maxBounces) {
+            color += throughput * direct;
+            break;
+        }
+
+        float cosTheta = clamp(dot(-rd, h.normal), 0.0f, 1.0f);
+        float fresnel = F0 + (1.0f - F0) * pow(1.0f - cosTheta, 5.0f);
+        float reflectWeight = clamp(gloss * fresnel, 0.0f, 1.0f);
+
+        color += throughput * (1.0f - reflectWeight) * direct;
+        throughput *= reflectWeight;
+
+        ro = h.pos + h.normal * hitEps * 4.0f;
+        rd = reflect(rd, h.normal);
+
+        if (max(throughput.r, max(throughput.g, throughput.b)) < 0.01f) break;
+    }
+
+    int idx = py * rp.imageWidth + px;
+    uint3 q = uint3(clamp(color, float3(0.0f), float3(1.0f)) * 255.0f + 0.5f);
+    output[idx] = (255u << 24) | (q.b << 16) | (q.g << 8) | q.r;
+}
