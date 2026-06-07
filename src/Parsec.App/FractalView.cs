@@ -7,6 +7,7 @@ using Avalonia.Threading;
 using Parsec.Rendering;
 using Parsec.Rendering.DeepZoom;
 using Parsec.Rendering.Gpu;
+using Parsec.Rendering.Metal;
 using Parsec.Rendering.Raymarching;
 
 namespace Parsec.App;
@@ -24,6 +25,8 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
     private Gl? _gl;
     private RaymarchPipeline? _pipeline;
     private GpuMandelboxRenderer? _boxRenderer;
+    private MetalMandelboxRenderer? _metalRenderer; // null on non-macOS or when Metal unavailable
+    private long _metalComputeMs;
     private GpuKifsRenderer? _kifsRenderer;
     private GpuKleinianRenderer? _kleinianRenderer;
     private GpuAttractorRenderer? _attractorRenderer;
@@ -531,6 +534,9 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
             _burningShipRenderer = new GpuBurningShipRenderer(_gl, _pipeline);
             _deepPipeline = new DeepZoomPipeline(_gl);
 
+            if (OperatingSystem.IsMacOS())
+                _metalRenderer = new MetalMandelboxRenderer();
+
             _texture = _gl.GenTexture();
             _gl.BindTexture(GlConst.Texture2D, _texture);
             _gl.TexParameteri(GlConst.Texture2D, GlConst.TextureMinFilter, (int)GlConst.Linear);
@@ -847,6 +853,8 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
                     lightDirection: Light.ToDirection(),
                     palette: Palette.ToParams(),
                     tileRows: 64),
+                FractalType.Mandelbox when _metalRenderer?.IsAvailable == true =>
+                    RenderWithMetal(camera, rw, rh),
                 FractalType.Mandelbox => _boxRenderer.RenderToBuffer(Mandelbox.ToParams(), camera,
                     PreviewWidth, PreviewHeight, PreviewSettings(),
                     background: new Color(0.02f, 0.03f, 0.07f),
@@ -879,6 +887,8 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
                 && _deepView.Radius <= DeepZoomView.MinRadius * 1.05;
             Status(ActiveType == FractalType.DeepZoom
                 ? $"Deep Zoom 2D · {(_deepView.Formula switch { 1 => "Prospector", 2 => "Julia", 3 => "Burning Ship", _ => "Mandelbrot" })} · radius {_deepView.Radius:e2}{(atMaxDepth ? " · max depth" : "")} · {rw}x{rh} · drag pan · scroll zoom"
+                : ActiveType == FractalType.Mandelbox && _metalRenderer?.IsAvailable == true
+                ? $"Metal Mandelbox · {rw}x{rh} · compute {_metalComputeMs} ms  ·  WASD+QE move · drag to look"
                 : $"pos ({_cam.Position.X:F2}, {_cam.Position.Y:F2}, {_cam.Position.Z:F2})  ·  WASD+QE move · drag to look");
         }
 
@@ -952,8 +962,10 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
         _burningShipRenderer?.Dispose();
         _deepPipeline?.Dispose();
         _pipeline?.Dispose();
+        _metalRenderer?.Dispose();
         _texture = _vao = _blitProgram = 0;
         _boxRenderer = null;
+        _metalRenderer = null;
         _kifsRenderer = null;
         _kleinianRenderer = null;
         _attractorRenderer = null;
@@ -986,6 +998,20 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
         int w = Math.Max(1, (int)(Bounds.Width * scaling));
         int h = Math.Max(1, (int)(Bounds.Height * scaling));
         return (w, h);
+    }
+
+    private uint[] RenderWithMetal(Camera3D camera, int width, int height)
+    {
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        var pixels = _metalRenderer!.RenderMandelbox(
+            Mandelbox.ToParams(), camera, width, height,
+            PreviewSettings(),
+            background: new Color(0.02f, 0.03f, 0.07f),
+            surface: Color.Rgb(170, 150, 130),
+            lightDirection: Light.ToDirection(),
+            palette: Palette.ToParams());
+        _metalComputeMs = sw.ElapsedMilliseconds;
+        return pixels;
     }
 
     private RaymarchSettings PreviewSettings() => new(
