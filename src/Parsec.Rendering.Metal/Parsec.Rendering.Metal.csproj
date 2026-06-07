@@ -6,7 +6,18 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <LangVersion>latest</LangVersion>
     <RootNamespace>Parsec.Rendering.Metal</RootNamespace>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <!-- All SharpMetal APIs are macOS-only; suppress CA1416 for the whole project -->
+    <NoWarn>CA1416</NoWarn>
   </PropertyGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="Shaders\mandelbox_raymarch.metal" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="SharpMetal" Version="1.1.0" />
+  </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\Parsec.Rendering\Parsec.Rendering.csproj" />
