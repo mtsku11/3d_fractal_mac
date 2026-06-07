@@ -26,6 +26,12 @@ public sealed class MetalMandelboxRenderer : IThreeDimensionalRenderBackend
 
     public bool IsAvailable => _isAvailable;
 
+    /// <summary>Time spent waiting for the GPU command buffer to complete (milliseconds).</summary>
+    public long LastComputeMs { get; private set; }
+
+    /// <summary>Time spent copying the output buffer from GPU-shared memory into a managed uint[] (milliseconds).</summary>
+    public long LastReadbackMs { get; private set; }
+
     public MetalMandelboxRenderer()
     {
         try
@@ -87,10 +93,16 @@ public sealed class MetalMandelboxRenderer : IThreeDimensionalRenderBackend
         };
         enc.DispatchThreadgroups(threadgroups, threadgroupSize);
         enc.EndEncoding();
+
+        var computeSw = System.Diagnostics.Stopwatch.StartNew();
         cmd.Commit();
         cmd.WaitUntilCompleted();
+        LastComputeMs = computeSw.ElapsedMilliseconds;
 
-        return ReadUintBuffer(outBuf, pixelCount);
+        var readbackSw = System.Diagnostics.Stopwatch.StartNew();
+        var result = ReadUintBuffer(outBuf, pixelCount);
+        LastReadbackMs = readbackSw.ElapsedMilliseconds;
+        return result;
     }
 
     public void Dispose()

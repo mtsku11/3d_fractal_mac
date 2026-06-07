@@ -27,6 +27,9 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
     private GpuMandelboxRenderer? _boxRenderer;
     private MetalMandelboxRenderer? _metalRenderer; // null on non-macOS or when Metal unavailable
     private long _metalComputeMs;
+    private long _metalReadbackMs;
+    private long _texUploadMs;
+    private long _totalFrameMs;
     private GpuKifsRenderer? _kifsRenderer;
     private GpuKleinianRenderer? _kleinianRenderer;
     private GpuAttractorRenderer? _attractorRenderer;
@@ -669,6 +672,7 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
 
         if (_dirty && !(ActiveType == FractalType.Attractor && _attractorHash == null))
         {
+            var totalFrameSw = System.Diagnostics.Stopwatch.StartNew();
             var camera = _cam.ToCamera(PreviewWidth, PreviewHeight);
             // 3D raymarch previews use the fixed preview buffer; deep-zoom renders
             // at native resolution so the 2D filigree stays crisp at 1:1 -- but
@@ -872,6 +876,7 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
             };
 
             _gl.BindTexture(GlConst.Texture2D, _texture);
+            var texUploadSw = System.Diagnostics.Stopwatch.StartNew();
             unsafe
             {
                 fixed (uint* p = pixels)
@@ -881,6 +886,8 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
                         GlConst.Rgba, GlConst.UnsignedByte, (IntPtr)p);
                 }
             }
+            _texUploadMs = texUploadSw.ElapsedMilliseconds;
+            _totalFrameMs = totalFrameSw.ElapsedMilliseconds;
             _texW = rw; _texH = rh;
             _dirty = false;
             bool atMaxDepth = ActiveType == FractalType.DeepZoom
@@ -888,7 +895,7 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
             Status(ActiveType == FractalType.DeepZoom
                 ? $"Deep Zoom 2D · {(_deepView.Formula switch { 1 => "Prospector", 2 => "Julia", 3 => "Burning Ship", _ => "Mandelbrot" })} · radius {_deepView.Radius:e2}{(atMaxDepth ? " · max depth" : "")} · {rw}x{rh} · drag pan · scroll zoom"
                 : ActiveType == FractalType.Mandelbox && _metalRenderer?.IsAvailable == true
-                ? $"Metal Mandelbox · {rw}x{rh} · compute {_metalComputeMs} ms  ·  WASD+QE move · drag to look"
+                ? $"Metal Mandelbox · {rw}x{rh} · compute {_metalComputeMs} ms · readback {_metalReadbackMs} ms · upload {_texUploadMs} ms · total {_totalFrameMs} ms  ·  WASD+QE move · drag to look"
                 : $"pos ({_cam.Position.X:F2}, {_cam.Position.Y:F2}, {_cam.Position.Z:F2})  ·  WASD+QE move · drag to look");
         }
 
@@ -1002,7 +1009,6 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
 
     private uint[] RenderWithMetal(Camera3D camera, int width, int height)
     {
-        var sw = System.Diagnostics.Stopwatch.StartNew();
         var pixels = _metalRenderer!.RenderMandelbox(
             Mandelbox.ToParams(), camera, width, height,
             PreviewSettings(),
@@ -1010,7 +1016,8 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
             surface: Color.Rgb(170, 150, 130),
             lightDirection: Light.ToDirection(),
             palette: Palette.ToParams());
-        _metalComputeMs = sw.ElapsedMilliseconds;
+        _metalComputeMs  = _metalRenderer!.LastComputeMs;
+        _metalReadbackMs = _metalRenderer!.LastReadbackMs;
         return pixels;
     }
 
