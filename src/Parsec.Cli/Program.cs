@@ -504,6 +504,262 @@ public static class Program
             catch (Exception ex) { Console.Error.WriteLine($"metal-hybrid-smoke FAILED: {ex.Message}"); return 1; }
         }
 
+        if (args[0] is "metal-morph-mp4")
+        {
+            if (!OperatingSystem.IsMacOS()) { Console.Error.WriteLine("metal-morph-mp4 requires macOS."); return 1; }
+            try
+            {
+                int frames    = args.Length > 1 ? int.Parse(args[1]) : 120;
+                int w         = args.Length > 2 ? int.Parse(args[2]) : 720;
+                int h         = args.Length > 3 ? int.Parse(args[3]) : 720;
+                string outMp4 = args.Length > 4 ? args[4] : ResolveOutputPath("morph.mp4");
+
+                // Render at native resolution — MP4 has full colour depth so no 2× trick needed.
+                Console.WriteLine($"Metal Mandelbulb power morph MP4 — {frames} frames at {w}x{h}");
+                using var renderer = new MetalMandelbulbRenderer();
+                if (!renderer.IsAvailable) { Console.Error.WriteLine("Metal backend not available."); return 1; }
+
+                var settings = new RaymarchSettings(
+                    MaxSteps: 400, HitEpsilon: 4e-4f, MaxDistance: 40f, NormalEpsilon: 4e-4f,
+                    EnableSoftShadows: true,  ShadowSteps: 96, ShadowSoftness: 12f,
+                    EnableAmbientOcclusion: true, AOSamples: 6, AOStepDistance: 0.04f, AOIntensity: 1.1f,
+                    HeroSamples: 1, EnableReflections: false, ReflectionBounces: 0,
+                    Gloss: 0f, F0: 0f, LightIntensity: 1.0f);
+
+                // Full-amplitude rainbow palette — produces the indigo/purple/gold bands
+                // typical of high-quality fractal imagery.
+                var palette = new PaletteParams
+                {
+                    Base      = new Vector3(0.5f, 0.5f, 0.5f),
+                    Amp       = new Vector3(0.5f, 0.5f, 0.5f),
+                    Frequency = 1.5f,
+                    Phase     = new Vector3(0.0f, 0.33f, 0.67f),
+                    TrapScale = 0.75f,
+                    TrapMix   = new Vector3(0.6f, 0.5f, 0.2f),
+                    ShellMix  = 0.55f,
+                };
+
+                var bg     = new Color(0.01f, 0.01f, 0.03f);
+                var surface = Color.Rgb(200, 175, 155);
+                var light   = Vector3.Normalize(new Vector3(0.8f, 1.6f, 1.0f));
+
+                // Camera close and slightly above, looking at origin — the morphing shape fills the frame.
+                var cam = new Camera3D(
+                    new Vector3(0.8f, 0.6f, 2.1f), Vector3.Zero, Vector3.UnitY,
+                    MathF.PI / 3.5f, (float)w / h);
+
+                var frameDir = Path.Combine(Path.GetTempPath(), $"parsec-morph-{Guid.NewGuid():N}");
+                Directory.CreateDirectory(frameDir);
+
+                // Rotated Grid Supersampling (RGSS) 4× — better edge coverage than axis-aligned 2×2
+                Vector2[] jitters =
+                [
+                    new(-0.375f, -0.125f),
+                    new( 0.125f, -0.375f),
+                    new( 0.375f,  0.125f),
+                    new(-0.125f,  0.375f),
+                ];
+
+                var sw = System.Diagnostics.Stopwatch.StartNew();
+                for (int i = 0; i < frames; i++)
+                {
+                    // Ease in-out: power sweeps from 2→12 with a smoothstep envelope
+                    float tRaw  = frames > 1 ? (float)i / (frames - 1) : 0f;
+                    float t     = tRaw * tRaw * (3f - 2f * tRaw); // smoothstep
+                    float power = 2f + (12f - 2f) * t;
+
+                    var fractal = new MandelbulbParams { Power = power, Iterations = 10, Bailout = 2.0f, Fudge = 0.9f, BoundRadius = 1.3f };
+
+                    // 4-pass SSAA: accumulate each channel as float, pack at the end
+                    int pixCount = w * h;
+                    var sumR = new float[pixCount];
+                    var sumG = new float[pixCount];
+                    var sumB = new float[pixCount];
+                    foreach (var jitter in jitters)
+                    {
+                        uint[] pass = renderer.RenderMandelbulb(fractal, cam, w, h, settings, bg, surface, light, palette, jitter);
+                        for (int p = 0; p < pixCount; p++)
+                        {
+                            sumR[p] += (pass[p]         & 0xFF);
+                            sumG[p] += ((pass[p] >>  8) & 0xFF);
+                            sumB[p] += ((pass[p] >> 16) & 0xFF);
+                        }
+                    }
+                    var pixels = new uint[pixCount];
+                    for (int p = 0; p < pixCount; p++)
+                    {
+                        uint r = (uint)(sumR[p] / jitters.Length + 0.5f);
+                        uint g = (uint)(sumG[p] / jitters.Length + 0.5f);
+                        uint b = (uint)(sumB[p] / jitters.Length + 0.5f);
+                        pixels[p] = (255u << 24) | (b << 16) | (g << 8) | r;
+                    }
+
+                    var info  = new SKImageInfo(w, h, SKColorType.Rgba8888, SKAlphaType.Premul);
+                    var bmp   = new SKBitmap(info);
+                    var bytes = new byte[pixels.Length * 4];
+                    Buffer.BlockCopy(pixels, 0, bytes, 0, bytes.Length);
+                    Marshal.Copy(bytes, 0, bmp.GetPixels(), bytes.Length);
+                    ImageOutput.SavePng(bmp, Path.Combine(frameDir, $"frame_{i:D4}.png"));
+                    Console.Write($"\r  frame {i + 1}/{frames} power={power:F1} — {renderer.LastComputeMs} ms   ");
+                }
+                sw.Stop();
+                Console.WriteLine($"\nRendered {frames} frames in {sw.ElapsedMilliseconds} ms ({sw.ElapsedMilliseconds / frames} ms avg)");
+
+                Directory.CreateDirectory(Path.GetDirectoryName(outMp4)!);
+                string ffArgs = $"-y -framerate 24 -i \"{Path.Combine(frameDir, "frame_%04d.png")}\" " +
+                    $"-c:v libx264 -crf 16 -preset slow -pix_fmt yuv420p \"{outMp4}\"";
+                var proc = System.Diagnostics.Process.Start(
+                    new System.Diagnostics.ProcessStartInfo("ffmpeg", ffArgs)
+                    { RedirectStandardError = true, UseShellExecute = false })!;
+                proc.WaitForExit();
+                Directory.Delete(frameDir, recursive: true);
+
+                if (proc.ExitCode != 0) { Console.Error.WriteLine("ffmpeg failed."); return 1; }
+                var fi = new FileInfo(outMp4);
+                Console.WriteLine($"  -> {outMp4}  ({fi.Length / 1024} KB)");
+                return 0;
+            }
+            catch (Exception ex) { Console.Error.WriteLine($"metal-morph-mp4 FAILED: {ex.Message}\n{ex.StackTrace}"); return 1; }
+        }
+
+        if (args[0] is "metal-cinematic-gif")
+        {
+            if (!OperatingSystem.IsMacOS()) { Console.Error.WriteLine("metal-cinematic-gif requires macOS."); return 1; }
+            try
+            {
+                // Renders at 2× internal resolution then downscales via ffmpeg lanczos → natural 4× SS AA.
+                int frames    = args.Length > 1 ? int.Parse(args[1]) : 90;
+                int outW      = args.Length > 2 ? int.Parse(args[2]) : 480;
+                int outH      = args.Length > 3 ? int.Parse(args[3]) : 270;
+                string outGif = args.Length > 4 ? args[4] : ResolveOutputPath("cinematic.gif");
+                int renderW   = outW * 2;
+                int renderH   = outH * 2;
+
+                Console.WriteLine($"Metal Mandelbox cinematic GIF — {frames} frames, render {renderW}x{renderH} → output {outW}x{outH}");
+                using var renderer = new MetalMandelboxRenderer();
+                if (!renderer.IsAvailable) { Console.Error.WriteLine("Metal backend not available."); return 1; }
+
+                var fractal  = new MandelboxParams();
+                var settings = new RaymarchSettings(
+                    MaxSteps: 400, HitEpsilon: 5e-4f, MaxDistance: 50f, NormalEpsilon: 5e-4f,
+                    EnableSoftShadows: true,  ShadowSteps: 64, ShadowSoftness: 14f,
+                    EnableAmbientOcclusion: true, AOSamples: 6, AOStepDistance: 0.04f, AOIntensity: 1.1f,
+                    HeroSamples: 1, EnableReflections: false, ReflectionBounces: 0,
+                    Gloss: 0f, F0: 0f, LightIntensity: 1.1f);
+                var bg      = new Color(0.01f, 0.02f, 0.06f);
+                var surface = Color.Rgb(170, 150, 130);
+                var light   = Vector3.Normalize(new Vector3(0.6f, 1.8f, 1.2f));
+                var palette = PaletteParams.Default;
+
+                var frameDir = Path.Combine(Path.GetTempPath(), $"parsec-cinematic-{Guid.NewGuid():N}");
+                Directory.CreateDirectory(frameDir);
+
+                var sw = System.Diagnostics.Stopwatch.StartNew();
+                for (int i = 0; i < frames; i++)
+                {
+                    // Slow spiral-in: 270° arc, radius 12→5, elevation 3→0.3
+                    float t      = (float)i / (frames - 1);
+                    float angle  = (270f * t) * MathF.PI / 180f;
+                    float radius = 12f + (5f - 12f) * t;
+                    float elev   = 3f  + (0.3f - 3f) * t;
+                    var   pos    = new Vector3(MathF.Sin(angle) * radius, elev, MathF.Cos(angle) * radius);
+                    var   cam    = new Camera3D(pos, Vector3.Zero, Vector3.UnitY, MathF.PI / 4f, (float)renderW / renderH);
+
+                    uint[] pixels = renderer.RenderMandelbox(fractal, cam, renderW, renderH, settings, bg, surface, light, palette);
+
+                    var info  = new SKImageInfo(renderW, renderH, SKColorType.Rgba8888, SKAlphaType.Premul);
+                    var bmp   = new SKBitmap(info);
+                    var bytes = new byte[pixels.Length * 4];
+                    Buffer.BlockCopy(pixels, 0, bytes, 0, bytes.Length);
+                    Marshal.Copy(bytes, 0, bmp.GetPixels(), bytes.Length);
+                    ImageOutput.SavePng(bmp, Path.Combine(frameDir, $"frame_{i:D4}.png"));
+                    Console.Write($"\r  frame {i + 1}/{frames} — {renderer.LastComputeMs} ms   ");
+                }
+                sw.Stop();
+                Console.WriteLine($"\nRendered {frames} frames in {sw.ElapsedMilliseconds} ms ({sw.ElapsedMilliseconds / frames} ms avg)");
+
+                Directory.CreateDirectory(Path.GetDirectoryName(outGif)!);
+                // Lanczos downscale + palette-optimised GIF
+                string ffArgs = $"-y -framerate 12 -i \"{Path.Combine(frameDir, "frame_%04d.png")}\" " +
+                    $"-vf \"scale={outW}:{outH}:flags=lanczos,fps=12,split[s0][s1];[s0]palettegen=max_colors=256[p];[s1][p]paletteuse=dither=bayer:bayer_scale=5\" \"{outGif}\"";
+                var proc = System.Diagnostics.Process.Start(
+                    new System.Diagnostics.ProcessStartInfo("ffmpeg", ffArgs)
+                    { RedirectStandardError = true, UseShellExecute = false })!;
+                proc.WaitForExit();
+                Directory.Delete(frameDir, recursive: true);
+
+                if (proc.ExitCode != 0) { Console.Error.WriteLine("ffmpeg failed."); return 1; }
+                var fi = new FileInfo(outGif);
+                Console.WriteLine($"  -> {outGif}  ({fi.Length / 1024} KB)");
+                return 0;
+            }
+            catch (Exception ex) { Console.Error.WriteLine($"metal-cinematic-gif FAILED: {ex.Message}\n{ex.StackTrace}"); return 1; }
+        }
+
+        if (args[0] is "metal-orbit-gif")
+        {
+            if (!OperatingSystem.IsMacOS()) { Console.Error.WriteLine("metal-orbit-gif requires macOS."); return 1; }
+            try
+            {
+                int frames   = args.Length > 1 ? int.Parse(args[1]) : 60;
+                int w        = args.Length > 2 ? int.Parse(args[2]) : 480;
+                int h        = args.Length > 3 ? int.Parse(args[3]) : 270;
+                string outGif = args.Length > 4 ? args[4] : ResolveOutputPath("orbit.gif");
+
+                Console.WriteLine($"Metal Mandelbulb orbit GIF — {frames} frames at {w}x{h}");
+                using var renderer = new MetalMandelbulbRenderer();
+                if (!renderer.IsAvailable) { Console.Error.WriteLine("Metal backend not available."); return 1; }
+
+                var fractal  = new MandelbulbParams();
+                var settings = new RaymarchSettings(MaxSteps: 200, HitEpsilon: 1.5e-3f, MaxDistance: 40f,
+                    NormalEpsilon: 2e-3f, EnableSoftShadows: false, ShadowSteps: 0, ShadowSoftness: 12f,
+                    EnableAmbientOcclusion: true, AOSamples: 4, AOStepDistance: 0.05f, AOIntensity: 1.0f,
+                    HeroSamples: 1, EnableReflections: false, ReflectionBounces: 0, Gloss: 0f, F0: 0f,
+                    LightIntensity: 1.0f);
+                var bg      = new Color(0.02f, 0.03f, 0.07f);
+                var surface = Color.Rgb(210, 175, 140);
+                var light   = Vector3.Normalize(new Vector3(1f, 2f, 1.5f));
+                var palette = PaletteParams.Default;
+
+                var frameDir = Path.Combine(Path.GetTempPath(), $"parsec-orbit-{Guid.NewGuid():N}");
+                Directory.CreateDirectory(frameDir);
+
+                var sw = System.Diagnostics.Stopwatch.StartNew();
+                for (int i = 0; i < frames; i++)
+                {
+                    float t   = 2f * MathF.PI * i / frames;
+                    var   pos = new Vector3(MathF.Sin(t) * 4f, 0.5f, MathF.Cos(t) * 4f);
+                    var   cam = new Camera3D(pos, Vector3.Zero, Vector3.UnitY, MathF.PI / 4f, (float)w / h);
+
+                    uint[] pixels = renderer.RenderMandelbulb(fractal, cam, w, h, settings, bg, surface, light, palette);
+
+                    var info  = new SKImageInfo(w, h, SKColorType.Rgba8888, SKAlphaType.Premul);
+                    var bmp   = new SKBitmap(info);
+                    var bytes = new byte[pixels.Length * 4];
+                    Buffer.BlockCopy(pixels, 0, bytes, 0, bytes.Length);
+                    Marshal.Copy(bytes, 0, bmp.GetPixels(), bytes.Length);
+                    ImageOutput.SavePng(bmp, Path.Combine(frameDir, $"frame_{i:D4}.png"));
+                    Console.Write($"\r  frame {i + 1}/{frames} — {renderer.LastComputeMs} ms   ");
+                }
+                sw.Stop();
+                Console.WriteLine($"\nRendered {frames} frames in {sw.ElapsedMilliseconds} ms");
+
+                Directory.CreateDirectory(Path.GetDirectoryName(outGif)!);
+                string ffArgs = $"-y -framerate 24 -i \"{Path.Combine(frameDir, "frame_%04d.png")}\" " +
+                    $"-vf \"fps=24,split[s0][s1];[s0]palettegen[p];[s1][p]paletteuse\" \"{outGif}\"";
+                var proc = System.Diagnostics.Process.Start(
+                    new System.Diagnostics.ProcessStartInfo("ffmpeg", ffArgs)
+                    { RedirectStandardError = true, UseShellExecute = false })!;
+                proc.WaitForExit();
+                Directory.Delete(frameDir, recursive: true);
+
+                if (proc.ExitCode != 0) { Console.Error.WriteLine("ffmpeg failed."); return 1; }
+                Console.WriteLine($"  -> {outGif}");
+                return 0;
+            }
+            catch (Exception ex) { Console.Error.WriteLine($"metal-orbit-gif FAILED: {ex.Message}\n{ex.StackTrace}"); return 1; }
+        }
+
         if (args[0] is "gpu-render")
         {
             if (args.Length < 2)
@@ -611,6 +867,7 @@ public static class Program
         Console.WriteLine("  parsec metal-kifs-smoke [w] [h]      Metal KIFS smoke test (macOS only)");
         Console.WriteLine("  parsec metal-kleinian-smoke [w] [h]  Metal Kleinian smoke test (macOS only)");
         Console.WriteLine("  parsec metal-hybrid-smoke [w] [h]    Metal Hybrid smoke test (macOS only)");
+        Console.WriteLine("  parsec metal-orbit-gif [frames] [w] [h] [out.gif]  Orbiting Mandelbulb GIF (macOS only)");
         Console.WriteLine("  parsec help           Show this help");
         Console.WriteLine();
         Console.WriteLine("Available examples:");

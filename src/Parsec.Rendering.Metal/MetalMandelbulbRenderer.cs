@@ -61,14 +61,15 @@ public sealed class MetalMandelbulbRenderer : IDisposable
         Color background,
         Color surface,
         Vector3 lightDirection,
-        PaletteParams palette)
+        PaletteParams palette,
+        Vector2 subpixelJitter = default)
     {
         ThrowIfDisposed();
         if (!_isAvailable)
             throw new InvalidOperationException("Metal backend is not available on this machine.");
 
         var foldParams   = BuildFoldParams(fractal);
-        var renderParams = BuildRenderParams(camera, width, height, lightDirection, background, surface, settings, palette);
+        var renderParams = BuildRenderParams(camera, width, height, lightDirection, background, surface, settings, palette, subpixelJitter);
         int pixelCount = width * height;
 
         using var foldBuf   = UploadStruct(_device, foldParams);
@@ -136,7 +137,8 @@ public sealed class MetalMandelbulbRenderer : IDisposable
     private static MetalRenderParams BuildRenderParams(
         Camera3D camera, int width, int height,
         Vector3 lightDirection, Color background, Color surface,
-        RaymarchSettings s, PaletteParams palette)
+        RaymarchSettings s, PaletteParams palette,
+        Vector2 subpixelJitter = default)
     {
         var fwd   = Vector3.Normalize(camera.LookAt - camera.Position);
         var right = Vector3.Normalize(Vector3.Cross(fwd, camera.Up));
@@ -171,7 +173,7 @@ public sealed class MetalMandelbulbRenderer : IDisposable
             PalAmp      = new Vector4(palette.Amp,   palette.TrapScale),
             PalPhase    = new Vector4(palette.Phase, palette.ShellMix),
             TrapMix     = new Vector4(palette.TrapMix, 0f),
-            SubpixelJitter = Vector4.Zero,
+            SubpixelJitter = new Vector4(subpixelJitter.X, subpixelJitter.Y, 0f, 0f),
             ReflectParams  = new Vector4(
                 s.EnableReflections ? 1f : 0f,
                 s.ReflectionBounces,
