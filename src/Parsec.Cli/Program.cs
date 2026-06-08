@@ -859,7 +859,7 @@ public static class Program
                     MaxSteps: 0, HitEpsilon: 0, MaxDistance: 0, NormalEpsilon: 0,
                     EnableSoftShadows: false, ShadowSteps: 0, ShadowSoftness: 0,
                     EnableAmbientOcclusion: false, AOSamples: 0, AOStepDistance: 0, AOIntensity: 0,
-                    HeroSamples: 1,   // preview quality; bump to 4 for hero
+                    HeroSamples: 4,
                     EnableReflections: false, ReflectionBounces: 0, Gloss: 0, F0: 0, LightIntensity: 0);
 
                 // Build the view: center is fixed at the Seahorse Valley; radius decreases each frame.
@@ -900,7 +900,7 @@ public static class Program
 
                 Directory.CreateDirectory(Path.GetDirectoryName(outMp4)!);
                 string ffArgs = $"-y -framerate 24 -i \"{Path.Combine(frameDir, "frame_%04d.png")}\" " +
-                    $"-c:v libx264 -crf 18 -preset slow -pix_fmt yuv420p \"{outMp4}\"";
+                    $"-c:v libx264 -crf 18 -preset slow -pix_fmt yuv444p \"{outMp4}\"";
                 var proc = System.Diagnostics.Process.Start(
                     new System.Diagnostics.ProcessStartInfo("ffmpeg", ffArgs)
                     { RedirectStandardError = true, UseShellExecute = false })!;
