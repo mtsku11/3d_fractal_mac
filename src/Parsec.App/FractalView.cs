@@ -763,10 +763,11 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
             }
             uint[] pixels = ActiveType switch
             {
-                FractalType.DeepZoom => _deepPipeline.Render(_deepView,
+                FractalType.DeepZoom when _deepPipeline != null => _deepPipeline.Render(_deepView,
                     rw, rh, Palette.ToParams(),
                     new Color(0.02f, 0.03f, 0.07f), heroSamples: 1, tileRows: 64,
                     interactive: _deepInteracting, interactiveIter: _deepPreviewIter),
+                FractalType.DeepZoom => new uint[rw * rh],
                 FractalType.Mandelbulb when _metalMandelbulbRenderer?.IsAvailable == true =>
                     RenderWithMetalMandelbulb(camera, rw, rh),
                 FractalType.Mandelbulb => _mandelbulbRenderer.RenderToBuffer(Mandelbulb.ToParams(), camera,

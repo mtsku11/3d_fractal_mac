@@ -43,6 +43,14 @@ public partial class MainWindow : Window
         {
             selector.SelectedIndex = 0;   // KIFS, the default ActiveType
             selector.SelectionChanged += OnFractalChanged;
+
+            // Deep Zoom 2D requires OpenGL 4.3 compute which macOS does not support.
+            if (OperatingSystem.IsMacOS() && selector.Items.Count > 22
+                && selector.Items[22] is ComboBoxItem deepItem)
+            {
+                deepItem.IsEnabled = false;
+                ToolTip.SetTip(deepItem, "Deep Zoom 2D requires OpenGL 4.3 (not available on macOS)");
+            }
         }
 
         var heroButton = this.FindControl<Button>("HeroButton");
@@ -200,6 +208,12 @@ public partial class MainWindow : Window
             22 => FractalType.DeepZoom,
             _ => FractalType.Kifs,
         };
+        if (OperatingSystem.IsMacOS() && type == FractalType.DeepZoom)
+        {
+            cb.SelectedIndex = 0;
+            return;
+        }
+
         _view.SetActiveType(type);
         if (_generateButton != null)
             _generateButton.IsVisible = type == FractalType.Attractor;
