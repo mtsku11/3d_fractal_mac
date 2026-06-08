@@ -68,12 +68,31 @@ public sealed class MetalMandelbulbRenderer : IDisposable
         if (!_isAvailable)
             throw new InvalidOperationException("Metal backend is not available on this machine.");
 
-        var foldParams   = BuildFoldParams(fractal);
-        var renderParams = BuildRenderParams(camera, width, height, lightDirection, background, surface, settings, palette, subpixelJitter);
-        int pixelCount = width * height;
+        // When the caller provides an explicit jitter (CLI morph path), render one
+        // sample with that jitter and return immediately. When called from in-app
+        // hero renders with no jitter, run the full SSAA accumulation loop.
+        if (subpixelJitter != Vector2.Zero)
+            return DispatchOneSample(fractal, camera, width, height, settings, background, surface, lightDirection, palette, subpixelJitter);
 
-        using var foldBuf   = UploadStruct(_device, foldParams);
-        using var renderBuf = UploadStruct(_device, renderParams);
+        return MetalSsaa.Accumulate(settings.HeroSamples, width, height, jitter =>
+            DispatchOneSample(fractal, camera, width, height, settings, background, surface, lightDirection, palette, jitter));
+    }
+
+    private uint[] DispatchOneSample(
+        MandelbulbParams fractal,
+        Camera3D camera,
+        int width,
+        int height,
+        RaymarchSettings settings,
+        Color background,
+        Color surface,
+        Vector3 lightDirection,
+        PaletteParams palette,
+        Vector2 jitter)
+    {
+        int pixelCount = width * height;
+        using var foldBuf   = UploadStruct(_device, BuildFoldParams(fractal));
+        using var renderBuf = UploadStruct(_device, BuildRenderParams(camera, width, height, lightDirection, background, surface, settings, palette, jitter));
         using var outBuf    = _device.NewBuffer((ulong)(pixelCount * sizeof(uint)), MTLResourceOptions.ResourceStorageModeShared);
 
         using var cmd = _queue.CommandBuffer();
@@ -84,14 +103,9 @@ public sealed class MetalMandelbulbRenderer : IDisposable
         enc.SetBuffer(renderBuf, 0, 1);
         enc.SetBuffer(outBuf,    0, 2);
 
-        var threadgroupSize = new MTLSize { width = 8, height = 8, depth = 1 };
-        var threadgroups    = new MTLSize
-        {
-            width  = (ulong)((width  + 7) / 8),
-            height = (ulong)((height + 7) / 8),
-            depth  = 1,
-        };
-        enc.DispatchThreadgroups(threadgroups, threadgroupSize);
+        enc.DispatchThreadgroups(
+            new MTLSize { width = (ulong)((width + 7) / 8), height = (ulong)((height + 7) / 8), depth = 1 },
+            new MTLSize { width = 8, height = 8, depth = 1 });
         enc.EndEncoding();
 
         var computeSw = System.Diagnostics.Stopwatch.StartNew();

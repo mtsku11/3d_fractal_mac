@@ -42,30 +42,32 @@ public sealed class MetalBurningShipRenderer : IDisposable
     public uint[] RenderBurningShip(
         BurningShipParams bs, Camera3D camera, int width, int height,
         RaymarchSettings settings, Color background, Color surface,
-        Vector3 lightDirection, PaletteParams palette, Vector2 subpixelJitter = default)
+        Vector3 lightDirection, PaletteParams palette)
     {
         ThrowIfDisposed();
         if (!_isAvailable) throw new InvalidOperationException("Metal backend unavailable.");
+        return MetalSsaa.Accumulate(settings.HeroSamples, width, height, jitter =>
+        {
+            var foldBuf   = UploadStruct(_device, BuildFoldParams(bs));
+            var renderBuf = UploadStruct(_device, BuildRenderParams(camera, width, height, lightDirection, background, surface, settings, palette, jitter));
+            var outBuf    = _device.NewBuffer((ulong)(width * height * sizeof(uint)), MTLResourceOptions.ResourceStorageModeShared);
 
-        var foldBuf   = UploadStruct(_device, BuildFoldParams(bs));
-        var renderBuf = UploadStruct(_device, BuildRenderParams(camera, width, height, lightDirection, background, surface, settings, palette, subpixelJitter));
-        var outBuf    = _device.NewBuffer((ulong)(width * height * sizeof(uint)), MTLResourceOptions.ResourceStorageModeShared);
-
-        using var cmd = _queue.CommandBuffer();
-        using var enc = cmd.ComputeCommandEncoder();
-        enc.SetComputePipelineState(_pso!);
-        enc.SetBuffer(foldBuf, 0, 0); enc.SetBuffer(renderBuf, 0, 1); enc.SetBuffer(outBuf, 0, 2);
-        enc.DispatchThreadgroups(new MTLSize { width = (ulong)((width+7)/8), height = (ulong)((height+7)/8), depth = 1 },
-                                 new MTLSize { width = 8, height = 8, depth = 1 });
-        enc.EndEncoding();
-        var sw = System.Diagnostics.Stopwatch.StartNew();
-        cmd.Commit(); cmd.WaitUntilCompleted();
-        LastComputeMs = sw.ElapsedMilliseconds;
-        sw.Restart();
-        var result = ReadUintBuffer(outBuf, width * height);
-        LastReadbackMs = sw.ElapsedMilliseconds;
-        foldBuf.Dispose(); renderBuf.Dispose(); outBuf.Dispose();
-        return result;
+            using var cmd = _queue.CommandBuffer();
+            using var enc = cmd.ComputeCommandEncoder();
+            enc.SetComputePipelineState(_pso!);
+            enc.SetBuffer(foldBuf, 0, 0); enc.SetBuffer(renderBuf, 0, 1); enc.SetBuffer(outBuf, 0, 2);
+            enc.DispatchThreadgroups(new MTLSize { width = (ulong)((width+7)/8), height = (ulong)((height+7)/8), depth = 1 },
+                                     new MTLSize { width = 8, height = 8, depth = 1 });
+            enc.EndEncoding();
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            cmd.Commit(); cmd.WaitUntilCompleted();
+            LastComputeMs = sw.ElapsedMilliseconds;
+            sw.Restart();
+            var result = ReadUintBuffer(outBuf, width * height);
+            LastReadbackMs = sw.ElapsedMilliseconds;
+            foldBuf.Dispose(); renderBuf.Dispose(); outBuf.Dispose();
+            return result;
+        });
     }
 
     public void Dispose()

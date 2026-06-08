@@ -66,42 +66,36 @@ public sealed class MetalRotBoxRenderer : IDisposable
         ThrowIfDisposed();
         if (!_isAvailable)
             throw new InvalidOperationException("Metal backend is not available on this machine.");
-
-        var foldParams   = BuildFoldParams(fractal);
-        var renderParams = BuildRenderParams(camera, width, height, lightDirection, background, surface, settings, palette);
-        int pixelCount = width * height;
-
-        using var foldBuf   = UploadStruct(_device, foldParams);
-        using var renderBuf = UploadStruct(_device, renderParams);
-        using var outBuf    = _device.NewBuffer((ulong)(pixelCount * sizeof(uint)), MTLResourceOptions.ResourceStorageModeShared);
-
-        using var cmd = _queue.CommandBuffer();
-        using var enc = cmd.ComputeCommandEncoder();
-
-        enc.SetComputePipelineState(_pso!);
-        enc.SetBuffer(foldBuf,   0, 0);
-        enc.SetBuffer(renderBuf, 0, 1);
-        enc.SetBuffer(outBuf,    0, 2);
-
-        var threadgroupSize = new MTLSize { width = 8, height = 8, depth = 1 };
-        var threadgroups    = new MTLSize
+        return MetalSsaa.Accumulate(settings.HeroSamples, width, height, jitter =>
         {
-            width  = (ulong)((width  + 7) / 8),
-            height = (ulong)((height + 7) / 8),
-            depth  = 1,
-        };
-        enc.DispatchThreadgroups(threadgroups, threadgroupSize);
-        enc.EndEncoding();
+            int pixelCount = width * height;
+            using var foldBuf   = UploadStruct(_device, BuildFoldParams(fractal));
+            using var renderBuf = UploadStruct(_device, BuildRenderParams(camera, width, height, lightDirection, background, surface, settings, palette, jitter));
+            using var outBuf    = _device.NewBuffer((ulong)(pixelCount * sizeof(uint)), MTLResourceOptions.ResourceStorageModeShared);
 
-        var computeSw = System.Diagnostics.Stopwatch.StartNew();
-        cmd.Commit();
-        cmd.WaitUntilCompleted();
-        LastComputeMs = computeSw.ElapsedMilliseconds;
+            using var cmd = _queue.CommandBuffer();
+            using var enc = cmd.ComputeCommandEncoder();
 
-        var readbackSw = System.Diagnostics.Stopwatch.StartNew();
-        var result = ReadUintBuffer(outBuf, pixelCount);
-        LastReadbackMs = readbackSw.ElapsedMilliseconds;
-        return result;
+            enc.SetComputePipelineState(_pso!);
+            enc.SetBuffer(foldBuf,   0, 0);
+            enc.SetBuffer(renderBuf, 0, 1);
+            enc.SetBuffer(outBuf,    0, 2);
+
+            enc.DispatchThreadgroups(
+                new MTLSize { width = (ulong)((width + 7) / 8), height = (ulong)((height + 7) / 8), depth = 1 },
+                new MTLSize { width = 8, height = 8, depth = 1 });
+            enc.EndEncoding();
+
+            var computeSw = System.Diagnostics.Stopwatch.StartNew();
+            cmd.Commit();
+            cmd.WaitUntilCompleted();
+            LastComputeMs = computeSw.ElapsedMilliseconds;
+
+            var readbackSw = System.Diagnostics.Stopwatch.StartNew();
+            var result = ReadUintBuffer(outBuf, pixelCount);
+            LastReadbackMs = readbackSw.ElapsedMilliseconds;
+            return result;
+        });
     }
 
     public void Dispose()
@@ -137,7 +131,7 @@ public sealed class MetalRotBoxRenderer : IDisposable
     private static MetalRenderParams BuildRenderParams(
         Camera3D camera, int width, int height,
         Vector3 lightDirection, Color background, Color surface,
-        RaymarchSettings s, PaletteParams palette)
+        RaymarchSettings s, PaletteParams palette, Vector2 jitter = default)
     {
         var fwd   = Vector3.Normalize(camera.LookAt - camera.Position);
         var right = Vector3.Normalize(Vector3.Cross(fwd, camera.Up));
@@ -172,7 +166,7 @@ public sealed class MetalRotBoxRenderer : IDisposable
             PalAmp      = new Vector4(palette.Amp,   palette.TrapScale),
             PalPhase    = new Vector4(palette.Phase, palette.ShellMix),
             TrapMix     = new Vector4(palette.TrapMix, 0f),
-            SubpixelJitter = Vector4.Zero,
+            SubpixelJitter = new Vector4(jitter.X, jitter.Y, 0f, 0f),
             ReflectParams  = new Vector4(
                 s.EnableReflections ? 1f : 0f,
                 s.ReflectionBounces,

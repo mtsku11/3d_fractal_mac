@@ -31,20 +31,23 @@ public sealed class MetalMengerRenderer : IDisposable
 
     public uint[] RenderMenger(MengerParams mg, Camera3D camera, int width, int height,
         RaymarchSettings settings, Color background, Color surface, Vector3 lightDirection,
-        PaletteParams palette, Vector2 subpixelJitter = default)
+        PaletteParams palette)
     {
         ThrowIfDisposed();
         if (!_isAvailable) throw new InvalidOperationException("Metal backend unavailable.");
-        using var fb = UploadStruct(_device, BuildFoldParams(mg));
-        using var rb = UploadStruct(_device, BuildRenderParams(camera, width, height, lightDirection, background, surface, settings, palette, subpixelJitter));
-        using var ob = _device.NewBuffer((ulong)(width * height * sizeof(uint)), MTLResourceOptions.ResourceStorageModeShared);
-        using var cmd = _queue.CommandBuffer(); using var enc = cmd.ComputeCommandEncoder();
-        enc.SetComputePipelineState(_pso!); enc.SetBuffer(fb,0,0); enc.SetBuffer(rb,0,1); enc.SetBuffer(ob,0,2);
-        enc.DispatchThreadgroups(new MTLSize{width=(ulong)((width+7)/8),height=(ulong)((height+7)/8),depth=1}, new MTLSize{width=8,height=8,depth=1});
-        enc.EndEncoding();
-        var sw = System.Diagnostics.Stopwatch.StartNew(); cmd.Commit(); cmd.WaitUntilCompleted(); LastComputeMs = sw.ElapsedMilliseconds;
-        sw.Restart(); var result = ReadUintBuffer(ob, width * height); LastReadbackMs = sw.ElapsedMilliseconds;
-        return result;
+        return MetalSsaa.Accumulate(settings.HeroSamples, width, height, jitter =>
+        {
+            using var fb = UploadStruct(_device, BuildFoldParams(mg));
+            using var rb = UploadStruct(_device, BuildRenderParams(camera, width, height, lightDirection, background, surface, settings, palette, jitter));
+            using var ob = _device.NewBuffer((ulong)(width * height * sizeof(uint)), MTLResourceOptions.ResourceStorageModeShared);
+            using var cmd = _queue.CommandBuffer(); using var enc = cmd.ComputeCommandEncoder();
+            enc.SetComputePipelineState(_pso!); enc.SetBuffer(fb,0,0); enc.SetBuffer(rb,0,1); enc.SetBuffer(ob,0,2);
+            enc.DispatchThreadgroups(new MTLSize{width=(ulong)((width+7)/8),height=(ulong)((height+7)/8),depth=1}, new MTLSize{width=8,height=8,depth=1});
+            enc.EndEncoding();
+            var sw = System.Diagnostics.Stopwatch.StartNew(); cmd.Commit(); cmd.WaitUntilCompleted(); LastComputeMs = sw.ElapsedMilliseconds;
+            sw.Restart(); var result = ReadUintBuffer(ob, width * height); LastReadbackMs = sw.ElapsedMilliseconds;
+            return result;
+        });
     }
 
     public void Dispose() { if (_disposed) return; _disposed = true; if (_isAvailable) { _pso.Dispose(); _queue.Dispose(); _device.Dispose(); } }
