@@ -5,6 +5,7 @@ using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Markup.Xaml;
 using Avalonia.Threading;
+using Parsec.Audio;
 
 namespace Parsec.App;
 
@@ -14,6 +15,7 @@ public partial class MainWindow : Window
     private Border? _panelHost;
     private Border? _bankHost;
     private Button? _generateButton;
+    private AudioTransportController? _audioTransport;
 
     // Animation timeline state.
     private KeyframeBank? _bank;
@@ -108,7 +110,20 @@ public partial class MainWindow : Window
         // focus (the GL view grabs keyboard focus for fly controls).
         AddHandler(KeyDownEvent, OnWindowKeyDown, RoutingStrategies.Tunnel);
 
+        _audioTransport = new AudioTransportController(new OpenALAudioPlaybackBackend());
+        var audioHost = this.FindControl<ContentControl>("AudioHost");
+        if (audioHost != null)
+            audioHost.Content = new AudioTransportPanel(_audioTransport);
+
+        Closed += OnWindowClosed;
+
         RebuildForActiveFractal();
+    }
+
+    private async void OnWindowClosed(object? sender, EventArgs e)
+    {
+        if (_audioTransport != null)
+            await _audioTransport.DisposeAsync();
     }
 
     // ----------------------------------------------------------- hero / generate

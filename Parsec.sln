@@ -12,6 +12,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Parsec.Rendering.Metal", "s
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Parsec.App", "src\Parsec.App\Parsec.App.csproj", "{A1A1A1A1-0000-0000-0000-000000000006}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Parsec.Audio", "src\Parsec.Audio\Parsec.Audio.csproj", "{A1A1A1A1-0000-0000-0000-000000000007}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -42,5 +44,9 @@ Global
 		{A1A1A1A1-0000-0000-0000-000000000006}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{A1A1A1A1-0000-0000-0000-000000000006}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{A1A1A1A1-0000-0000-0000-000000000006}.Release|Any CPU.Build.0 = Release|Any CPU
+		{A1A1A1A1-0000-0000-0000-000000000007}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{A1A1A1A1-0000-0000-0000-000000000007}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{A1A1A1A1-0000-0000-0000-000000000007}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{A1A1A1A1-0000-0000-0000-000000000007}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 EndGlobal
