@@ -94,6 +94,42 @@ float tanX = tanY * ((float)width / height);
 
 ---
 
+## Metal SSAA — adding hero-still supersampling to a Metal renderer
+
+All 20 Metal renderers use `MetalSsaa.Accumulate` (in `Parsec.Rendering.Metal/MetalSsaa.cs`) to run N Halton-jittered samples and average the result. The pattern is:
+
+```csharp
+public uint[] RenderFoo(FooParams fractal, Camera3D camera, int width, int height,
+    RaymarchSettings settings, Color background, Color surface,
+    Vector3 lightDirection, PaletteParams palette)
+{
+    ThrowIfDisposed();
+    if (!_isAvailable) throw new InvalidOperationException("Metal backend unavailable.");
+    return MetalSsaa.Accumulate(settings.HeroSamples, width, height, jitter =>
+    {
+        using var fb  = UploadStruct(_device, BuildFoldParams(fractal));
+        using var rb  = UploadStruct(_device, BuildRenderParams(..., palette, jitter));
+        using var ob  = _device.NewBuffer(...SharedMode...);
+        using var cmd = _queue.CommandBuffer();
+        using var enc = cmd.ComputeCommandEncoder();
+        enc.SetComputePipelineState(_pso!);
+        enc.SetBuffer(fb, 0, 0); enc.SetBuffer(rb, 0, 1); enc.SetBuffer(ob, 0, 2);
+        enc.DispatchThreadgroups(...); enc.EndEncoding();
+        cmd.Commit(); cmd.WaitUntilCompleted();
+        return ReadUintBuffer(ob, width * height);
+    });
+}
+```
+
+Key points:
+- `BuildRenderParams` must accept `Vector2 jitter` and set `SubpixelJitter = new Vector4(jitter.X, jitter.Y, 0f, 0f)` in the returned struct.
+- `MetalSsaa.Accumulate` short-circuits when `sampleCount == 1` — passes `Vector2.Zero` and returns immediately, so preview renders (which always use `HeroSamples: 1`) cost nothing extra.
+- CPU accumulation is free on Apple Silicon unified memory: N `Buffer.MemoryCopy` calls each cost <1 ms.
+- `settings.HeroSamples` is already set from `FractalView.HeroSampleCount` (the UI ComboBox) via `HeroSettings()` — no call-site changes needed.
+- **CLI morph exception:** `MetalMandelbulbRenderer.RenderMandelbulb` keeps a `Vector2 subpixelJitter = default` param. Non-zero explicit jitter bypasses the loop and calls `DispatchOneSample` directly; zero jitter (in-app) runs the SSAA loop.
+
+---
+
 ## Porting a second (and subsequent) fp32 3D fractal to Metal
 
 The Mandelbox MSL shader is the template. For each new fractal:

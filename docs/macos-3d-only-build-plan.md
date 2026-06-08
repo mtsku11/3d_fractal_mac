@@ -207,7 +207,24 @@ CLI validation: `parsec metal-new-smoke` — all 14/14 pass.
 
 Files touched per port: `Shaders/<fractal>_raymarch.metal`, `Metal<Fractal>Renderer.cs`, `Parsec.Rendering.Metal.csproj`, `FractalView.cs` (field/init/switch/status/dispose/RenderWithMetal*), `Program.cs` (smoke command).
 
-### 7. Package and notarize later
+### 8. In-app 16× SSAA for hero stills ✓ COMPLETE
+
+Goal: honour `HeroSampleCount` (1/4/9/16×) on the Metal path, matching what `RaymarchPipeline` already does on OpenGL.
+
+**Implementation:** `MetalSsaa.cs` — a single shared static helper:
+- `Accumulate(int sampleCount, int width, int height, Func<Vector2, uint[]> renderOneSample)` — calls the lambda N times with Halton(2,3)-jittered sub-pixel offsets, accumulates R/G/B channels as `float[]`, averages, repacks to RGBA8 `uint[]`. When `sampleCount == 1` the lambda is called once with `Vector2.Zero` — identical behaviour to before.
+- `HaltonJitter(int sampleIndex)` — Halton(2,3) quasi-random sequence in `[-0.5, 0.5]²`.
+
+All 20 Metal renderers updated to call `MetalSsaa.Accumulate(settings.HeroSamples, ...)` in their public `RenderX()` entry point. The `settings.HeroSamples` value is set by `FractalView.HeroSettings()` from `HeroSampleCount`, which is already bound to the `HeroSamplesSelector` ComboBox in the UI — no UI changes needed.
+
+Apple Silicon unified memory means N GPU round-trips cost negligible extra transfer time (readback is a pointer copy, <1 ms per pass). The bottleneck remains GPU compute, which scales linearly with N.
+
+**CLI morph path preserved:** `MetalMandelbulbRenderer.RenderMandelbulb` retains its `Vector2 subpixelJitter = default` overload. Non-zero explicit jitter (the CLI's RGSS loop) goes directly to `DispatchOneSample` and bypasses the internal SSAA loop. In-app calls arrive with no jitter, so the SSAA loop fires normally.
+
+Files touched: `MetalSsaa.cs` (new), all 20 `Metal*Renderer.cs` files.
+Commit: 9bc7a2b.
+
+### 9. Package and notarize later
 
 Goal: macOS distribution polish after renderer functionality exists.
 
@@ -226,7 +243,7 @@ Acceptance criteria:
 - synthesizer or visual-to-sound work
 - 2D deep zoom on Metal
 - fp64 shader parity
-- all 3D shader ports
+- all 3D shader ports (now done — M7)
 - native Metal presentation before offscreen display is measured
 - installer, notarization, or release packaging
 

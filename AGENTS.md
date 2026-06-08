@@ -74,13 +74,17 @@ CLI smoke test: `parsec metal-new-smoke` verifies all 14 new renderers.
 Key Metal gotcha discovered: global `const` variables at program scope (even scalars) cause silent
 shader compilation failure — use local constants or inline literals instead.
 
+Milestone 8 (in-app SSAA) complete: `MetalSsaa.cs` added with Halton(2,3) accumulation loop. All
+20 Metal renderers now honour `settings.HeroSamples` (1/4/9/16×) set from the UI HeroSamplesSelector
+ComboBox. CPU accumulation on unified memory is free — N round-trips cost <1 ms extra. CLI morph path
+in `MetalMandelbulbRenderer` preserved via explicit-jitter bypass.
+
 Non-goals (still deferred):
 
 - audio-reactive feature expansion
 - synth engine
 - deep-zoom parity on macOS
 - `CAMetalLayer` presentation unless GL upload proves too slow
-- in-app 16× SSAA hero renders
 
 ## Context-Loading Order
 

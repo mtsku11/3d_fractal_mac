@@ -28,7 +28,7 @@ Seven projects in the solution, layered bottom-up:
 - **Parsec.Core** -- pure math: IFS transforms, attractors, geometry primitives. No GPU or UI dependencies.
 - **Parsec.Rendering** -- CPU-side rendering abstractions: `Camera3D`, raymarching settings, `BinaryFixed` (arbitrary-precision for deep zoom), `ReferenceOrbit`, `ImageOutput` (PNG via SkiaSharp). Depends on Core.
 - **Parsec.Rendering.Gpu** -- OpenGL 4.3 compute shader pipeline. Each fractal has a `Gpu*Renderer` class + a `*_core.glsl` shader (distance estimator). `RaymarchPipeline` owns shared SSBOs and the clear/finalize shaders; renderers own only their per-fractal compute shader. `DeepZoomPipeline` handles 2D perturbation rendering. `ShaderLoader` reads shaders from embedded resources and strips non-ASCII (NVIDIA's GLSL compiler rejects it). Depends on Core, Rendering.
-- **Parsec.Rendering.Metal** -- macOS-only Metal compute backend. `MetalMandelboxRenderer` compiles `mandelbox_raymarch.metal` (embedded resource) at startup via SharpMetal 1.1.0, dispatches an 8×8 threadgroup compute pass, and returns packed RGBA8 `uint[]` matching the OpenGL backend's output contract. Exposes `LastComputeMs`/`LastReadbackMs` for frame-time diagnostics. Depends on Core, Rendering, Rendering.Gpu (for `IThreeDimensionalRenderBackend`).
+- **Parsec.Rendering.Metal** -- macOS-only Metal compute backend. All 20 fp32 3D fractals have a `Metal*Renderer` class that compiles the corresponding `*_raymarch.metal` embedded resource at startup via SharpMetal 1.1.0, dispatches an 8×8 threadgroup compute pass, and returns packed RGBA8 `uint[]` matching the OpenGL backend's output contract. `MetalSsaa.cs` provides a shared Halton-jittered accumulation helper used by every renderer to honour `settings.HeroSamples` for hero still SSAA (up to 16×). Exposes `LastComputeMs`/`LastReadbackMs` for frame-time diagnostics. Depends on Core, Rendering, Rendering.Gpu (for `IThreeDimensionalRenderBackend`).
 - **Parsec.Audio** -- audio playback and analysis. `AudioTransportController` is the backend-neutral playback facade. Currently OpenAL + managed WAV decode only (`OpenALAudioPlaybackSession`). Feature extraction types (`AudioFeatureFrame`, `AudioFeatureTrack`, `IAudioAnalyzer`) exist for the audio-reactive pipeline. Depends on OpenTK.Audio.OpenAL.
 - **Parsec.App** -- Avalonia desktop UI. `FractalView` (OpenGL control) dispatches to the active renderer. `MainWindow` orchestrates timeline, playback, hero renders, animation export. `AudioTransportPanel` is the audio UI. No MVVM framework -- controls are built in code-behind.
 - **Parsec.Cli** -- headless CLI with IFS rendering examples. Separate entry point.
@@ -60,16 +60,16 @@ The macOS-native 3D-only build is underway. Milestones 1–7 are complete:
 - **Milestone 5 (done):** `TexImage2D` upload measured: 0 ms at 640×480/1280×720, 1 ms at 1920×1080. Decision: stay with current `TexImage2D` path. Also fixed: macOS GL 4.1 cap (`glDispatchCompute` optional, compute pipeline skipped on macOS, blit shaders at `#version 330`, Avalonia Metal UI renderer crash on HDMI dummy plugs).
 - **Milestone 6 (done):** All priority fp32 3D shaders ported to Metal. Mandelbox (5 ms), Mandelbulb (7 ms), RotBox (6 ms), KIFS (5 ms), Kleinian (23 ms — numerical-gradient DE), Hybrid (11 ms). All wired into `FractalView` and validated via CLI smoke tests.
 - **Milestone 7 (done):** All remaining 14 fp32 3D fractals ported to Metal: BurningShip, Menger, QuaternionJulia, QJBox, Apollonian, Bicomplex, Phoenix, Biomorph, Mosely, PseudoKleinian4D, RiemannSphere, Mandalay, Anisotropic, OrbitHybrid. AmazingBox routes through MetalMandelboxRenderer (Mode=1). All 20 fractals now render on macOS via Metal. CLI: `metal-new-smoke` validates all 14. Key MSL gotcha: global `const` variables at program scope cause silent shader failure — see `skills.md`.
+- **Milestone 8 (done):** In-app 16× SSAA for hero stills. `MetalSsaa.cs` added — shared `Accumulate(n, w, h, Func<Vector2, uint[]>)` helper runs N Halton(2,3)-jittered samples, accumulates per-channel as float, averages, and repacks to RGBA8. All 20 Metal renderers updated to call `MetalSsaa.Accumulate(settings.HeroSamples, ...)`. The UI `HeroSamplesSelector` ComboBox (1/4/9/16×) now takes effect on macOS. CLI morph path in `MetalMandelbulbRenderer` preserved — explicit non-zero jitter bypasses the loop.
 
 ## Current Milestone
 
-Milestones 1–7 are complete. All 20 fp32 3D fractals render via Metal on macOS. Remaining deferred work: in-app 16× SSAA for hero stills, audio-reactive features, packaging/notarization.
+Milestones 1–8 are complete. All 20 fp32 3D fractals render via Metal on macOS with full hero-still SSAA support. Remaining deferred work: audio-reactive features, packaging/notarization.
 
 See `skills.md` for Metal porting recipes and gotchas. See `docs/macos-3d-only-build-plan.md` for the full milestone breakdown.
 
 ## Deferred
 
-- in-app 16× SSAA for hero stills (HeroSamples ignored in Metal path)
 - audio reactivity and audio-driven modulation
 - deep-zoom parity on macOS
 - fp64 shader support or double-float deep-zoom redesign
