@@ -64,16 +64,24 @@ The macOS-native 3D-only build is underway. Milestones 1–7 are complete:
 
 ## Current Milestone
 
-Milestones 1–8 are complete. All 20 fp32 3D fractals render via Metal on macOS with full hero-still SSAA support. Remaining deferred work: audio-reactive features, packaging/notarization.
+Milestones 1–8 are complete. All 20 fp32 3D fractals render via Metal on macOS with full hero-still SSAA support.
+
+**Outstanding parity gaps (M9 onward):**
+- **M9:** `Parsec.App` missing from `Parsec.sln` — `dotnet build Parsec.sln` skips the desktop app.
+- **M10:** `Parsec.Audio` project entirely absent from Mac rewrite (no directory, not in solution). Original has AudioTransportController, WaveAudioAnalyzer, WavePcmDecoder, AudioFeatureFrame/Track, OpenAL backends (9 files total).
+- **M11:** Audio transport UI missing: `AudioTransportPanel.cs`, `MainWindow.axaml` `AudioHost` control, `MainWindow.axaml.cs` init + `OnWindowClosed` disposal.
+- **M12–M14:** Audio-reactive modulation, mapping UI, export integration (not started in either repo).
+- **M15:** Deep zoom on macOS — at minimum show a "not available" message; full parity needs floatexp MSL.
+- **M16:** Packaging and notarization.
 
 See `skills.md` for Metal porting recipes and gotchas. See `docs/macos-3d-only-build-plan.md` for the full milestone breakdown.
 
 ## Deferred
 
-- audio reactivity and audio-driven modulation
-- deep-zoom parity on macOS
+- audio reactivity and audio-driven modulation (M12–M14)
+- deep-zoom parity on macOS (M15)
 - fp64 shader support or double-float deep-zoom redesign
-- polished packaging, notarization, and installer work
+- polished packaging, notarization, and installer work (M16)
 - synth/audio-generation features
 
 Existing audio branch code can remain, but do not expand it until explicitly requested.

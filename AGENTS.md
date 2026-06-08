@@ -79,11 +79,18 @@ Milestone 8 (in-app SSAA) complete: `MetalSsaa.cs` added with Halton(2,3) accumu
 ComboBox. CPU accumulation on unified memory is free — N round-trips cost <1 ms extra. CLI morph path
 in `MetalMandelbulbRenderer` preserved via explicit-jitter bypass.
 
-Non-goals (still deferred):
+Pending milestones (in order):
 
-- audio-reactive feature expansion
+- **M9:** Add `Parsec.App` to `Parsec.sln` so `dotnet build Parsec.sln` builds the desktop app.
+- **M10:** Port `Parsec.Audio` project — all 7 source files absent from Mac rewrite; original has OpenAL transport, WAV decode, offline RMS/FFT analysis.
+- **M11:** Restore audio transport UI (`AudioTransportPanel.cs`, `MainWindow.axaml` host slot, `MainWindow.axaml.cs` wiring + disposal).
+- **M12–M14:** Audio-reactive modulation, mapping UI, and export integration (Phases 3–5 of original audio roadmap — not started in either repo).
+- **M15:** Deep zoom on macOS — at minimum disable the selector with a clear message; full parity requires floatexp MSL.
+- **M16:** Package and notarize.
+
+Non-goals (still deferred indefinitely):
+
 - synth engine
-- deep-zoom parity on macOS
 - `CAMetalLayer` presentation unless GL upload proves too slow
 
 ## Context-Loading Order

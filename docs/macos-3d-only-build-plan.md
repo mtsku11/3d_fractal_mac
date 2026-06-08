@@ -224,28 +224,94 @@ Apple Silicon unified memory means N GPU round-trips cost negligible extra trans
 Files touched: `MetalSsaa.cs` (new), all 20 `Metal*Renderer.cs` files.
 Commit: 9bc7a2b.
 
-### 9. Package and notarize later
+### 9. Fix solution file — add Parsec.App to Parsec.sln
+
+`Parsec.App` is not listed in `Parsec.sln`. `dotnet build Parsec.sln` silently skips the desktop app — only `dotnet build src/Parsec.App/Parsec.App.csproj` builds it.
+
+Files touched: `Parsec.sln` (add `Parsec.App` project entry).
+
+Acceptance criteria: `dotnet build Parsec.sln` compiles the full solution including the desktop app.
+
+### 10. Port Parsec.Audio project
+
+`Parsec.Audio` is entirely absent from the Mac rewrite. The original contains:
+
+- `AudioTransportController.cs` — backend-neutral playback facade
+- `IAudioPlaybackBackend.cs` / `IAudioPlaybackSession.cs` — OpenAL abstraction seam
+- `OpenALAudioPlaybackBackend.cs` / `OpenALAudioPlaybackSession.cs` — OpenAL + WAV decode backend
+- `UnavailableAudioPlaybackBackend.cs` — stub for platforms without audio
+- `WavePcmData.cs` / `WavePcmDecoder.cs` — managed WAV decode
+- `AudioFeatureFrame.cs` / `AudioFeatureTrack.cs` — feature data structures
+- `IAudioAnalyzer.cs` / `WaveAudioAnalyzer.cs` — offline RMS/FFT analysis
+- `AudioAnalysisOptions.cs`, `AudioPlaybackStatus.cs`, `AudioTransportState.cs`
+
+Files touched: new `src/Parsec.Audio/` directory and `Parsec.Audio.csproj`, `Parsec.sln`, `src/Parsec.App/Parsec.App.csproj` (add project reference).
+
+Acceptance criteria: `dotnet build` succeeds; `parsec audio-analyze /path/to/file.wav 500` headless CLI command works.
+
+### 11. Restore audio transport UI
+
+Three concrete things are missing from the Mac rewrite versus the original:
+
+1. `src/Parsec.App/AudioTransportPanel.cs` — the file/play/pause/seek control panel
+2. `src/Parsec.App/MainWindow.axaml` — missing `<ContentControl Name="AudioHost" Margin="0,12,0,0" />`
+3. `src/Parsec.App/MainWindow.axaml.cs` — missing `_audioHost` / `_audioTransport` fields, their init in the constructor, and `OnWindowClosed` async disposal
+
+Files touched: `AudioTransportPanel.cs` (new), `MainWindow.axaml`, `MainWindow.axaml.cs`.
+
+Acceptance criteria: app launches, audio host panel is visible, user can load and play a WAV file; existing fractal rendering is unaffected when audio is idle.
+
+### 12. Audio-reactive modulation (Phase 3 of original roadmap)
+
+Drive existing visual parameters from audio feature values (RMS, band energy). This phase is not started in either repo — it requires new files:
+
+- `src/Parsec.Audio/ModulationMapping.cs` — feature → parameter descriptor target + depth
+- `src/Parsec.Audio/AudioReactiveController.cs` — per-frame sampling and application to live state
+
+Files touched: above new files, `FractalView.cs` (apply modulation before render), `MainWindow.axaml.cs` (connect controller to transport clock).
+
+Acceptance criteria: at least one feature (RMS) drives at least one parameter; modulation can be toggled; timeline playback still works when modulation is active.
+
+### 13. Audio mapping UI (Phase 4 of original roadmap)
+
+Expose a minimal mapping editor: feature source, parameter target, depth slider, enable toggle.
+
+Files touched: `MainWindow.axaml`, `MainWindow.axaml.cs`.
+
+### 14. Timeline + export integration (Phase 5 of original roadmap)
+
+Exported frames must use deterministic feature sampling at the same timestamps as live playback. Generated ffmpeg mux instructions must account for audio attachment.
+
+Files touched: `AudioFeatureTrack.cs`, `AudioReactiveController.cs`, `MainWindow.axaml.cs`, `FractalView.cs`.
+
+### 15. Deep zoom on macOS
+
+`DeepZoomPipeline` requires OpenGL 4.3 compute shaders and fp64 paths — neither is available on macOS. The `_deepPipeline` field is null on macOS; selecting `FractalType.DeepZoom` produces no output.
+
+Options (in ascending cost):
+- **A (minimal):** hide or disable the Deep Zoom entry in the fractal selector on macOS; show a clear "not available on macOS" message.
+- **B (fp32 approximation):** port the Mandelbrot/Julia perturbation renderer as a Metal compute kernel using fp32 arithmetic — loses precision below ~1e-7 zoom depth but works for shallow exploration.
+- **C (full parity):** implement floatexp (mantissa + int exponent) arithmetic in MSL — significant shader complexity, restores deep zoom parity with the Windows/Linux path.
+
+Acceptance criteria (option A, minimum viable): macOS users get a clear message instead of a black frame when Deep Zoom is selected.
+
+### 16. Package and notarize
 
 Goal: macOS distribution polish after renderer functionality exists.
 
-Expected files touched:
+Expected files touched: packaging scripts, entitlements/signing/notarization files.
 
-- packaging scripts
-- entitlements/signing/notarization files
-
-Acceptance criteria:
-
-- deferred until the app has a useful macOS 3D render path
+Acceptance criteria: deferred until the app has a useful macOS 3D render path.
 
 ## Explicit Non-Goals For First Milestone
 
-- audio-reactive visuals
+- audio-reactive visuals (now tracked as M12–M14)
 - synthesizer or visual-to-sound work
-- 2D deep zoom on Metal
+- 2D deep zoom on Metal (tracked as M15)
 - fp64 shader parity
 - all 3D shader ports (now done — M7)
 - native Metal presentation before offscreen display is measured
-- installer, notarization, or release packaging
+- installer, notarization, or release packaging (tracked as M16)
 
 ## Major Risks And Unknowns
 
