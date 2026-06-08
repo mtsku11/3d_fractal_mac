@@ -44,10 +44,14 @@ internal static class Program
             })
             .With(new AvaloniaNativePlatformOptions
             {
-                // Skia-Metal crashes on HDMI dummy plugs (gr_backendrendertarget_new_metal
-                // gets a null drawable). OpenGl is the default but explicitly listed here
-                // so Software is the fallback if OpenGl also fails.
-                RenderingMode = new[] { AvaloniaNativeRenderingMode.OpenGl, AvaloniaNativeRenderingMode.Software }
+                // Avalonia 11.2.0 + macOS 15 (Sequoia): both the OpenGL compositor
+                // (GLDPipelineProgramRec crash) and the Metal compositor
+                // (gr_backendrendertarget_new_metal null drawable) are broken at the
+                // Skia layer. Software compositing is the only stable mode.
+                // This only affects the UI chrome (buttons, sliders, panels).
+                // FractalView : OpenGlControlBase has its own independent GPU context
+                // and is completely unaffected — fractals still render on GPU.
+                RenderingMode = new[] { AvaloniaNativeRenderingMode.Software }
             })
             .WithInterFont()
             .LogToTrace();
