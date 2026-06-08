@@ -16,6 +16,9 @@ public partial class MainWindow : Window
     private Border? _bankHost;
     private Button? _generateButton;
     private AudioTransportController? _audioTransport;
+    private AudioModulationController? _audioMod;
+    private AudioMappingPanel? _audioMappingPanel;
+    private DispatcherTimer? _modTimer;
 
     // Animation timeline state.
     private KeyframeBank? _bank;
@@ -115,6 +118,19 @@ public partial class MainWindow : Window
         if (audioHost != null)
             audioHost.Content = new AudioTransportPanel(_audioTransport);
 
+        _audioMod = new AudioModulationController(_audioTransport);
+        _audioMappingPanel = new AudioMappingPanel(_audioMod);
+        var audioMappingHost = this.FindControl<ContentControl>("AudioMappingHost");
+        if (audioMappingHost != null)
+            audioMappingHost.Content = _audioMappingPanel;
+
+        _modTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(16) };
+        _modTimer.Tick += (_, _) =>
+        {
+            if (_audioMod.Tick()) _view?.MarkDirty();
+        };
+        _modTimer.Start();
+
         Closed += OnWindowClosed;
 
         RebuildForActiveFractal();
@@ -122,6 +138,7 @@ public partial class MainWindow : Window
 
     private async void OnWindowClosed(object? sender, EventArgs e)
     {
+        _modTimer?.Stop();
         if (_audioTransport != null)
             await _audioTransport.DisposeAsync();
     }
@@ -250,6 +267,10 @@ public partial class MainWindow : Window
     {
         if (_view == null) return;
         _activeSchema = _view.BuildActiveSchema();
+        // Mappings reference descriptor instances from the previous schema; clear
+        // them so there are no stale references when the fractal type changes.
+        _audioMod?.ClearMappings();
+        _audioMappingPanel?.SetSchema(_activeSchema);
         RebuildPanel();
         RebuildTimeline();
     }
@@ -322,6 +343,8 @@ public partial class MainWindow : Window
             _timeline.CaptureInto(sel);
             if (!wasSet) _bank?.Refresh(_timeline);
         }
+        // Clear audio delta tracking so the new slider position becomes the base.
+        _audioMod?.OnManualParamChanged();
         _view?.MarkDirty();
     }
 
@@ -412,14 +435,24 @@ public partial class MainWindow : Window
 
         SetStatus($"Rendering ~{(int)(duration * RenderFps)} frames at {TestWidth}x{TestHeight}... (window will pause)");
 
-        // The apply-callback runs on the GL thread inside the batch loop; it sets
-        // the live params for playback time t via the timeline interpolator.
+        // Capture locals for the apply-callback (runs on the GL thread per frame).
+        var audioMod = _audioMod;
         _view.RequestAnimationRender(dir, TestWidth, TestHeight, RenderFps, duration,
-            t => timeline.ApplyAtTime(0, t));
+            t =>
+            {
+                timeline.ApplyAtTime(0, t);
+                audioMod?.ApplyAtTime(TimeSpan.FromSeconds(t));
+            });
 
-        // Stitch hint: print the ffmpeg command for turning frames into a video.
+        // Stitch hint: include audio track in ffmpeg command if one is loaded.
         string mp4 = System.IO.Path.Combine(dir, "out.mp4");
-        Console.WriteLine($"To stitch: ffmpeg -framerate {RenderFps} -i \"{System.IO.Path.Combine(dir, "frame_%05d.png")}\" -c:v libx264 -pix_fmt yuv420p \"{mp4}\"");
+        string frames = System.IO.Path.Combine(dir, "frame_%05d.png");
+        bool hasAudio = audioMod?.TrackSource?.IsFile == true;
+        string audioInput = hasAudio ? $" -i \"{audioMod!.TrackSource!.LocalPath}\"" : string.Empty;
+        string audioCodec = hasAudio ? " -c:a aac -shortest" : string.Empty;
+        Console.WriteLine(
+            $"To stitch: ffmpeg -framerate {RenderFps} -i \"{frames}\"{audioInput}" +
+            $" -c:v libx264 -pix_fmt yuv420p{audioCodec} \"{mp4}\"");
     }
 
     private void OnSaveAnimClick(object? sender, RoutedEventArgs e)

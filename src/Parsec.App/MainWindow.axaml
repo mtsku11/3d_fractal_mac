@@ -88,6 +88,7 @@
                   HorizontalContentAlignment="Center" Margin="2,0,0,0" Content="Load Anim" />
         </Grid>
         <ContentControl Name="AudioHost" Margin="0,12,0,0" />
+        <ContentControl Name="AudioMappingHost" Margin="0,8,0,0" />
       </StackPanel>
       <Border Name="PanelHost" Grid.Row="1" />
     </Grid>
