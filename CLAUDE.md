@@ -51,7 +51,7 @@ The existing Windows/Linux backend requires OpenGL 4.3+ with compute shaders. Th
 
 ## Current project direction
 
-The macOS-native 3D-only build is underway. Milestones 1–4B are complete:
+The macOS-native 3D-only build is underway. Milestones 1–7 are complete:
 
 - **Milestone 1–2 (done):** repository audit, `IThreeDimensionalRenderBackend` seam added to `Parsec.Rendering.Gpu`.
 - **Milestone 3 (done):** `MetalMandelboxRenderer` with full MSL compute kernel (`mandelbox_raymarch.metal`). Manual port of `mandelbox_core.glsl` + `raymarch_main.glsl`. Renders correctly; 5 ms GPU compute at 640×480 on Apple Silicon.
@@ -59,23 +59,24 @@ The macOS-native 3D-only build is underway. Milestones 1–4B are complete:
 - **Milestone 4B (done):** per-phase timing in the status bar — `compute N ms · readback N ms · upload N ms · total N ms`. CPU readback from unified memory is <1 ms.
 - **Milestone 5 (done):** `TexImage2D` upload measured: 0 ms at 640×480/1280×720, 1 ms at 1920×1080. Decision: stay with current `TexImage2D` path. Also fixed: macOS GL 4.1 cap (`glDispatchCompute` optional, compute pipeline skipped on macOS, blit shaders at `#version 330`, Avalonia Metal UI renderer crash on HDMI dummy plugs).
 - **Milestone 6 (done):** All priority fp32 3D shaders ported to Metal. Mandelbox (5 ms), Mandelbulb (7 ms), RotBox (6 ms), KIFS (5 ms), Kleinian (23 ms — numerical-gradient DE), Hybrid (11 ms). All wired into `FractalView` and validated via CLI smoke tests.
+- **Milestone 7 (done):** All remaining 14 fp32 3D fractals ported to Metal: BurningShip, Menger, QuaternionJulia, QJBox, Apollonian, Bicomplex, Phoenix, Biomorph, Mosely, PseudoKleinian4D, RiemannSphere, Mandalay, Anisotropic, OrbitHybrid. AmazingBox routes through MetalMandelboxRenderer (Mode=1). All 20 fractals now render on macOS via Metal. CLI: `metal-new-smoke` validates all 14. Key MSL gotcha: global `const` variables at program scope cause silent shader failure — see `skills.md`.
 
 ## Current Milestone
 
-Milestone 6 is complete. All six priority fp32 3D fractals render via Metal on macOS. See `skills.md` for the porting recipe and per-fractal parameter layout notes.
+Milestones 1–7 are complete. All 20 fp32 3D fractals render via Metal on macOS. Remaining deferred work: in-app 16× SSAA for hero stills, audio-reactive features, packaging/notarization.
 
-See `skills.md` for Metal porting recipes and gotchas from the spike. See `docs/macos-3d-only-build-plan.md` for the full milestone breakdown.
+See `skills.md` for Metal porting recipes and gotchas. See `docs/macos-3d-only-build-plan.md` for the full milestone breakdown.
 
 ## Deferred
 
+- in-app 16× SSAA for hero stills (HeroSamples ignored in Metal path)
 - audio reactivity and audio-driven modulation
 - deep-zoom parity on macOS
 - fp64 shader support or double-float deep-zoom redesign
-- full parity across all 3D shaders
 - polished packaging, notarization, and installer work
 - synth/audio-generation features
 
-Existing audio branch code can remain, but do not expand it until the macOS 3D renderer milestone is working.
+Existing audio branch code can remain, but do not expand it until explicitly requested.
 
 ## Technical Strategy
 
@@ -90,7 +91,7 @@ Existing audio branch code can remain, but do not expand it until the macOS 3D r
 
 - Do not resume audio-reactive feature work.
 - Do not build a synth engine.
-- Do not port every shader before Mandelbox proves the backend.
+- Do not resume audio-reactive feature work until explicitly requested.
 - Do not implement macOS deep-zoom parity in the first milestone.
 - Do not refactor renderer internals broadly before the one-fractal Metal spike.
 - Do not change Windows/Linux OpenGL behavior unless the change is required by a narrow backend seam and can be validated.

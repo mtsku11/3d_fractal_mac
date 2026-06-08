@@ -172,41 +172,40 @@ Goal: complete and keep this plan current.
 - Blit shaders lowered from `#version 430 core` to `#version 330 core` — the shaders use no 4.3 features and the macOS GL 4.1 driver rejected the higher version directive.
 - Avalonia's Metal UI renderer crashes on HDMI dummy plugs (`gr_backendrendertarget_new_metal` null drawable). Fixed by adding `AvaloniaNativePlatformOptions { RenderingMode = [OpenGl, Software] }` in `Program.cs`.
 
-### 6. Port remaining fp32 3D shaders (in progress)
+### 6. Port remaining fp32 3D shaders ✓ COMPLETE
 
 Goal: expand only after Mandelbox proves the stack.
 
-**Mandelbulb ✓ COMPLETE** — `mandelbulb_raymarch.metal` + `MetalMandelbulbRenderer`. Key difference from Mandelbox: log-space derivative accumulation (no helper folds), `atan2` instead of `atan(y,x)`, camera at `(0,0,4)` not `(0,3,12)`. Measured: 7 ms GPU compute at 640×480. CLI: `metal-bulb-smoke [w] [h]`.
+**Mandelbulb ✓** — `mandelbulb_raymarch.metal` + `MetalMandelbulbRenderer`. Log-space derivative accumulation, `atan2`. 7 ms at 640×480.
+**RotBox ✓** — `rotbox_raymarch.metal` + `MetalRotBoxRenderer`. Mandelbox + per-iteration Euler rotation. 6 ms at 640×480.
+**KIFS ✓** — `kifs_raymarch.metal` + `MetalKifsRenderer`. Pre/post rotation, sphere fold, pivot scale. 5 ms at 640×480.
+**Kleinian ✓** — `kleinian_raymarch.metal` + `MetalKleinianRenderer`. Numerical-gradient DE (7 potential calls/estimate). 23 ms at 640×480.
+**Hybrid ✓** — `hybrid_raymarch.metal` + `MetalHybridRenderer`. Mandelbox + Mandelbulb per-iteration, `atan2` fix. 11 ms at 640×480.
 
-**RotBox ✓ COMPLETE** — `rotbox_raymarch.metal` + `MetalRotBoxRenderer`. Standard Mandelbox + per-iteration Euler rotation (`z = R * z` before folds). Key differences: Euler angles in `surfParams.xyz` (not `rot.xyz`); `boxParams` order `(scale, minRadius, fixedRadius, foldLimit)` differs from Mandelbox `(scale, foldingLimit, minRadius, fixedRadius)`. Measured: 6 ms GPU compute at 640×480. CLI: `metal-rotbox-smoke [w] [h]`.
+### 7. Port all remaining fp32 3D fractals ✓ COMPLETE
 
-**KIFS ✓ COMPLETE** — `kifs_raymarch.metal` + `MetalKifsRenderer`. Pre-rotation (`rot.xyz`), abs fold, post-rotation (`surfParams.xyz`), sphere fold, scale toward pivot (`juliaC.xyz`). `boxParams = (scale, _, minRadius, fixedRadius)` — slot .y unused. Measured: 5 ms GPU compute at 640×480. CLI: `metal-kifs-smoke [w] [h]`.
+All 14 remaining fractals ported to Metal (commit b96f21c). All 20 fp32 3D fractals now render on macOS via Metal. AmazingBox reuses MetalMandelboxRenderer (Mode=1).
 
-**Kleinian ✓ COMPLETE** — `kleinian_raymarch.metal` + `MetalKleinianRenderer`. Numerical-gradient DE: `estimateDE` calls `kleinianPotential` 7 times (central differences). `boxParams = (scale, cell, minRadius, fixedRadius)`, offset in `juliaC.xyz`. Measured: 23 ms GPU compute at 640×480 (expected — 7× potential evaluations per estimate call). CLI: `metal-kleinian-smoke [w] [h]`.
+**BurningShip ✓** — same FoldParams layout as Mandelbulb; abs() fold after power step; y-up spherical convention.
+**Menger ✓** — sort-based IFS (largest component to z); Euler rotation each iteration; box SDF at exit.
+**QuaternionJulia ✓** — 4D quaternion iteration; flat or stereographic slice; optional half-cut plane; stereo mode sets BoundSphere.w = 1e6f to disable fast-skip.
+**QJBox ✓** — Mandelbox fold + quaternion-square hybrid; 4D z; cut-axis flag in rot.z.
+**Apollonian ✓** — inversive inversion through 5 spheres; logScale accumulation; gTrap set after each inversion.
+**Bicomplex ✓** — tessarine square with per-axis mul/add scalings; Hubbard-Douady DE; half-cut flag in rot.y.
+**Phoenix ✓** — Mandelbulb-style square + memory term p_mem × z_{n-1}; two-step derivative tracking.
+**Biomorph ✓** — Mandelbulb-style square; L∞ (componentwise) escape; optional half-cut.
+**Mosely ✓** — [111]-frame IFS; twist rotation; wedge kaleidoscope fold; exact box SDF / dz.
+**PseudoKleinian4D ✓** — 4D z (w0 slice); box fold + one-sided sphere inversion; slab-tube DE.
+**RiemannSphere ✓** — stereographic projection; sine-fold; variable-exponent radial power; approx scalar-dr DE.
+**Mandalay ✓** — darkbeam fold (SDF min/max per axis); parallel or sequential mode; |z|/dr DE.
+**Anisotropic ✓** — delta-DE: 4 orbits per pixel, finite-difference Jacobian; Frobenius or sigma_max norm.
+**OrbitHybrid ✓** — KIFS + Mandelbox schedule; shared sphere fold; kifsCount/mboxCount packed in mode/juliaMode slots.
 
-**Hybrid ✓ COMPLETE** — `hybrid_raymarch.metal` + `MetalHybridRenderer`. Per-iteration: rotate, Mandelbox half, Mandelbulb half. `surfParams = (rotX, rotY, rotZ, power)`. Key: GLSL `atan(z.y, z.x)` → MSL `atan2(z.y, z.x)`. DE = 0.25 × log(r)·r/dr (heuristic safety factor). Measured: 11 ms GPU compute at 640×480. CLI: `metal-hybrid-smoke [w] [h]`.
+**Key MSL gotcha discovered:** global `const` variables at program scope (scalar or vector) cause silent shader compilation failure — `NewFunction` returns nil even though `NewLibrary` appears to succeed. All shaders must use local variables or inline literals. Documented in `skills.md`.
 
-Remaining fp32 3D shaders to port (candidates in rough priority order based on parameter pack complexity):
-- GpuMandelbulbRenderer ✓ done
-- GpuRotBoxRenderer ✓ done
-- GpuKifsRenderer ✓ done
-- GpuKleinianRenderer ✓ done
-- GpuHybridRenderer ✓ done
-- others as needed
+CLI validation: `parsec metal-new-smoke` — all 14/14 pass.
 
-Expected files touched per port:
-
-- `src/Parsec.Rendering.Metal/Shaders/<fractal>_raymarch.metal`
-- `src/Parsec.Rendering.Metal/Metal<Fractal>Renderer.cs`
-- `src/Parsec.Rendering.Metal/Parsec.Rendering.Metal.csproj` (EmbeddedResource)
-- `src/Parsec.App/FractalView.cs` (field, init, switch arm, status, dispose)
-- `src/Parsec.Cli/Program.cs` (smoke command)
-
-Acceptance criteria:
-
-- each port has visual smoke validation (`metal-*-smoke` CLI command)
-- parameter packing differences are documented
-- no deep-zoom parity implied
+Files touched per port: `Shaders/<fractal>_raymarch.metal`, `Metal<Fractal>Renderer.cs`, `Parsec.Rendering.Metal.csproj`, `FractalView.cs` (field/init/switch/status/dispose/RenderWithMetal*), `Program.cs` (smoke command).
 
 ### 7. Package and notarize later
 
