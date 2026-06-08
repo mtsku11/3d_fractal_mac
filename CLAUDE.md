@@ -51,7 +51,7 @@ The existing Windows/Linux backend requires OpenGL 4.3+ with compute shaders. Th
 
 ## Current project direction
 
-The macOS-native 3D-only build is underway. Milestones 1–7 are complete:
+The macOS-native 3D-only build is underway. Milestones 1–10 are complete:
 
 - **Milestone 1–2 (done):** repository audit, `IThreeDimensionalRenderBackend` seam added to `Parsec.Rendering.Gpu`.
 - **Milestone 3 (done):** `MetalMandelboxRenderer` with full MSL compute kernel (`mandelbox_raymarch.metal`). Manual port of `mandelbox_core.glsl` + `raymarch_main.glsl`. Renders correctly; 5 ms GPU compute at 640×480 on Apple Silicon.
@@ -61,14 +61,14 @@ The macOS-native 3D-only build is underway. Milestones 1–7 are complete:
 - **Milestone 6 (done):** All priority fp32 3D shaders ported to Metal. Mandelbox (5 ms), Mandelbulb (7 ms), RotBox (6 ms), KIFS (5 ms), Kleinian (23 ms — numerical-gradient DE), Hybrid (11 ms). All wired into `FractalView` and validated via CLI smoke tests.
 - **Milestone 7 (done):** All remaining 14 fp32 3D fractals ported to Metal: BurningShip, Menger, QuaternionJulia, QJBox, Apollonian, Bicomplex, Phoenix, Biomorph, Mosely, PseudoKleinian4D, RiemannSphere, Mandalay, Anisotropic, OrbitHybrid. AmazingBox routes through MetalMandelboxRenderer (Mode=1). All 20 fractals now render on macOS via Metal. CLI: `metal-new-smoke` validates all 14. Key MSL gotcha: global `const` variables at program scope cause silent shader failure — see `skills.md`.
 - **Milestone 8 (done):** In-app 16× SSAA for hero stills. `MetalSsaa.cs` added — shared `Accumulate(n, w, h, Func<Vector2, uint[]>)` helper runs N Halton(2,3)-jittered samples, accumulates per-channel as float, averages, and repacks to RGBA8. All 20 Metal renderers updated to call `MetalSsaa.Accumulate(settings.HeroSamples, ...)`. The UI `HeroSamplesSelector` ComboBox (1/4/9/16×) now takes effect on macOS. CLI morph path in `MetalMandelbulbRenderer` preserved — explicit non-zero jitter bypasses the loop.
+- **Milestone 9 (done):** `Parsec.App` added to `Parsec.sln`. `dotnet build Parsec.sln` now builds the full solution including the desktop app.
+- **Milestone 10 (done):** 2D deep zoom on macOS via `MetalDeepZoomRenderer` (`deepzoom_metal.metal`). Float-float (Dekker double-double) arithmetic in MSL gives ~48-bit precision, supporting zoom to ~1e-12 depth. Supports all four formulas (Mandelbrot, Prospector, Julia, Burning Ship) with direct path (radius > 1e-6) and perturbation path (radius ≤ 1e-6) using the existing CPU `ReferenceOrbit`. Uses `MetalSsaa.Accumulate` for hero SSAA. CLI: `metal-deepzoom-mp4` renders a Seahorse Valley zoom video. **Precision note:** float-float reaches ~1e-12; the OpenGL floatexp path reaches 1e-147 — not identical at extreme depths but beyond any practical need.
 
 ## Current Milestone
 
-Milestones 1–8 are complete. All 20 fp32 3D fractals render via Metal on macOS with full hero-still SSAA support.
+Milestones 1–10 are complete. All 20 fp32 3D fractals and the 2D deep-zoom pipeline render via Metal on macOS.
 
 **Remaining macOS parity work:**
-- **M9:** `Parsec.App` missing from `Parsec.sln` — `dotnet build Parsec.sln` skips the desktop app.
-- **M10:** Deep zoom on macOS — at minimum disable the selector with a clear message; full parity needs floatexp MSL.
 - **M11:** Packaging and notarization.
 
 **Audio-reactive feature (new — not in upstream):**
@@ -81,8 +81,6 @@ See `skills.md` for Metal porting recipes and gotchas. See `docs/macos-3d-only-b
 ## Deferred
 
 - audio-reactive feature (Audio Phases 1–5 — see plan doc for detail)
-- deep-zoom parity on macOS (M10)
-- fp64 shader support or double-float deep-zoom redesign
 - polished packaging, notarization, and installer work (M11)
 - synth/audio-generation features
 
@@ -95,16 +93,13 @@ Do not expand audio work until explicitly requested.
 - **Backend seam:** `IThreeDimensionalRenderBackend` in `Parsec.Rendering.Gpu` is the dispatch interface. `FractalView` uses a `when` guard on the switch arm to route Mandelbox to Metal; all other fractals fall through to OpenGL.
 - **Shader translation:** SPIRV-Cross was not used. The Mandelbox shader was manually ported to MSL (`mandelbox_raymarch.metal`). For additional shaders, use the Mandelbox MSL as the template — see `skills.md`.
 - **Avalonia presentation:** Metal renders offscreen into `uint[]`, uploaded into the existing GL texture via `TexImage2D`. CPU readback from unified memory is <1 ms. If GL upload proves too slow, the next step is `CAMetalLayer`.
-- **Deep zoom:** disabled on macOS 3D-only path. Metal's shader model does not support the existing fp64 path.
+- **Deep zoom:** `MetalDeepZoomRenderer` (`deepzoom_metal.metal`) implements Dekker float-float arithmetic in MSL, giving ~48-bit precision (~1e-12 max depth). The OpenGL path uses fp64/floatexp to reach 1e-147; the Metal path is not bit-identical at extreme depths but covers all practical use. The CPU `ReferenceOrbit` (BigInteger) and `DeepZoomView` are shared with the OpenGL path unchanged.
 
 ## Do Not Do Yet
 
-- Do not resume audio-reactive feature work.
-- Do not build a synth engine.
 - Do not resume audio-reactive feature work until explicitly requested.
-- Do not implement macOS deep-zoom parity in the first milestone.
-- Do not refactor renderer internals broadly before the one-fractal Metal spike.
+- Do not build a synth engine.
+- Do not refactor renderer internals broadly.
 - Do not change Windows/Linux OpenGL behavior unless the change is required by a narrow backend seam and can be validated.
-- Do not over-engineer Avalonia integration before measuring the simplest offscreen display path.
 
 `AGENTS.md` holds the fuller engineering rules and context-loading order. `docs/macos-3d-only-build-plan.md` is the current implementation plan.

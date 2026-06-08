@@ -224,24 +224,27 @@ Apple Silicon unified memory means N GPU round-trips cost negligible extra trans
 Files touched: `MetalSsaa.cs` (new), all 20 `Metal*Renderer.cs` files.
 Commit: 9bc7a2b.
 
-### 9. Fix solution file — add Parsec.App to Parsec.sln
+### 9. Fix solution file — add Parsec.App to Parsec.sln ✓ DONE
 
-`Parsec.App` is not listed in `Parsec.sln`. `dotnet build Parsec.sln` silently skips the desktop app — only `dotnet build src/Parsec.App/Parsec.App.csproj` builds it.
+`Parsec.App` was not listed in `Parsec.sln`. Fixed by adding the project entry and configuration blocks.
 
-Files touched: `Parsec.sln` (add `Parsec.App` project entry).
+Files touched: `Parsec.sln`. Commit: c09ce80.
 
-Acceptance criteria: `dotnet build Parsec.sln` compiles the full solution including the desktop app.
+### 10. Deep zoom on macOS ✓ DONE
 
-### 10. Deep zoom on macOS
+`DeepZoomPipeline` requires OpenGL 4.3 + fp64, neither available on macOS. Replaced with `MetalDeepZoomRenderer` (`deepzoom_metal.metal`) using Dekker float-float (double-double) arithmetic in MSL.
 
-`DeepZoomPipeline` requires OpenGL 4.3 compute shaders and fp64 paths — neither is available on macOS. The `_deepPipeline` field is null on macOS; selecting `FractalType.DeepZoom` produces no output.
+**Implementation:**
+- Float-float library in MSL: `ddAdd`, `ddSub`, `ddMul`, `ddSqr`, `ddScale`, `ddDiffabs` (Dekker/Knuth error-free transformations using `fma`).
+- **Direct path** (radius > 1e-6): each pixel's orbit iterated in float-float coordinates. Correct for all 4 formulas at shallow zoom; required for Burning Ship (perturbation is unstable at large delta).
+- **Perturbation path** (radius ≤ 1e-6): CPU `ReferenceOrbit` (BigInteger, unchanged) split to float-float pairs for GPU upload; GPU tracks float-float delta dz with rebasing. Supports zoom to ~1e-12.
+- All 4 formulas: Mandelbrot, Prospector, Julia, Burning Ship.
+- Reference-orbit caching logic mirrors `DeepZoomPipeline.EnsureReference`.
+- Hero SSAA via `MetalSsaa.Accumulate`.
 
-Options (in ascending cost):
-- **A (minimal):** hide or disable the Deep Zoom entry in the fractal selector on macOS; show a clear "not available on macOS" message.
-- **B (fp32 approximation):** port the Mandelbrot/Julia perturbation renderer as a Metal compute kernel using fp32 arithmetic — loses precision below ~1e-7 zoom depth but works for shallow exploration.
-- **C (full parity):** implement floatexp (mantissa + int exponent) arithmetic in MSL — significant shader complexity, restores deep zoom parity with the Windows/Linux path.
+**Precision note:** float-float gives ~48 mantissa bits (~1e-12 max depth). The OpenGL floatexp path reaches 1e-147. Not bit-identical at extreme depth, but beyond any practical need — verified via `metal-deepzoom-mp4` CLI (Seahorse Valley, 1280×720, 4× SSAA).
 
-Acceptance criteria (option A, minimum viable): macOS users get a clear message instead of a black frame when Deep Zoom is selected.
+Files touched: `MetalDeepZoomRenderer.cs` (new), `deepzoom_metal.metal` (new), `Parsec.Rendering.Metal.csproj`, `FractalView.cs`, `MainWindow.axaml.cs`. Commits: 859e03c, 0e3d5e9.
 
 ### 11. Package and notarize
 

@@ -1,6 +1,6 @@
 # Parsec Agent Guide
 
-Parsec is a C#/.NET 9 Avalonia desktop application for GPU fractal exploration and rendering. The current branch direction is a macOS-native 3D-only build: get one existing fp32 3D raymarched fractal running through a native Metal backend first, while preserving the current OpenGL backend for Windows/Linux. Audio-reactive visuals, deep-zoom parity, and full shader parity are deferred.
+Parsec is a C#/.NET 9 Avalonia desktop application for GPU fractal exploration and rendering. The current branch direction is a macOS-native build: all 20 fp32 3D fractals and the 2D deep-zoom pipeline now render via Metal on macOS, while preserving the OpenGL backend for Windows/Linux. Audio-reactive work is deferred.
 
 ## Key Commands
 
@@ -32,7 +32,8 @@ Note: every project targets `net9.0`. If `dotnet` is unavailable, fix the SDK en
 - `src/Parsec.Rendering.Metal/Shaders/mandelbox_raymarch.metal`: MSL compute kernel; reference for future MSL ports.
 - `src/Parsec.Rendering.Metal/MetalMandelbulbRenderer.cs`: Metal compute backend for Mandelbulb. Second example of the porting pattern.
 - `src/Parsec.Rendering.Metal/Shaders/mandelbulb_raymarch.metal`: MSL Mandelbulb kernel. Identical shading/raytrace skeleton to Mandelbox; only the DE section differs.
-- `src/Parsec.Rendering.Gpu/DeepZoomPipeline.cs`: OpenGL fp64/floatexp 2D deep-zoom path; defer for macOS first milestone.
+- `src/Parsec.Rendering.Gpu/DeepZoomPipeline.cs`: OpenGL fp64/floatexp 2D deep-zoom path (Windows/Linux only).
+- `src/Parsec.Rendering.Metal/MetalDeepZoomRenderer.cs`: Metal 2D deep-zoom backend. Dekker float-float arithmetic in `deepzoom_metal.metal`; all 4 formulas; direct + perturbation paths. Shares `ReferenceOrbit` and `DeepZoomView` with the OpenGL path.
 - `src/Parsec.Rendering/Output/ImageOutput.cs`: PNG export helper.
 - `docs/macos-3d-only-build-plan.md`: current macOS 3D-only implementation plan.
 - `docs/audio-reactive/`: deferred audio-reactive planning and implementation history.
@@ -79,10 +80,13 @@ Milestone 8 (in-app SSAA) complete: `MetalSsaa.cs` added with Halton(2,3) accumu
 ComboBox. CPU accumulation on unified memory is free — N round-trips cost <1 ms extra. CLI morph path
 in `MetalMandelbulbRenderer` preserved via explicit-jitter bypass.
 
+Completed macOS parity milestones (this session):
+
+- **M9 (done):** `Parsec.App` added to `Parsec.sln`. `dotnet build Parsec.sln` now builds the full solution.
+- **M10 (done):** 2D deep zoom on macOS via `MetalDeepZoomRenderer`. Dekker float-float in MSL; ~48-bit precision; zoom to ~1e-12. All 4 formulas. CLI: `metal-deepzoom-mp4`.
+
 Remaining macOS parity milestones:
 
-- **M9:** Add `Parsec.App` to `Parsec.sln` so `dotnet build Parsec.sln` builds the desktop app.
-- **M10:** Deep zoom on macOS — at minimum disable the selector with a clear message; full parity requires floatexp MSL.
 - **M11:** Package and notarize.
 
 Audio-reactive feature (new work, not in upstream `zoomacroom-games/Parsec`):
