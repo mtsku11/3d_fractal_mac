@@ -504,6 +504,66 @@ public static class Program
             catch (Exception ex) { Console.Error.WriteLine($"metal-hybrid-smoke FAILED: {ex.Message}"); return 1; }
         }
 
+        if (args[0] is "metal-new-smoke")
+        {
+            if (!OperatingSystem.IsMacOS()) { Console.Error.WriteLine("metal-new-smoke requires macOS."); return 1; }
+            try
+            {
+                int w = 64, h = 64;
+                var camera = new Camera3D(new Vector3(0f, 1f, 5f), Vector3.Zero, Vector3.UnitY, MathF.PI / 4f, 1f);
+                var settings = new RaymarchSettings();
+                var palette = PaletteParams.Default;
+                var bg = new Color(0.02f, 0.03f, 0.07f);
+                var sf = new Color(0.6f, 0.6f, 0.6f);
+                var light = Vector3.Normalize(new Vector3(1f, 2f, 1.5f));
+                uint bgR=(uint)(bg.R*255+0.5f),bgG=(uint)(bg.G*255+0.5f),bgB=(uint)(bg.B*255+0.5f);
+                uint bgPacked=(255u<<24)|(bgB<<16)|(bgG<<8)|bgR;
+
+                int pass = 0, fail = 0;
+                void Test(string name, Func<uint[]> render) {
+                    try {
+                        var px = render();
+                        int nonBg = px.Count(p => p != bgPacked);
+                        Console.WriteLine($"  {name,-28} {w*h} px, {nonBg} non-bg  {(nonBg > 0 ? "PASS" : "WARN (all bg)")}");
+                        if (nonBg > 0) pass++; else fail++;
+                    } catch (Exception ex) { Console.WriteLine($"  {name,-28} FAIL: {ex.Message}"); fail++; }
+                }
+
+                using var r1 = new MetalBurningShipRenderer();
+                Test("BurningShip", () => r1.RenderBurningShip(new BurningShipParams(), camera, w, h, settings, bg, sf, light, palette));
+                using var r2 = new MetalMengerRenderer();
+                Test("Menger", () => r2.RenderMenger(new MengerParams(), camera, w, h, settings, bg, sf, light, palette));
+                using var r3 = new MetalQuaternionJuliaRenderer();
+                Test("QuaternionJulia", () => r3.RenderQuaternionJulia(new QuaternionJuliaParams(), camera, w, h, settings, bg, sf, light, palette));
+                using var r4 = new MetalQJBoxRenderer();
+                Test("QJBox", () => r4.RenderQJBox(new QJBoxParams(), camera, w, h, settings, bg, sf, light, palette));
+                using var r5 = new MetalApollonianRenderer();
+                Test("Apollonian", () => r5.RenderApollonian(new ApollonianParams(), camera, w, h, settings, bg, sf, light, palette));
+                using var r6 = new MetalBicomplexRenderer();
+                Test("Bicomplex", () => r6.RenderBicomplex(new BicomplexParams(), camera, w, h, settings, bg, sf, light, palette));
+                using var r7 = new MetalPhoenixRenderer();
+                Test("Phoenix", () => r7.RenderPhoenix(new PhoenixParams(), camera, w, h, settings, bg, sf, light, palette));
+                using var r8 = new MetalBiomorphRenderer();
+                Test("Biomorph", () => r8.RenderBiomorph(new BiomorphParams(), camera, w, h, settings, bg, sf, light, palette));
+                using var r9 = new MetalMoselyRenderer();
+                Test("Mosely", () => r9.RenderMosely(new MoselyParams(), camera, w, h, settings, bg, sf, light, palette));
+                using var r10 = new MetalPseudoKleinian4DRenderer();
+                Test("PseudoKleinian4D", () => r10.RenderPseudoKleinian4D(new PseudoKleinian4DParams(), camera, w, h, settings, bg, sf, light, palette));
+                using var r11 = new MetalRiemannSphereRenderer();
+                Test("RiemannSphere", () => r11.RenderRiemannSphere(new RiemannSphereParams(), camera, w, h, settings, bg, sf, light, palette));
+                using var r12 = new MetalMandalayRenderer();
+                Test("Mandalay", () => r12.RenderMandalay(new MandalayParams(), camera, w, h, settings, bg, sf, light, palette));
+                using var r13 = new MetalAnisotropicRenderer();
+                Test("Anisotropic", () => r13.RenderAnisotropic(new AnisotropicParams(), camera, w, h, settings, bg, sf, light, palette));
+                using var r14 = new MetalOrbitHybridRenderer();
+                Test("OrbitHybrid", () => r14.RenderOrbitHybrid(new OrbitHybridParams(), camera, w, h, settings, bg, sf, light, palette));
+
+                Console.WriteLine($"\n  {pass} passed, {fail} failed/warned");
+                return fail == 0 ? 0 : 1;
+            }
+            catch (Exception ex) { Console.Error.WriteLine($"metal-new-smoke FAILED: {ex.Message}"); return 1; }
+        }
+
         if (args[0] is "metal-morph-mp4")
         {
             if (!OperatingSystem.IsMacOS()) { Console.Error.WriteLine("metal-morph-mp4 requires macOS."); return 1; }

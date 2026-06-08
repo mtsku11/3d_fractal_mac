@@ -18,6 +18,20 @@
     <EmbeddedResource Include="Shaders\kifs_raymarch.metal" />
     <EmbeddedResource Include="Shaders\kleinian_raymarch.metal" />
     <EmbeddedResource Include="Shaders\hybrid_raymarch.metal" />
+    <EmbeddedResource Include="Shaders\burningship_raymarch.metal" />
+    <EmbeddedResource Include="Shaders\menger_raymarch.metal" />
+    <EmbeddedResource Include="Shaders\quaternianjulia_raymarch.metal" />
+    <EmbeddedResource Include="Shaders\qjbox_raymarch.metal" />
+    <EmbeddedResource Include="Shaders\apollonian_raymarch.metal" />
+    <EmbeddedResource Include="Shaders\bicomplex_raymarch.metal" />
+    <EmbeddedResource Include="Shaders\phoenix_raymarch.metal" />
+    <EmbeddedResource Include="Shaders\biomorph_raymarch.metal" />
+    <EmbeddedResource Include="Shaders\mosely_raymarch.metal" />
+    <EmbeddedResource Include="Shaders\pseudokleinian4d_raymarch.metal" />
+    <EmbeddedResource Include="Shaders\riemannsphere_raymarch.metal" />
+    <EmbeddedResource Include="Shaders\mandalay_raymarch.metal" />
+    <EmbeddedResource Include="Shaders\anisotropic_raymarch.metal" />
+    <EmbeddedResource Include="Shaders\orbithybrid_raymarch.metal" />
   </ItemGroup>
 
   <ItemGroup>
