@@ -69,8 +69,8 @@ public sealed class MetalKleinianRenderer : IDisposable
             using var renderBuf = UploadStruct(_device, BuildRenderParams(camera, width, height, lightDirection, background, surface, settings, palette, jitter));
             using var outBuf    = _device.NewBuffer((ulong)(pixelCount * sizeof(uint)), MTLResourceOptions.ResourceStorageModeShared);
 
-            using var cmd = _queue.CommandBuffer();
-            using var enc = cmd.ComputeCommandEncoder();
+            var cmd = _queue.CommandBuffer();
+            var enc = cmd.ComputeCommandEncoder();
 
             enc.SetComputePipelineState(_pso!);
             enc.SetBuffer(foldBuf,   0, 0);

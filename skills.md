@@ -17,7 +17,7 @@ Requires an **active** display on macOS — will fail with `activeDisplays=0` if
 ```
 dotnet run --project src/Parsec.Cli/Parsec.Cli.csproj -- <command>
 ```
-Commands: `metal-smoke [w] [h]`, `metal-bulb-smoke [w] [h]`, `metal-new-smoke` (all 14 new renderers), `gpu-smoke`, `gpu-render <name>`, `gpu-de-validate`, `attractor-stats`, `metal-orbit-gif`, `metal-morph-mp4`, `all`, `list`.
+Commands: `metal-smoke [w] [h]`, `metal-bulb-smoke [w] [h]`, `metal-new-smoke` (all 14 new renderers), `gpu-smoke`, `gpu-render <name>`, `gpu-de-validate`, `attractor-stats`, `metal-orbit-gif`, `metal-morph-mp4`, `metal-audio-reactive [wav] [startSec] [durationSec] [outMp4]`, `all`, `list`.
 
 ---
 
@@ -217,3 +217,151 @@ When running the GUI app headlessly (HDMI dummy, no physical screen), the app wi
 - `system_profiler SPDisplaysDataType` → shows attached displays and whether each is asleep
 - Add `Console.WriteLine` to `OnOpenGlInit`/`OnOpenGlRender` and redirect stdout to a log file to diagnose GL init failures
 - `MacDisplayPreflight` checks `CGGetActiveDisplayList` — requires the display to be **active** (not sleeping), not just online
+
+---
+
+## macOS 15+ (Sequoia) app launch blockers
+
+### OpenAL SIGSEGV — system OpenAL is broken on Sequoia
+
+macOS 15 broke the system OpenAL framework. `alcOpenDevice(NULL)` via the system `/System/Library/Frameworks/OpenAL.framework` causes a native SIGSEGV. This kills the entire app if `OpenALAudioPlaybackBackend` is constructed.
+
+**Fix:** redirect OpenTK to Homebrew's `openal-soft` via `OpenALLibraryNameContainer.OverridePath` before any AL/ALC type is touched. The override must be set before the first `ALC.OpenDevice` call.
+
+**Wrong approach — do NOT use `NativeLibrary.SetDllImportResolver`:**
+OpenTK 4.9.4's `ALLoader.RegisterDllResolver()` already calls `SetDllImportResolver` internally, and .NET allows only ONE resolver per assembly. Calling it a second time throws `InvalidOperationException`, which surfaces as `TypeInitializationException` for `OpenTK.Audio.OpenAL.ALC`. The correct API is `OpenALLibraryNameContainer.OverridePath` — it's OpenTK's own mechanism, checked before the platform-default library path.
+
+```csharp
+// CORRECT — in OpenALAudioPlaybackBackend constructor, before ALC.OpenDevice
+OpenALLibraryNameContainer.OverridePath = "/opt/homebrew/lib/libopenal.dylib";
+```
+
+Probe Homebrew Cellar versioned paths first (`/opt/homebrew/Cellar/openal-soft/*/lib/libopenal.dylib`), then symlink paths, then Intel-Mac paths.
+
+**Current app startup decision:** do not construct `OpenALAudioPlaybackBackend` from `MainWindow` on macOS while the macOS renderer build is being stabilized. The audio feature is deferred, and startup crash work should not load OpenAL just to show the fractal UI. Use `UnavailableAudioPlaybackBackend` on macOS until audio work is explicitly resumed.
+
+### Avalonia compositor crashes on macOS 15.6
+
+Both the OpenGL and Metal Avalonia compositors crash on macOS 15.6 (Apple Silicon):
+- **OpenGL compositor:** `GLDPipelineProgramRec` → SIGSEGV. Avalonia's Skia GL backend hits a driver bug.
+- **Metal compositor:** `gr_backendrendertarget_new_metal` → null drawable → SIGSEGV. Skia can't acquire a Metal drawable from Avalonia's surface.
+
+**Fix:** force Software-only rendering mode in `Program.cs`:
+```csharp
+.With(new AvaloniaNativePlatformOptions
+{
+    RenderingMode = new[] { AvaloniaNativeRenderingMode.Software }
+})
+```
+
+This means `OpenGlControlBase` never gets a GL context — `OnOpenGlInit` is never called, `_ready` stays false, and the fractal view shows nothing. Requires the software-blit fallback (see below).
+
+### Software-blit fallback for Metal renderers without GL context
+
+When Avalonia runs in Software-only mode, `OpenGlControlBase` has no GL context. The Metal renderers still work (they produce `uint[]` via CPU-accessible unified memory), but there's no GL texture to upload to. Solution: override `Render(DrawingContext)` and use `WriteableBitmap` + `DrawImage`.
+
+**Critical gotcha — `OpenGlControlBase` hides `InvalidateVisual()`:**
+`OpenGlControlBase` declares `public new void InvalidateVisual() => RequestNextFrameRendering();`, which shadows `Visual.InvalidateVisual()`. In software mode, calling `InvalidateVisual()` on a `FractalView` (which extends `OpenGlControlBase`) routes through the compositor pipeline — dead without GL. The `Render(DrawingContext)` override is never triggered.
+
+**Fix:** bypass the hiding with a cast:
+```csharp
+private void SoftInvalidate() => ((Avalonia.Visual)this).InvalidateVisual();
+```
+Call `SoftInvalidate()` everywhere in software-mode paths instead of `InvalidateVisual()`. This triggers Avalonia's normal `Render(DrawingContext)` dispatch.
+
+**Detection pattern:** use double-deferred `Dispatcher.UIThread.Post` in `OnAttachedToVisualTree` — if `_ready` is still false after `DispatcherPriority.Background`, GL init failed and software mode is needed:
+```csharp
+Dispatcher.UIThread.Post(() => {
+    Dispatcher.UIThread.Post(() => {
+        if (!_ready) {
+            InitMetalRenderers();
+            _softwareMode = true;
+            // start 16ms timer calling SoftInvalidate()
+        }
+    }, DispatcherPriority.Background);
+}, DispatcherPriority.Loaded);
+```
+
+### SharpMetal autorelease double-free — do NOT `using`-dispose autoreleased Metal objects
+
+Metal's Objective-C API follows standard naming conventions: methods not starting with `new`, `alloc`, `copy`, or `mutableCopy` return autoreleased objects. In a GUI app, the CFRunLoop drains the autorelease pool at the end of each iteration.
+
+SharpMetal's `Dispose()` calls `objc_msgSend(ptr, sel_release)`. If the object was autoreleased, you get a double-free: `Dispose()` releases it (retain count → 0, freed), then the autorelease pool drain tries to release the freed pointer → `SIGSEGV` in `objc_release` / `AutoreleasePoolPage::releaseUntil`.
+
+**Autoreleased (do NOT use `using`):**
+- `_queue.CommandBuffer()` → maps to `-[MTLCommandQueue commandBuffer]`
+- `cmd.ComputeCommandEncoder()` → maps to `-[MTLCommandBuffer computeCommandEncoder]`
+
+**Retained (DO use `using` to release):**
+- `device.NewBuffer(...)` → starts with `new` → retained
+- `device.NewLibrary(...)` → retained
+- `device.NewComputePipelineState(...)` → retained
+
+```csharp
+// CORRECT — no using on autoreleased objects
+var cmd = _queue.CommandBuffer();
+var enc = cmd.ComputeCommandEncoder();
+// ... dispatch, EndEncoding, Commit, WaitUntilCompleted ...
+// cmd and enc released by autorelease pool drain — no manual dispose
+
+// CORRECT — using on retained objects
+using var outBuf = _device.NewBuffer((ulong)(pixelCount * sizeof(uint)), MTLResourceOptions.ResourceStorageModeShared);
+```
+
+**Diagnosis:** crash report shows `objc_release` → `AutoreleasePoolPage::releaseUntil` → `__CFRunLoopPerCalloutARPEnd` on thread 0. No managed exception — pure native SIGSEGV. The CLI never hits this because it has no CFRunLoop / autorelease pool drain cycle.
+
+### Software Render + Status — must defer StatusChanged updates
+
+Calling `Status()` (which sets `TextBlock.Text` on the status bar) from inside `Render(DrawingContext)` triggers `InvalidateVisual()` on the TextBlock, which Avalonia rejects with `InvalidOperationException: Visual was invalidated during the render pass`. Fix: always `Dispatcher.UIThread.Post()` from `Status()`:
+
+```csharp
+private void Status(string text) =>
+    Dispatcher.UIThread.Post(() => StatusChanged?.Invoke(text));
+```
+
+### Software Render + base.Render — skip on macOS
+
+In Software compositor mode, `base.Render(context)` routes through `OpenGlControlBase.Render()` which may touch dead GL compositor state. Skip it on macOS:
+
+```csharp
+if (!_softwareMode)
+{
+    if (!OperatingSystem.IsMacOS())
+        base.Render(context);
+    return;
+}
+```
+
+---
+
+## Audio-reactive CLI rendering (`metal-audio-reactive`)
+
+Renders a fractal animation video with audio feature extraction driving fractal/camera/lighting parameters.
+
+```
+dotnet run --project src/Parsec.Cli/Parsec.Cli.csproj -c Release -- metal-audio-reactive "path.wav" 5.0 5.0
+```
+
+**Pipeline:** WAV → `WaveAudioAnalyzer` → `AudioFeatureTrack` → per-frame `Sample(t)` → modulate params → Metal compute → PNG frames → ffmpeg mux with audio → MP4.
+
+**Audio features available** (from `AudioFeatureFrame`): `Rms`, `Peak`, `BassEnergy`, `MidEnergy`, `TrebleEnergy`, `SpectrumCentroidHz`, `OnsetStrength`.
+
+**Key technique — normalize to track range:** Raw RMS/energy values are tiny for quiet music (Chopin ≈ 0.01–0.09). Pre-scan the render window to find per-feature maxima, then normalize each feature to [0,1] relative to its own peak. Apply `pow(x, 0.3)` to expand quiet dynamics.
+
+**Key technique — EMA smoothing:** Raw per-frame values cause jitter. Use exponential moving average (α ≈ 0.2) on each smoothed parameter to get organic motion.
+
+**Best organic fractals for audio-reactive work:**
+- **QuaternionJulia** — smooth blobby forms, no axis artifacts. `WSlice` (4D cross-section) and `c.y` are great modulation targets.
+- **Phoenix** — curling tendrils via `PMem` (memory strength). `PlaneOffset` sweeps the cut plane to reveal internals.
+- **Mandelbulb** — dramatic shape changes via `Power`, but has a polar axis artifact that becomes visible under power modulation.
+- **Biomorph** — multi-armed Pickover creatures via `Bailout B`.
+
+**Typical multi-band mapping pattern:**
+| Feature | Target | Effect |
+|---|---|---|
+| RMS (normalized) | headline shape param | shape morphs with overall loudness |
+| Bass | camera distance | camera breathes in/out |
+| Mids | palette frequency | color band density pulses |
+| Treble | palette phase / shape param | color rotation or shape shift |
+| Onset | light intensity | flash on transients |
+| Centroid | light azimuth orbit speed | light sweeps faster when sound is brighter |

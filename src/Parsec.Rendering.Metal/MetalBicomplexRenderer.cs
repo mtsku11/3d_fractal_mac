@@ -40,7 +40,7 @@ public sealed class MetalBicomplexRenderer : IDisposable
             using var fb = UploadStruct(_device, BuildFoldParams(bp));
             using var rb = UploadStruct(_device, BuildRenderParams(camera, width, height, lightDirection, background, surface, settings, palette, jitter));
             using var ob = _device.NewBuffer((ulong)(width * height * sizeof(uint)), MTLResourceOptions.ResourceStorageModeShared);
-            using var cmd = _queue.CommandBuffer(); using var enc = cmd.ComputeCommandEncoder();
+            var cmd = _queue.CommandBuffer(); var enc = cmd.ComputeCommandEncoder();
             enc.SetComputePipelineState(_pso!); enc.SetBuffer(fb,0,0); enc.SetBuffer(rb,0,1); enc.SetBuffer(ob,0,2);
             enc.DispatchThreadgroups(new MTLSize{width=(ulong)((width+7)/8),height=(ulong)((height+7)/8),depth=1}, new MTLSize{width=8,height=8,depth=1});
             enc.EndEncoding();

@@ -44,13 +44,10 @@ internal static class Program
             })
             .With(new AvaloniaNativePlatformOptions
             {
-                // Avalonia 11.2.0 + macOS 15 (Sequoia): both the OpenGL compositor
-                // (GLDPipelineProgramRec crash) and the Metal compositor
-                // (gr_backendrendertarget_new_metal null drawable) are broken at the
-                // Skia layer. Software compositing is the only stable mode.
-                // This only affects the UI chrome (buttons, sliders, panels).
-                // FractalView : OpenGlControlBase has its own independent GPU context
-                // and is completely unaffected — fractals still render on GPU.
+                // Avalonia 11.2.0 + macOS 15: the native GL and Metal compositors
+                // can crash in Skia before managed code can recover. Keep the UI in
+                // software mode; FractalView presents Metal compute output through
+                // its WriteableBitmap fallback when OpenGlControlBase has no context.
                 RenderingMode = new[] { AvaloniaNativeRenderingMode.Software }
             })
             .WithInterFont()

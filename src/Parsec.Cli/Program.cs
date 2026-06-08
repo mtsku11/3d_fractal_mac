@@ -915,6 +915,190 @@ public static class Program
             catch (Exception ex) { Console.Error.WriteLine($"metal-deepzoom-mp4 FAILED: {ex.Message}\n{ex.StackTrace}"); return 1; }
         }
 
+        if (args[0] is "metal-audio-reactive")
+        {
+            if (!OperatingSystem.IsMacOS()) { Console.Error.WriteLine("metal-audio-reactive requires macOS."); return 1; }
+            try
+            {
+                string wavPath = args.Length > 1 ? args[1] : Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "..", "Chopin - Nocturne op.9 No.2 - andrea romano (128k).wav");
+                if (!File.Exists(wavPath)) { Console.Error.WriteLine($"WAV not found: {wavPath}"); return 1; }
+                double startSec = args.Length > 2 ? double.Parse(args[2]) : 0.0;
+                double durationSec = args.Length > 3 ? double.Parse(args[3]) : 5.0;
+                string outMp4 = args.Length > 4 ? args[4] : ResolveOutputPath("audio-reactive.mp4");
+
+                int fps = 30, w = 640, h = 480;
+                int totalFrames = (int)(durationSec * fps);
+
+                Console.WriteLine($"Audio-reactive render: {totalFrames} frames at {w}x{h}, audio={Path.GetFileName(wavPath)}");
+
+                // 1. Analyze audio
+                Console.Write("  Analyzing audio... ");
+                var analyzer = new Parsec.Audio.WaveAudioAnalyzer();
+                var track = analyzer.AnalyzeAsync(new Uri("file://" + Path.GetFullPath(wavPath)), null, CancellationToken.None).GetAwaiter().GetResult();
+                Console.WriteLine($"{track.Frames.Count} feature frames");
+
+                // 2. Set up renderer — Phoenix with multi-band audio modulation
+                //    Curling tendrils via PMem; cut plane reveals internals
+                var renderer = new MetalPhoenixRenderer();
+                if (!renderer.IsAvailable) { Console.Error.WriteLine("Metal backend not available."); return 1; }
+
+                var bg = new Color(0.02f, 0.02f, 0.05f);
+                var surface = Color.Rgb(220, 185, 140);
+
+                // Pre-scan audio for normalization
+                double maxRms = 0, maxBass = 0, maxMid = 0, maxTreble = 0, maxOnset = 0, maxCentroid = 0;
+                for (int i = 0; i < totalFrames; i++)
+                {
+                    var f = track.Sample(TimeSpan.FromSeconds(startSec + (double)i / fps));
+                    maxRms = Math.Max(maxRms, f.Rms);
+                    maxBass = Math.Max(maxBass, f.BassEnergy);
+                    maxMid = Math.Max(maxMid, f.MidEnergy);
+                    maxTreble = Math.Max(maxTreble, f.TrebleEnergy);
+                    maxOnset = Math.Max(maxOnset, f.OnsetStrength);
+                    maxCentroid = Math.Max(maxCentroid, f.SpectrumCentroidHz);
+                }
+                float Norm(double val, double peak) => peak > 0 ? (float)Math.Min(val / peak, 1.0) : 0f;
+
+                // EMA smoothing state
+                float smoothPMem = -0.5f, smoothCx = 0.4f, smoothPlaneOff = 0f;
+                float smoothDist = 3.5f, smoothFreq = 1.5f, smoothPhaseShift = 0f;
+                float smoothIntensity = 1f;
+                const float ema = 0.2f;
+
+                // 3. Render frames with multi-band audio modulation
+                var frameDir = Path.Combine(Path.GetTempPath(), $"parsec-audio-{Guid.NewGuid():N}");
+                Directory.CreateDirectory(frameDir);
+                var sw = System.Diagnostics.Stopwatch.StartNew();
+
+                for (int i = 0; i < totalFrames; i++)
+                {
+                    double t = startSec + (double)i / fps;
+                    var frame = track.Sample(TimeSpan.FromSeconds(t));
+                    float progress = (float)i / totalFrames;
+
+                    float nRms     = Norm(frame.Rms, maxRms);
+                    float nBass    = Norm(frame.BassEnergy, maxBass);
+                    float nMid     = Norm(frame.MidEnergy, maxMid);
+                    float nTreble  = Norm(frame.TrebleEnergy, maxTreble);
+                    float nOnset   = Norm(frame.OnsetStrength, maxOnset);
+                    float nCentroid= Norm(frame.SpectrumCentroidHz, maxCentroid);
+
+                    float rmsExp = MathF.Pow(nRms, 0.3f);
+
+                    // RMS → PMem: tendrils curl/uncurl (-0.8 deep curl → -0.1 smooth)
+                    float targetPMem = -0.8f + rmsExp * 0.7f;
+                    smoothPMem += ema * (targetPMem - smoothPMem);
+
+                    // Treble → c.x: creature shape shifts (0.2 → 0.6)
+                    float targetCx = 0.2f + MathF.Pow(nTreble, 0.4f) * 0.4f;
+                    smoothCx += ema * (targetCx - smoothCx);
+
+                    // Bass → PlaneOffset: sweep cut plane to reveal internals (-0.4 → 0.4)
+                    float targetPlane = (MathF.Pow(nBass, 0.4f) - 0.5f) * 0.8f;
+                    smoothPlaneOff += ema * (targetPlane - smoothPlaneOff);
+
+                    // Bass → camera distance: breathe (2.8 → 4.2)
+                    float targetDist = 4.2f - MathF.Pow(nBass, 0.5f) * 1.4f;
+                    smoothDist += ema * (targetDist - smoothDist);
+
+                    // Mid → palette frequency (0.8 → 3.0)
+                    float targetFreq = 0.8f + MathF.Pow(nMid, 0.4f) * 2.2f;
+                    smoothFreq += ema * (targetFreq - smoothFreq);
+
+                    // Mid → palette phase shift (0 → 0.4)
+                    float targetPhase = MathF.Pow(nMid, 0.5f) * 0.4f;
+                    smoothPhaseShift += ema * (targetPhase - smoothPhaseShift);
+
+                    // Onset → light intensity: flash (1.0 → 2.2)
+                    float targetIntensity = 1.0f + MathF.Pow(nOnset, 0.5f) * 1.2f;
+                    smoothIntensity += ema * (targetIntensity - smoothIntensity);
+
+                    // Centroid → light azimuth orbit
+                    float azSpeed = 0.3f + nCentroid * 0.7f;
+                    float azimuth = progress * MathF.Tau * 2.0f * azSpeed;
+
+                    // Camera orbit — wider for Phoenix's extended tendrils
+                    float camAngle = progress * MathF.Tau * 0.5f;
+                    float camY = 1.0f + MathF.Sin(progress * MathF.PI) * 0.8f;
+                    var camPos = new Vector3(
+                        MathF.Cos(camAngle) * smoothDist,
+                        camY,
+                        MathF.Sin(camAngle) * smoothDist);
+                    var cam = new Camera3D(camPos, Vector3.Zero, Vector3.UnitY,
+                        MathF.PI / 4.0f, (float)w / h);
+
+                    float lightEl = 40f * (MathF.PI / 180f);
+                    float lightC = MathF.Cos(lightEl);
+                    var light = Vector3.Normalize(new Vector3(
+                        lightC * MathF.Cos(azimuth), MathF.Sin(lightEl), lightC * MathF.Sin(azimuth)));
+
+                    var settings = new RaymarchSettings(
+                        MaxSteps: 350, HitEpsilon: 5e-4f, MaxDistance: 20f, NormalEpsilon: 5e-4f,
+                        EnableSoftShadows: true, ShadowSteps: 80, ShadowSoftness: 14f,
+                        EnableAmbientOcclusion: true, AOSamples: 6, AOStepDistance: 0.04f, AOIntensity: 1.1f,
+                        HeroSamples: 1, EnableReflections: false, ReflectionBounces: 0,
+                        Gloss: 0f, F0: 0f, LightIntensity: smoothIntensity);
+
+                    var palette = new PaletteParams
+                    {
+                        Base = new Vector3(0.5f, 0.4f, 0.35f),
+                        Amp = new Vector3(0.5f, 0.45f, 0.4f),
+                        Frequency = smoothFreq,
+                        Phase = new Vector3(
+                            0.0f  + smoothPhaseShift,
+                            0.15f + smoothPhaseShift,
+                            0.40f + smoothPhaseShift),
+                        TrapScale = 0.7f,
+                        TrapMix = new Vector3(0.6f, 0.5f, 0.2f),
+                        ShellMix = 0.45f,
+                    };
+
+                    var fractal = new PhoenixParams
+                    {
+                        Iterations = 16,
+                        C = new Vector3(smoothCx, 0.0f, 0.0f),
+                        PMem = smoothPMem,
+                        Bailout = 4.0f,
+                        Cut = true,
+                        PlaneNormal = new Vector3(0.3f, 0.5f, 0.8f),
+                        PlaneOffset = smoothPlaneOff,
+                        Fudge = 0.85f,
+                        BoundRadius = 4.0f,
+                    };
+
+                    uint[] pixels = renderer.RenderPhoenix(fractal, cam, w, h, settings, bg, surface, light, palette);
+
+                    var info = new SKImageInfo(w, h, SKColorType.Rgba8888, SKAlphaType.Premul);
+                    var bmp = new SKBitmap(info);
+                    var bytes = new byte[pixels.Length * 4];
+                    Buffer.BlockCopy(pixels, 0, bytes, 0, bytes.Length);
+                    Marshal.Copy(bytes, 0, bmp.GetPixels(), bytes.Length);
+                    ImageOutput.SavePng(bmp, Path.Combine(frameDir, $"frame_{i:D4}.png"));
+
+                    Console.Write($"\r  frame {i + 1}/{totalFrames} mem={smoothPMem:F2} cx={smoothCx:F2} cut={smoothPlaneOff:F2} light={smoothIntensity:F1} — {renderer.LastComputeMs}ms   ");
+                }
+                sw.Stop();
+                Console.WriteLine($"\nRendered {totalFrames} frames in {sw.ElapsedMilliseconds}ms ({sw.ElapsedMilliseconds / totalFrames}ms avg)");
+
+                // 4. Stitch with ffmpeg including audio
+                Directory.CreateDirectory(Path.GetDirectoryName(outMp4)!);
+                string ffArgs = $"-y -framerate {fps} -i \"{Path.Combine(frameDir, "frame_%04d.png")}\" " +
+                    $"-ss {startSec} -t {durationSec} -i \"{Path.GetFullPath(wavPath)}\" " +
+                    $"-c:v libx264 -crf 18 -preset fast -pix_fmt yuv420p -c:a aac -shortest \"{outMp4}\"";
+                var proc = System.Diagnostics.Process.Start(
+                    new System.Diagnostics.ProcessStartInfo("ffmpeg", ffArgs)
+                    { RedirectStandardError = true, UseShellExecute = false })!;
+                proc.WaitForExit();
+                Directory.Delete(frameDir, recursive: true);
+
+                if (proc.ExitCode != 0) { Console.Error.WriteLine("ffmpeg failed."); return 1; }
+                var fi = new FileInfo(outMp4);
+                Console.WriteLine($"  -> {outMp4}  ({fi.Length / 1024} KB)");
+                return 0;
+            }
+            catch (Exception ex) { Console.Error.WriteLine($"metal-audio-reactive FAILED: {ex.Message}\n{ex.StackTrace}"); return 1; }
+        }
+
         if (args[0] is "gpu-render")
         {
             if (args.Length < 2)

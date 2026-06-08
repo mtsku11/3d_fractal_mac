@@ -72,15 +72,15 @@ Milestones 1–10 are complete. All 20 fp32 3D fractals and the 2D deep-zoom pip
 - **M11:** Packaging and notarization.
 
 **Audio-reactive feature (new — not in upstream):**
-The upstream `zoomacroom-games/Parsec` has no audio features. This is entirely new work. Development started in the `fractal_audio` fork at `~/projects/fractal_audio`. The Mac rewrite has none of it yet.
-- **Audio Phase 1–2 (done in fractal_audio, not yet here):** `Parsec.Audio` project (transport, WAV decode, offline RMS/FFT analysis, AudioFeatureFrame/Track), `AudioTransportPanel`, MainWindow wiring.
-- **Audio Phase 3–5 (not started anywhere):** audio-reactive modulation (feature → param mapping), mapping UI, timeline/export integration.
+The upstream `zoomacroom-games/Parsec` has no audio features. This is entirely new work. Development started in the `fractal_audio` fork at `~/projects/fractal_audio`.
+- **Audio Phase 1–2 (done):** `Parsec.Audio` project ported here (transport, WAV decode, offline RMS/FFT analysis, AudioFeatureFrame/Track), `AudioTransportPanel`, MainWindow wiring. OpenAL playback re-enabled on macOS via Homebrew openal-soft `OverridePath`.
+- **Audio Phase 3–5 (CLI prototype done):** `metal-audio-reactive` CLI command renders audio-reactive fractal animations. Multi-band feature extraction (RMS, bass, mid, treble, onset, centroid) drives fractal shape, camera, lighting, and palette parameters with EMA smoothing and track-normalized dynamics. Tested with Phoenix, QuaternionJulia, and Mandelbulb. In-app mapping UI and timeline/export integration are not yet built.
 
 See `skills.md` for Metal porting recipes and gotchas. See `docs/macos-3d-only-build-plan.md` for the full breakdown of both tracks.
 
 ## Deferred
 
-- audio-reactive feature (Audio Phases 1–5 — see plan doc for detail)
+- audio-reactive in-app UI (mapping panel, timeline/export integration)
 - polished packaging, notarization, and installer work (M11)
 - synth/audio-generation features
 
@@ -97,7 +97,7 @@ Do not expand audio work until explicitly requested.
 
 ## Do Not Do Yet
 
-- Do not resume audio-reactive feature work until explicitly requested.
+- Do not build the in-app audio-reactive mapping UI until explicitly requested.
 - Do not build a synth engine.
 - Do not refactor renderer internals broadly.
 - Do not change Windows/Linux OpenGL behavior unless the change is required by a narrow backend seam and can be validated.

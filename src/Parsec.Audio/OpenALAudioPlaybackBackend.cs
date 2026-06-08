@@ -4,20 +4,30 @@ namespace Parsec.Audio;
 
 public sealed class OpenALAudioPlaybackBackend : IAudioPlaybackBackend
 {
+    private static bool _overrideInstalled;
+
     public OpenALAudioPlaybackBackend()
     {
-        // macOS 15 (Sequoia) broke the system OpenAL framework — ALC.OpenDevice
-        // generates a native SIGSEGV that cannot be caught by managed code.
-        // If openal-soft (which works) is not present, declare unavailable rather
-        // than crash the process.
-        if (OperatingSystem.IsMacOS() && Environment.OSVersion.Version.Major >= 15)
+        // macOS 15 (Sequoia) broke the system OpenAL framework — alcOpenDevice(NULL)
+        // causes a native SIGSEGV. Redirect OpenTK to openal-soft via its built-in
+        // OverridePath before any AL/ALC type is touched.
+        if (OperatingSystem.IsMacOS() && Environment.OSVersion.Version.Major >= 15
+            && !_overrideInstalled)
         {
+            var cellarVersions = Directory.Exists("/opt/homebrew/Cellar/openal-soft")
+                ? Directory.GetDirectories("/opt/homebrew/Cellar/openal-soft")
+                    .Select(v => Path.Combine(v, "lib", "libopenal.dylib"))
+                : [];
             string[] softPaths =
             [
-                "/opt/homebrew/lib/libopenal.dylib",   // Apple Silicon Homebrew
-                "/usr/local/lib/libopenal.dylib",       // Intel Homebrew
+                ..cellarVersions,
+                "/opt/homebrew/lib/libopenal.dylib",
+                "/usr/local/Cellar/openal-soft/1.25.2/lib/libopenal.dylib",
+                "/usr/local/lib/libopenal.dylib",
             ];
-            if (!softPaths.Any(File.Exists))
+            string? softPath = softPaths.FirstOrDefault(File.Exists);
+
+            if (softPath == null)
             {
                 IsAvailable = false;
                 UnavailableReason =
@@ -25,8 +35,9 @@ public sealed class OpenALAudioPlaybackBackend : IAudioPlaybackBackend
                     "Install openal-soft for playback: brew install openal-soft";
                 return;
             }
-            // openal-soft is present; fall through to the normal probe below,
-            // which will pick it up via DYLD_LIBRARY_PATH or direct load.
+
+            OpenALLibraryNameContainer.OverridePath = softPath;
+            _overrideInstalled = true;
         }
 
         try

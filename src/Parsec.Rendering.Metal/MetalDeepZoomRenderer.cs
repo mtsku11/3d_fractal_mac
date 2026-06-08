@@ -175,8 +175,8 @@ public sealed class MetalDeepZoomRenderer : IDisposable
         using var paramBuf = UploadStruct(_device, p);
 
         // Dispatch.
-        using var cmd = _queue.CommandBuffer();
-        using var enc = cmd.ComputeCommandEncoder();
+        var cmd = _queue.CommandBuffer();
+        var enc = cmd.ComputeCommandEncoder();
         enc.SetComputePipelineState(_pso);
         enc.SetBuffer(paramBuf, 0, 0);
         enc.SetBuffer(refBuf,   0, 1);

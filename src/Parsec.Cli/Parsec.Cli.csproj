@@ -15,6 +15,7 @@
     <ProjectReference Include="..\Parsec.Rendering\Parsec.Rendering.csproj" />
     <ProjectReference Include="..\Parsec.Rendering.Gpu\Parsec.Rendering.Gpu.csproj" />
     <ProjectReference Include="..\Parsec.Rendering.Metal\Parsec.Rendering.Metal.csproj" />
+    <ProjectReference Include="..\Parsec.Audio\Parsec.Audio.csproj" />
   </ItemGroup>
 
 </Project>

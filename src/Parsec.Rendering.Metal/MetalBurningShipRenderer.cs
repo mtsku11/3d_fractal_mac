@@ -52,8 +52,8 @@ public sealed class MetalBurningShipRenderer : IDisposable
             var renderBuf = UploadStruct(_device, BuildRenderParams(camera, width, height, lightDirection, background, surface, settings, palette, jitter));
             var outBuf    = _device.NewBuffer((ulong)(width * height * sizeof(uint)), MTLResourceOptions.ResourceStorageModeShared);
 
-            using var cmd = _queue.CommandBuffer();
-            using var enc = cmd.ComputeCommandEncoder();
+            var cmd = _queue.CommandBuffer();
+            var enc = cmd.ComputeCommandEncoder();
             enc.SetComputePipelineState(_pso!);
             enc.SetBuffer(foldBuf, 0, 0); enc.SetBuffer(renderBuf, 0, 1); enc.SetBuffer(outBuf, 0, 2);
             enc.DispatchThreadgroups(new MTLSize { width = (ulong)((width+7)/8), height = (ulong)((height+7)/8), depth = 1 },
