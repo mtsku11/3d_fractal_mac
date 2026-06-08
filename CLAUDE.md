@@ -66,25 +66,27 @@ The macOS-native 3D-only build is underway. Milestones 1–7 are complete:
 
 Milestones 1–8 are complete. All 20 fp32 3D fractals render via Metal on macOS with full hero-still SSAA support.
 
-**Outstanding parity gaps (M9 onward):**
+**Remaining macOS parity work:**
 - **M9:** `Parsec.App` missing from `Parsec.sln` — `dotnet build Parsec.sln` skips the desktop app.
-- **M10:** `Parsec.Audio` project entirely absent from Mac rewrite (no directory, not in solution). Original has AudioTransportController, WaveAudioAnalyzer, WavePcmDecoder, AudioFeatureFrame/Track, OpenAL backends (9 files total).
-- **M11:** Audio transport UI missing: `AudioTransportPanel.cs`, `MainWindow.axaml` `AudioHost` control, `MainWindow.axaml.cs` init + `OnWindowClosed` disposal.
-- **M12–M14:** Audio-reactive modulation, mapping UI, export integration (not started in either repo).
-- **M15:** Deep zoom on macOS — at minimum show a "not available" message; full parity needs floatexp MSL.
-- **M16:** Packaging and notarization.
+- **M10:** Deep zoom on macOS — at minimum disable the selector with a clear message; full parity needs floatexp MSL.
+- **M11:** Packaging and notarization.
 
-See `skills.md` for Metal porting recipes and gotchas. See `docs/macos-3d-only-build-plan.md` for the full milestone breakdown.
+**Audio-reactive feature (new — not in upstream):**
+The upstream `zoomacroom-games/Parsec` has no audio features. This is entirely new work. Development started in the `fractal_audio` fork at `~/projects/fractal_audio`. The Mac rewrite has none of it yet.
+- **Audio Phase 1–2 (done in fractal_audio, not yet here):** `Parsec.Audio` project (transport, WAV decode, offline RMS/FFT analysis, AudioFeatureFrame/Track), `AudioTransportPanel`, MainWindow wiring.
+- **Audio Phase 3–5 (not started anywhere):** audio-reactive modulation (feature → param mapping), mapping UI, timeline/export integration.
+
+See `skills.md` for Metal porting recipes and gotchas. See `docs/macos-3d-only-build-plan.md` for the full breakdown of both tracks.
 
 ## Deferred
 
-- audio reactivity and audio-driven modulation (M12–M14)
-- deep-zoom parity on macOS (M15)
+- audio-reactive feature (Audio Phases 1–5 — see plan doc for detail)
+- deep-zoom parity on macOS (M10)
 - fp64 shader support or double-float deep-zoom redesign
-- polished packaging, notarization, and installer work (M16)
+- polished packaging, notarization, and installer work (M11)
 - synth/audio-generation features
 
-Existing audio branch code can remain, but do not expand it until explicitly requested.
+Do not expand audio work until explicitly requested.
 
 ## Technical Strategy
 

@@ -232,59 +232,7 @@ Files touched: `Parsec.sln` (add `Parsec.App` project entry).
 
 Acceptance criteria: `dotnet build Parsec.sln` compiles the full solution including the desktop app.
 
-### 10. Port Parsec.Audio project
-
-`Parsec.Audio` is entirely absent from the Mac rewrite. The original contains:
-
-- `AudioTransportController.cs` — backend-neutral playback facade
-- `IAudioPlaybackBackend.cs` / `IAudioPlaybackSession.cs` — OpenAL abstraction seam
-- `OpenALAudioPlaybackBackend.cs` / `OpenALAudioPlaybackSession.cs` — OpenAL + WAV decode backend
-- `UnavailableAudioPlaybackBackend.cs` — stub for platforms without audio
-- `WavePcmData.cs` / `WavePcmDecoder.cs` — managed WAV decode
-- `AudioFeatureFrame.cs` / `AudioFeatureTrack.cs` — feature data structures
-- `IAudioAnalyzer.cs` / `WaveAudioAnalyzer.cs` — offline RMS/FFT analysis
-- `AudioAnalysisOptions.cs`, `AudioPlaybackStatus.cs`, `AudioTransportState.cs`
-
-Files touched: new `src/Parsec.Audio/` directory and `Parsec.Audio.csproj`, `Parsec.sln`, `src/Parsec.App/Parsec.App.csproj` (add project reference).
-
-Acceptance criteria: `dotnet build` succeeds; `parsec audio-analyze /path/to/file.wav 500` headless CLI command works.
-
-### 11. Restore audio transport UI
-
-Three concrete things are missing from the Mac rewrite versus the original:
-
-1. `src/Parsec.App/AudioTransportPanel.cs` — the file/play/pause/seek control panel
-2. `src/Parsec.App/MainWindow.axaml` — missing `<ContentControl Name="AudioHost" Margin="0,12,0,0" />`
-3. `src/Parsec.App/MainWindow.axaml.cs` — missing `_audioHost` / `_audioTransport` fields, their init in the constructor, and `OnWindowClosed` async disposal
-
-Files touched: `AudioTransportPanel.cs` (new), `MainWindow.axaml`, `MainWindow.axaml.cs`.
-
-Acceptance criteria: app launches, audio host panel is visible, user can load and play a WAV file; existing fractal rendering is unaffected when audio is idle.
-
-### 12. Audio-reactive modulation (Phase 3 of original roadmap)
-
-Drive existing visual parameters from audio feature values (RMS, band energy). This phase is not started in either repo — it requires new files:
-
-- `src/Parsec.Audio/ModulationMapping.cs` — feature → parameter descriptor target + depth
-- `src/Parsec.Audio/AudioReactiveController.cs` — per-frame sampling and application to live state
-
-Files touched: above new files, `FractalView.cs` (apply modulation before render), `MainWindow.axaml.cs` (connect controller to transport clock).
-
-Acceptance criteria: at least one feature (RMS) drives at least one parameter; modulation can be toggled; timeline playback still works when modulation is active.
-
-### 13. Audio mapping UI (Phase 4 of original roadmap)
-
-Expose a minimal mapping editor: feature source, parameter target, depth slider, enable toggle.
-
-Files touched: `MainWindow.axaml`, `MainWindow.axaml.cs`.
-
-### 14. Timeline + export integration (Phase 5 of original roadmap)
-
-Exported frames must use deterministic feature sampling at the same timestamps as live playback. Generated ffmpeg mux instructions must account for audio attachment.
-
-Files touched: `AudioFeatureTrack.cs`, `AudioReactiveController.cs`, `MainWindow.axaml.cs`, `FractalView.cs`.
-
-### 15. Deep zoom on macOS
+### 10. Deep zoom on macOS
 
 `DeepZoomPipeline` requires OpenGL 4.3 compute shaders and fp64 paths — neither is available on macOS. The `_deepPipeline` field is null on macOS; selecting `FractalType.DeepZoom` produces no output.
 
@@ -295,7 +243,7 @@ Options (in ascending cost):
 
 Acceptance criteria (option A, minimum viable): macOS users get a clear message instead of a black frame when Deep Zoom is selected.
 
-### 16. Package and notarize
+### 11. Package and notarize
 
 Goal: macOS distribution polish after renderer functionality exists.
 
@@ -303,15 +251,84 @@ Expected files touched: packaging scripts, entitlements/signing/notarization fil
 
 Acceptance criteria: deferred until the app has a useful macOS 3D render path.
 
+---
+
+## Audio-Reactive Feature
+
+**Context:** The upstream `zoomacroom-games/Parsec` has no audio features. This is an entirely new capability being added to this project. Development started in a separate `fractal_audio` branch/fork. The work below describes porting what's already done there into this repo, then completing the phases that haven't been started anywhere yet.
+
+### Source of truth for existing audio work
+
+All audio code written so far lives in `~/projects/fractal_audio`. That repo is a fork of the upstream original with a `Parsec.Audio` project and UI wiring added. **The `3d_fractal_mac` repo has none of this yet.**
+
+### Audio Phase 1 — Port existing transport + UI (done in fractal_audio, not yet here)
+
+The following are complete in `fractal_audio` and need to be brought into this repo:
+
+**New project `src/Parsec.Audio/`:**
+- `AudioTransportController.cs` — backend-neutral play/pause/seek facade
+- `IAudioPlaybackBackend.cs` / `IAudioPlaybackSession.cs` — abstraction seam
+- `OpenALAudioPlaybackBackend.cs` / `OpenALAudioPlaybackSession.cs` — OpenAL + WAV decode backend
+- `UnavailableAudioPlaybackBackend.cs` — stub for platforms without audio
+- `WavePcmData.cs` / `WavePcmDecoder.cs` — managed WAV decode
+- `AudioPlaybackStatus.cs`, `AudioTransportState.cs`
+
+**UI wiring in this repo:**
+- `src/Parsec.App/AudioTransportPanel.cs` (new) — file/play/pause/seek control panel
+- `src/Parsec.App/MainWindow.axaml` — add `<ContentControl Name="AudioHost" Margin="0,12,0,0" />`
+- `src/Parsec.App/MainWindow.axaml.cs` — add `_audioHost`/`_audioTransport` fields, init, `OnWindowClosed` disposal
+- `Parsec.sln` and `Parsec.App.csproj` — add `Parsec.Audio` project reference
+
+Acceptance criteria: app launches, audio panel is visible, user can load and play a WAV file, fractal rendering is unaffected when audio is idle.
+
+### Audio Phase 2 — Port existing offline analysis (done in fractal_audio, not yet here)
+
+Also complete in `fractal_audio`, needs porting:
+
+- `src/Parsec.Audio/IAudioAnalyzer.cs`
+- `src/Parsec.Audio/AudioFeatureFrame.cs` — per-frame RMS, band energies, onset, spectral centroid
+- `src/Parsec.Audio/AudioFeatureTrack.cs` — full-track feature data with `SampleAt(t)` interpolation
+- `src/Parsec.Audio/WaveAudioAnalyzer.cs` — offline RMS/FFT analysis (WAV-only)
+- `src/Parsec.Audio/AudioAnalysisOptions.cs`
+
+CLI validation path (already in this repo's `Parsec.Cli`): `parsec audio-analyze /path/to/file.wav 500`.
+
+Acceptance criteria: full-track analysis runs for a WAV file; feature values can be sampled at arbitrary timestamps off the render path.
+
+### Audio Phase 3 — Audio-reactive modulation (not started anywhere)
+
+Drive existing visual parameters from audio feature values. Requires new files:
+
+- `src/Parsec.Audio/ModulationMapping.cs` — feature source → `ParamDescriptor` target + depth + smoothing
+- `src/Parsec.Audio/AudioReactiveController.cs` — per-frame sampling and application to live fractal state
+
+Files also touched: `FractalView.cs` (apply modulation before each render), `MainWindow.axaml.cs` (wire controller to transport clock).
+
+Acceptance criteria: at least RMS drives at least one parameter; modulation can be toggled on/off; timeline playback still works with modulation active.
+
+### Audio Phase 4 — Mapping UI (not started anywhere)
+
+Expose a minimal mapping editor: feature source, parameter target, depth slider, enable toggle.
+
+Files touched: `MainWindow.axaml`, `MainWindow.axaml.cs`.
+
+### Audio Phase 5 — Timeline + export integration (not started anywhere)
+
+Exported animation frames must use deterministic feature sampling at the same timestamps as live playback. ffmpeg mux instructions must account for audio attachment.
+
+Files touched: `AudioFeatureTrack.cs`, `AudioReactiveController.cs`, `MainWindow.axaml.cs`, `FractalView.cs`.
+
+---
+
 ## Explicit Non-Goals For First Milestone
 
-- audio-reactive visuals (now tracked as M12–M14)
+- audio-reactive visuals (tracked above as Audio Phases 1–5)
 - synthesizer or visual-to-sound work
-- 2D deep zoom on Metal (tracked as M15)
+- 2D deep zoom on Metal (tracked as M10)
 - fp64 shader parity
 - all 3D shader ports (now done — M7)
 - native Metal presentation before offscreen display is measured
-- installer, notarization, or release packaging (tracked as M16)
+- installer, notarization, or release packaging (tracked as M11)
 
 ## Major Risks And Unknowns
 

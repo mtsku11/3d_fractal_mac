@@ -79,14 +79,20 @@ Milestone 8 (in-app SSAA) complete: `MetalSsaa.cs` added with Halton(2,3) accumu
 ComboBox. CPU accumulation on unified memory is free — N round-trips cost <1 ms extra. CLI morph path
 in `MetalMandelbulbRenderer` preserved via explicit-jitter bypass.
 
-Pending milestones (in order):
+Remaining macOS parity milestones:
 
 - **M9:** Add `Parsec.App` to `Parsec.sln` so `dotnet build Parsec.sln` builds the desktop app.
-- **M10:** Port `Parsec.Audio` project — all 7 source files absent from Mac rewrite; original has OpenAL transport, WAV decode, offline RMS/FFT analysis.
-- **M11:** Restore audio transport UI (`AudioTransportPanel.cs`, `MainWindow.axaml` host slot, `MainWindow.axaml.cs` wiring + disposal).
-- **M12–M14:** Audio-reactive modulation, mapping UI, and export integration (Phases 3–5 of original audio roadmap — not started in either repo).
-- **M15:** Deep zoom on macOS — at minimum disable the selector with a clear message; full parity requires floatexp MSL.
-- **M16:** Package and notarize.
+- **M10:** Deep zoom on macOS — at minimum disable the selector with a clear message; full parity requires floatexp MSL.
+- **M11:** Package and notarize.
+
+Audio-reactive feature (new work, not in upstream `zoomacroom-games/Parsec`):
+
+- **Audio Phase 1–2:** Port `Parsec.Audio` project + UI wiring from `~/projects/fractal_audio` into this repo. Covers WAV playback, offline RMS/FFT analysis, `AudioTransportPanel`, `MainWindow` wiring.
+- **Audio Phase 3:** Audio-reactive modulation — map feature values (RMS, band energy) to existing fractal parameters. First phase not yet started anywhere.
+- **Audio Phase 4:** Mapping UI (feature source, target parameter, depth, enable toggle).
+- **Audio Phase 5:** Timeline + export integration — deterministic feature sampling at export timestamps, ffmpeg audio mux.
+
+Do not start any audio phase until explicitly requested. See `docs/macos-3d-only-build-plan.md` for full detail.
 
 Non-goals (still deferred indefinitely):
 
