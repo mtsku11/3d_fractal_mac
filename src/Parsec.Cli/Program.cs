@@ -2,6 +2,7 @@ using System.Numerics;
 using System.Runtime.InteropServices;
 using Parsec.Cli.Examples;
 using Parsec.Rendering;
+using Parsec.Rendering.DeepZoom;
 using Parsec.Rendering.Gpu;
 using Parsec.Rendering.Metal;
 using Parsec.Rendering.Output;
@@ -818,6 +819,100 @@ public static class Program
                 return 0;
             }
             catch (Exception ex) { Console.Error.WriteLine($"metal-orbit-gif FAILED: {ex.Message}\n{ex.StackTrace}"); return 1; }
+        }
+
+        if (args[0] is "metal-deepzoom-mp4")
+        {
+            if (!OperatingSystem.IsMacOS()) { Console.Error.WriteLine("metal-deepzoom-mp4 requires macOS."); return 1; }
+            try
+            {
+                int    frames  = args.Length > 1 ? int.Parse(args[1])  : 90;
+                int    w       = args.Length > 2 ? int.Parse(args[2])  : 640;
+                int    h       = args.Length > 3 ? int.Parse(args[3])  : 360;
+                string outMp4  = args.Length > 4 ? args[4] : ResolveOutputPath("deepzoom.mp4");
+
+                // Seahorse Valley — validated deep-zoom landmark from ReferenceOrbit.cs comments.
+                // Zoom from full Mandelbrot view (radius 1.5) to ~1e-8 (8 orders of magnitude).
+                string centerRe = "-0.743643887037158704752191506114774";
+                string centerIm =  "0.131825904205311970493132056385139";
+                double startRadius = 1.5;
+                double endRadius   = 1e-8;
+
+                Console.WriteLine($"Metal deep-zoom MP4 — {frames} frames at {w}x{h}");
+                Console.WriteLine($"  Target: Seahorse Valley  radius {startRadius} → {endRadius:e1}");
+
+                using var renderer = new MetalDeepZoomRenderer();
+                if (!renderer.IsAvailable) { Console.Error.WriteLine("Metal deep-zoom backend not available."); return 1; }
+
+                // Rainbow cosine palette — saturated bands suit the 2D escape-time colouring well.
+                var palette = new PaletteParams
+                {
+                    Base      = new Vector3(0.5f, 0.5f, 0.5f),
+                    Amp       = new Vector3(0.5f, 0.5f, 0.5f),
+                    Frequency = 1.0f,
+                    Phase     = new Vector3(0.0f, 0.33f, 0.67f),
+                    TrapScale = 1.0f,
+                    ShellMix  = 0f,
+                };
+                var bg       = new Color(0.01f, 0.01f, 0.03f);
+                var settings = new Parsec.Rendering.Raymarching.RaymarchSettings(
+                    MaxSteps: 0, HitEpsilon: 0, MaxDistance: 0, NormalEpsilon: 0,
+                    EnableSoftShadows: false, ShadowSteps: 0, ShadowSoftness: 0,
+                    EnableAmbientOcclusion: false, AOSamples: 0, AOStepDistance: 0, AOIntensity: 0,
+                    HeroSamples: 1,   // preview quality; bump to 4 for hero
+                    EnableReflections: false, ReflectionBounces: 0, Gloss: 0, F0: 0, LightIntensity: 0);
+
+                // Build the view: center is fixed at the Seahorse Valley; radius decreases each frame.
+                double logStart = Math.Log(startRadius);
+                double logEnd   = Math.Log(endRadius);
+
+                var frameDir = Path.Combine(Path.GetTempPath(), $"parsec-deepzoom-{Guid.NewGuid():N}");
+                Directory.CreateDirectory(frameDir);
+
+                var sw = System.Diagnostics.Stopwatch.StartNew();
+                for (int i = 0; i < frames; i++)
+                {
+                    double t      = frames > 1 ? (double)i / (frames - 1) : 0.0;
+                    double radius = Math.Exp(logStart + t * (logEnd - logStart));
+
+                    var view = new Parsec.Rendering.DeepZoom.DeepZoomView
+                    {
+                        CenterRe = centerRe,
+                        CenterIm = centerIm,
+                        Radius   = radius,
+                        Formula  = 0,   // Mandelbrot
+                    };
+
+                    uint[] pixels = renderer.Render(view, w, h, palette, bg, settings);
+
+                    // Write PNG frame.
+                    var info  = new SKImageInfo(w, h, SKColorType.Rgba8888, SKAlphaType.Premul);
+                    var bmp   = new SKBitmap(info);
+                    var bytes = new byte[pixels.Length * 4];
+                    Buffer.BlockCopy(pixels, 0, bytes, 0, bytes.Length);
+                    Marshal.Copy(bytes, 0, bmp.GetPixels(), bytes.Length);
+                    ImageOutput.SavePng(bmp, Path.Combine(frameDir, $"frame_{i:D4}.png"));
+
+                    Console.Write($"\r  frame {i + 1}/{frames}  radius={radius:e2}  ref={renderer.LastComputeMs} ms compute   ");
+                }
+                sw.Stop();
+                Console.WriteLine($"\nRendered {frames} frames in {sw.ElapsedMilliseconds} ms ({sw.ElapsedMilliseconds / frames} ms avg)");
+
+                Directory.CreateDirectory(Path.GetDirectoryName(outMp4)!);
+                string ffArgs = $"-y -framerate 24 -i \"{Path.Combine(frameDir, "frame_%04d.png")}\" " +
+                    $"-c:v libx264 -crf 18 -preset slow -pix_fmt yuv420p \"{outMp4}\"";
+                var proc = System.Diagnostics.Process.Start(
+                    new System.Diagnostics.ProcessStartInfo("ffmpeg", ffArgs)
+                    { RedirectStandardError = true, UseShellExecute = false })!;
+                proc.WaitForExit();
+                Directory.Delete(frameDir, recursive: true);
+
+                if (proc.ExitCode != 0) { Console.Error.WriteLine("ffmpeg failed."); return 1; }
+                var fi = new FileInfo(outMp4);
+                Console.WriteLine($"  -> {outMp4}  ({fi.Length / 1024} KB)");
+                return 0;
+            }
+            catch (Exception ex) { Console.Error.WriteLine($"metal-deepzoom-mp4 FAILED: {ex.Message}\n{ex.StackTrace}"); return 1; }
         }
 
         if (args[0] is "gpu-render")
