@@ -66,13 +66,21 @@ Key macOS-specific constraints now handled in the codebase:
 
 Milestone 6 complete: all priority fp32 3D shaders ported to Metal. Mandelbox (5 ms), Mandelbulb (7 ms), RotBox (6 ms), KIFS (5 ms), Kleinian (23 ms — numerical-gradient DE), Hybrid (11 ms). All wired into `FractalView`; CLI smoke tests pass. See `skills.md` for porting recipe and per-fractal parameter notes.
 
+Milestone 7 (shader parity) complete: all remaining 14 fp32 3D fractals ported to Metal on macOS:
+BurningShip, Menger, QuaternionJulia, QJBox, Apollonian, Bicomplex, Phoenix, Biomorph, Mosely,
+PseudoKleinian4D, RiemannSphere, Mandalay, Anisotropic, OrbitHybrid. AmazingBox routes through
+the existing MetalMandelboxRenderer (Mode=1). All 20 fractals now render on macOS via Metal.
+CLI smoke test: `parsec metal-new-smoke` verifies all 14 new renderers.
+Key Metal gotcha discovered: global `const` variables at program scope (even scalars) cause silent
+shader compilation failure — use local constants or inline literals instead.
+
 Non-goals (still deferred):
 
 - audio-reactive feature expansion
 - synth engine
 - deep-zoom parity on macOS
-- full shader parity before the upload-path decision is made
 - `CAMetalLayer` presentation unless GL upload proves too slow
+- in-app 16× SSAA hero renders
 
 ## Context-Loading Order
 

@@ -17,7 +17,7 @@ Requires an **active** display on macOS — will fail with `activeDisplays=0` if
 ```
 dotnet run --project src/Parsec.Cli/Parsec.Cli.csproj -- <command>
 ```
-Commands: `metal-smoke [w] [h]`, `metal-bulb-smoke [w] [h]`, `gpu-smoke`, `gpu-render <name>`, `gpu-de-validate`, `attractor-stats`, `all`, `list`.
+Commands: `metal-smoke [w] [h]`, `metal-bulb-smoke [w] [h]`, `metal-new-smoke` (all 14 new renderers), `gpu-smoke`, `gpu-render <name>`, `gpu-de-validate`, `attractor-stats`, `metal-orbit-gif`, `metal-morph-mp4`, `all`, `list`.
 
 ---
 
@@ -68,6 +68,8 @@ Unified memory means `Buffer.MemoryCopy` from `MTLBuffer.Contents` to a managed 
 - Address spaces: `constant` for read-only params (`[[buffer(0)]]`), `device` for output buffer
 - Thread ID: `uint2 gid [[thread_position_in_grid]]`
 - **`atan(y, x)` in GLSL → `atan2(y, x)` in MSL.** MSL's `atan` is single-arg only. The two-arg overload silently compiles but gives wrong results. Use `atan2` everywhere you mean "azimuthal angle from x-axis."
+- **No global `const` variables — ever.** `const float X = 1.0f;` or `const float3 V = float3(...)` at program scope causes silent shader compilation failure: `NewLibrary` returns a library but `NewFunction` returns nil, and `NewComputePipelineState` then fatally asserts `computeFunction must not be nil`. Affects both scalar and vector types. Fix: move constants inside the function as local variables, or inline the literals directly.
+- **Compact single-line helper functions can cause MSL compiler failure.** When porting GLSL shaders, write the shading tail (`estimateNormal`, `softShadow`, `ambientOcclusion`, `struct Hit`, `traceRay`, `shadeDirect`) in fully expanded multi-line form — not as single-line one-liners. Compact bodies with `return 0;` (vs `return 0.0f;`), multi-member `struct Hit{float3 a,b,c;};` syntax, and chained assignments can prevent the kernel from being found at runtime.
 
 **Embed the `.metal` file as a resource, compile at runtime.**
 ```xml
@@ -96,7 +98,7 @@ float tanX = tanY * ((float)width / height);
 
 The Mandelbox MSL shader is the template. For each new fractal:
 
-1. Copy `mandelbox_raymarch.metal` → `<fractal>_raymarch.metal`. Replace only the DE section (the helper functions and `estimateFull`/`estimate`). Everything from `estimateNormal` down to the end of the kernel is identical across all fp32 3D fractals and should not be modified.
+1. Copy `mandelbox_raymarch.metal` → `<fractal>_raymarch.metal`. Replace only the DE section (the helper functions and `estimateFull`/`estimate`). Everything from `estimateNormal` down to the end of the kernel is identical across all fp32 3D fractals and should not be modified. Use the expanded multi-line style for this tail — compact one-liners can fail silently (see MSL gotchas above).
 2. Rename the kernel function: `kernel void <fractal>_raymarch(...)`.
 3. Update `FoldParams` comments to match the new fractal's parameter usage (the layout is identical for all fractals that reuse `FoldParamsGpu`).
 4. Create `Metal<Fractal>Renderer.cs` as a standalone class (not implementing `IThreeDimensionalRenderBackend` — that interface only declares `RenderMandelbox`). Copy `MetalMandelboxRenderer.cs`, rename, and change `BuildFoldParams` to pack the new fractal's params.
