@@ -45,6 +45,7 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
     private MetalMandalayRenderer?        _metalMandalayRenderer;
     private MetalAnisotropicRenderer?     _metalAnisotropicRenderer;
     private MetalOrbitHybridRenderer?     _metalOrbitHybridRenderer;
+    private MetalDeepZoomRenderer?        _metalDeepZoomRenderer;
     private long _metalComputeMs;
     private long _metalReadbackMs;
     private long _texUploadMs;
@@ -584,6 +585,7 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
                 _metalMandalayRenderer        = new MetalMandalayRenderer();
                 _metalAnisotropicRenderer     = new MetalAnisotropicRenderer();
                 _metalOrbitHybridRenderer     = new MetalOrbitHybridRenderer();
+                _metalDeepZoomRenderer        = new MetalDeepZoomRenderer();
             }
 
             _texture = _gl.GenTexture();
@@ -763,6 +765,8 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
             }
             uint[] pixels = ActiveType switch
             {
+                FractalType.DeepZoom when _metalDeepZoomRenderer?.IsAvailable == true =>
+                    RenderWithMetalDeepZoom(rw, rh),
                 FractalType.DeepZoom when _deepPipeline != null => _deepPipeline.Render(_deepView,
                     rw, rh, Palette.ToParams(),
                     new Color(0.02f, 0.03f, 0.07f), heroSamples: 1, tileRows: 64,
@@ -1100,6 +1104,7 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
         _metalMandalayRenderer?.Dispose();
         _metalAnisotropicRenderer?.Dispose();
         _metalOrbitHybridRenderer?.Dispose();
+        _metalDeepZoomRenderer?.Dispose();
         _texture = _vao = _blitProgram = 0;
         _boxRenderer = null;
         _metalRenderer = null;
@@ -1122,6 +1127,7 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
         _metalMandalayRenderer = null;
         _metalAnisotropicRenderer = null;
         _metalOrbitHybridRenderer = null;
+        _metalDeepZoomRenderer = null;
         _kifsRenderer = null;
         _kleinianRenderer = null;
         _attractorRenderer = null;
@@ -1296,6 +1302,17 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
         var pixels = _metalOrbitHybridRenderer!.RenderOrbitHybrid(OrbitHybrid.ToParams(), camera, width, height, PreviewSettings(), new Color(0.02f, 0.03f, 0.07f), Color.Rgb(195, 170, 135), Light.ToDirection(), Palette.ToParams());
         _metalComputeMs = _metalOrbitHybridRenderer!.LastComputeMs; _metalReadbackMs = _metalOrbitHybridRenderer!.LastReadbackMs; return pixels; }
 
+    private uint[] RenderWithMetalDeepZoom(int width, int height)
+    {
+        var pixels = _metalDeepZoomRenderer!.Render(
+            _deepView, width, height, Palette.ToParams(),
+            new Color(0.02f, 0.03f, 0.07f), PreviewSettings(),
+            interactive: _deepInteracting, interactiveIter: _deepPreviewIter);
+        _metalComputeMs  = _metalDeepZoomRenderer.LastComputeMs;
+        _metalReadbackMs = _metalDeepZoomRenderer.LastReadbackMs;
+        return pixels;
+    }
+
     private uint[] RenderWithMetalAmazingBox(Camera3D camera, int width, int height) {
         var pixels = _metalRenderer!.RenderMandelbox(Fractal.ToParams(), camera, width, height, PreviewSettings(), new Color(0.02f, 0.03f, 0.07f), Color.Rgb(150, 125, 100), Light.ToDirection(), Palette.ToParams());
         _metalComputeMs = _metalRenderer!.LastComputeMs; _metalReadbackMs = _metalRenderer!.LastReadbackMs; return pixels; }
@@ -1327,6 +1344,9 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
         var pal = Palette.ToParams();
         return ActiveType switch
         {
+            FractalType.DeepZoom when OperatingSystem.IsMacOS() && _metalDeepZoomRenderer?.IsAvailable == true =>
+                PixelsToSkBitmap(_metalDeepZoomRenderer.Render(
+                    _deepView, width, height, Palette.ToParams(), bg, HeroSettings()), width, height),
             FractalType.DeepZoom => DeepZoomBitmap(width, height),
             FractalType.Mandelbulb => OperatingSystem.IsMacOS()
                 ? PixelsToSkBitmap(_metalMandelbulbRenderer!.RenderMandelbulb(Mandelbulb.ToParams(), cam, width, height, HeroSettings(), bg, Color.Rgb(210, 175, 140), light, pal), width, height)

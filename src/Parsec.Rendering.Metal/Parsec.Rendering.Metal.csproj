@@ -32,6 +32,7 @@
     <EmbeddedResource Include="Shaders\mandalay_raymarch.metal" />
     <EmbeddedResource Include="Shaders\anisotropic_raymarch.metal" />
     <EmbeddedResource Include="Shaders\orbithybrid_raymarch.metal" />
+    <EmbeddedResource Include="Shaders\deepzoom_metal.metal" />
   </ItemGroup>
 
   <ItemGroup>
