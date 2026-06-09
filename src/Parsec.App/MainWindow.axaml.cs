@@ -19,6 +19,7 @@ public partial class MainWindow : Window
     private AudioModulationController? _audioMod;
     private AudioMappingPanel? _audioMappingPanel;
     private DispatcherTimer? _modTimer;
+    private readonly SonificationController _sonification = new();
 
     // Animation timeline state.
     private KeyframeBank? _bank;
@@ -43,6 +44,9 @@ public partial class MainWindow : Window
 
         if (_view != null && status != null)
             _view.StatusChanged += text => status.Text = text;
+
+        if (_view != null)
+            _view.Sonification = _sonification;
 
         if (selector != null)
         {
@@ -275,6 +279,7 @@ public partial class MainWindow : Window
         // them so there are no stale references when the fractal type changes.
         _audioMod?.ClearMappings();
         _audioMappingPanel?.SetSchema(_activeSchema);
+        _sonification.SetDescriptors(_activeSchema.Parameters);
         RebuildPanel();
         RebuildTimeline();
     }

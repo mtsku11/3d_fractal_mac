@@ -80,6 +80,10 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
     private int _samplerLocation;
     private bool _ready;
     private bool _dirty = true;
+    private readonly System.Diagnostics.Stopwatch _sonicClock = System.Diagnostics.Stopwatch.StartNew();
+
+    /// <summary>Optional sonification controller. Set by the host (MainWindow) when sonification is enabled.</summary>
+    public SonificationController? Sonification { get; set; }
 
     // Software-blit fallback for macOS when the Avalonia compositor runs in
     // Software mode (no GL context for OpenGlControlBase). Metal renderers
@@ -400,6 +404,12 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
     public event Action<string>? StatusChanged;
     private void Status(string text) =>
         Dispatcher.UIThread.Post(() => StatusChanged?.Invoke(text));
+
+    private static string SonicDebugSuffix(Audio.Sonification.FractalSonicFrame? frame)
+    {
+        if (frame == null) return string.Empty;
+        return $" · son: camSpd={frame.CameraSpeed:F2} pVel={frame.ParameterVelocity:F4}";
+    }
 
     public FractalView()
     {
@@ -885,7 +895,10 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
             }
 
             if (renderedPreview)
-                Status($"Metal {ActiveType} · {rw}x{rh} · compute {_metalComputeMs} ms · readback {_metalReadbackMs} ms · total {_totalFrameMs} ms  ·  WASD+QE move · drag to look");
+            {
+                var sonicFrame = Sonification?.Update(_sonicClock.Elapsed.TotalSeconds, _cam.Position);
+                Status($"Metal {ActiveType} · {rw}x{rh} · compute {_metalComputeMs} ms · readback {_metalReadbackMs} ms · total {_totalFrameMs} ms  ·  WASD+QE move · drag to look{SonicDebugSuffix(sonicFrame)}");
+            }
         }
 
         if (_softBitmap != null)
@@ -1088,31 +1101,35 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
             _dirty = false;
             bool atMaxDepth = ActiveType == FractalType.DeepZoom
                 && _deepView.Radius <= DeepZoomView.MinRadius * 1.05;
-            Status(ActiveType == FractalType.DeepZoom
-                ? $"Deep Zoom 2D · {(_deepView.Formula switch { 1 => "Prospector", 2 => "Julia", 3 => "Burning Ship", _ => "Mandelbrot" })} · radius {_deepView.Radius:e2}{(atMaxDepth ? " · max depth" : "")} · {rw}x{rh} · drag pan · scroll zoom"
-                : ActiveType == FractalType.Mandelbox && _metalRenderer?.IsAvailable == true
-                ? $"Metal Mandelbox · {rw}x{rh} · compute {_metalComputeMs} ms · readback {_metalReadbackMs} ms · upload {_texUploadMs} ms · total {_totalFrameMs} ms  ·  WASD+QE move · drag to look"
-                : ActiveType == FractalType.Mandelbulb && _metalMandelbulbRenderer?.IsAvailable == true
-                ? $"Metal Mandelbulb · {rw}x{rh} · compute {_metalComputeMs} ms · readback {_metalReadbackMs} ms · upload {_texUploadMs} ms · total {_totalFrameMs} ms  ·  WASD+QE move · drag to look"
-                : ActiveType == FractalType.RotBox && _metalRotBoxRenderer?.IsAvailable == true
-                ? $"Metal RotBox · {rw}x{rh} · compute {_metalComputeMs} ms · readback {_metalReadbackMs} ms · upload {_texUploadMs} ms · total {_totalFrameMs} ms  ·  WASD+QE move · drag to look"
-                : ActiveType == FractalType.Kifs && _metalKifsRenderer?.IsAvailable == true
-                ? $"Metal KIFS · {rw}x{rh} · compute {_metalComputeMs} ms · readback {_metalReadbackMs} ms · upload {_texUploadMs} ms · total {_totalFrameMs} ms  ·  WASD+QE move · drag to look"
-                : ActiveType == FractalType.Kleinian && _metalKleinianRenderer?.IsAvailable == true
-                ? $"Metal Kleinian · {rw}x{rh} · compute {_metalComputeMs} ms · readback {_metalReadbackMs} ms · upload {_texUploadMs} ms · total {_totalFrameMs} ms  ·  WASD+QE move · drag to look"
-                : ActiveType == FractalType.Hybrid && _metalHybridRenderer?.IsAvailable == true
-                ? $"Metal Hybrid · {rw}x{rh} · compute {_metalComputeMs} ms · readback {_metalReadbackMs} ms · upload {_texUploadMs} ms · total {_totalFrameMs} ms  ·  WASD+QE move · drag to look"
-                : OperatingSystem.IsMacOS() && _metalBurningShipRenderer?.IsAvailable == true && (
-                    ActiveType == FractalType.BurningShip || ActiveType == FractalType.QuaternionJulia ||
-                    ActiveType == FractalType.QJBox || ActiveType == FractalType.Menger ||
-                    ActiveType == FractalType.Bicomplex || ActiveType == FractalType.Apollonian ||
-                    ActiveType == FractalType.Phoenix || ActiveType == FractalType.Biomorph ||
-                    ActiveType == FractalType.Mosely || ActiveType == FractalType.PseudoKleinian4D ||
-                    ActiveType == FractalType.RiemannSphere || ActiveType == FractalType.Mandalay ||
-                    ActiveType == FractalType.Anisotropic || ActiveType == FractalType.OrbitHybrid ||
-                    ActiveType == FractalType.AmazingBox)
-                ? $"Metal {ActiveType} · {rw}x{rh} · compute {_metalComputeMs} ms · readback {_metalReadbackMs} ms · upload {_texUploadMs} ms · total {_totalFrameMs} ms  ·  WASD+QE move · drag to look"
-                : $"pos ({_cam.Position.X:F2}, {_cam.Position.Y:F2}, {_cam.Position.Z:F2})  ·  WASD+QE move · drag to look");
+            {
+                var sonicFrame = Sonification?.Update(_sonicClock.Elapsed.TotalSeconds, _cam.Position);
+                string sonicSuffix = SonicDebugSuffix(sonicFrame);
+                Status(ActiveType == FractalType.DeepZoom
+                    ? $"Deep Zoom 2D · {(_deepView.Formula switch { 1 => "Prospector", 2 => "Julia", 3 => "Burning Ship", _ => "Mandelbrot" })} · radius {_deepView.Radius:e2}{(atMaxDepth ? " · max depth" : "")} · {rw}x{rh} · drag pan · scroll zoom"
+                    : ActiveType == FractalType.Mandelbox && _metalRenderer?.IsAvailable == true
+                    ? $"Metal Mandelbox · {rw}x{rh} · compute {_metalComputeMs} ms · readback {_metalReadbackMs} ms · upload {_texUploadMs} ms · total {_totalFrameMs} ms  ·  WASD+QE move · drag to look{sonicSuffix}"
+                    : ActiveType == FractalType.Mandelbulb && _metalMandelbulbRenderer?.IsAvailable == true
+                    ? $"Metal Mandelbulb · {rw}x{rh} · compute {_metalComputeMs} ms · readback {_metalReadbackMs} ms · upload {_texUploadMs} ms · total {_totalFrameMs} ms  ·  WASD+QE move · drag to look{sonicSuffix}"
+                    : ActiveType == FractalType.RotBox && _metalRotBoxRenderer?.IsAvailable == true
+                    ? $"Metal RotBox · {rw}x{rh} · compute {_metalComputeMs} ms · readback {_metalReadbackMs} ms · upload {_texUploadMs} ms · total {_totalFrameMs} ms  ·  WASD+QE move · drag to look{sonicSuffix}"
+                    : ActiveType == FractalType.Kifs && _metalKifsRenderer?.IsAvailable == true
+                    ? $"Metal KIFS · {rw}x{rh} · compute {_metalComputeMs} ms · readback {_metalReadbackMs} ms · upload {_texUploadMs} ms · total {_totalFrameMs} ms  ·  WASD+QE move · drag to look{sonicSuffix}"
+                    : ActiveType == FractalType.Kleinian && _metalKleinianRenderer?.IsAvailable == true
+                    ? $"Metal Kleinian · {rw}x{rh} · compute {_metalComputeMs} ms · readback {_metalReadbackMs} ms · upload {_texUploadMs} ms · total {_totalFrameMs} ms  ·  WASD+QE move · drag to look{sonicSuffix}"
+                    : ActiveType == FractalType.Hybrid && _metalHybridRenderer?.IsAvailable == true
+                    ? $"Metal Hybrid · {rw}x{rh} · compute {_metalComputeMs} ms · readback {_metalReadbackMs} ms · upload {_texUploadMs} ms · total {_totalFrameMs} ms  ·  WASD+QE move · drag to look{sonicSuffix}"
+                    : OperatingSystem.IsMacOS() && _metalBurningShipRenderer?.IsAvailable == true && (
+                        ActiveType == FractalType.BurningShip || ActiveType == FractalType.QuaternionJulia ||
+                        ActiveType == FractalType.QJBox || ActiveType == FractalType.Menger ||
+                        ActiveType == FractalType.Bicomplex || ActiveType == FractalType.Apollonian ||
+                        ActiveType == FractalType.Phoenix || ActiveType == FractalType.Biomorph ||
+                        ActiveType == FractalType.Mosely || ActiveType == FractalType.PseudoKleinian4D ||
+                        ActiveType == FractalType.RiemannSphere || ActiveType == FractalType.Mandalay ||
+                        ActiveType == FractalType.Anisotropic || ActiveType == FractalType.OrbitHybrid ||
+                        ActiveType == FractalType.AmazingBox)
+                    ? $"Metal {ActiveType} · {rw}x{rh} · compute {_metalComputeMs} ms · readback {_metalReadbackMs} ms · upload {_texUploadMs} ms · total {_totalFrameMs} ms  ·  WASD+QE move · drag to look{sonicSuffix}"
+                    : $"pos ({_cam.Position.X:F2}, {_cam.Position.Y:F2}, {_cam.Position.Z:F2})  ·  WASD+QE move · drag to look{sonicSuffix}");
+            }
         }
 
         _gl.BindFramebuffer(GlConst.Framebuffer, (uint)fb);

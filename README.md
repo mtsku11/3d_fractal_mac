@@ -60,7 +60,7 @@ A perturbation-theory escape-time explorer with four formulas — **Mandelbrot, 
 
 ### Audio
 
-Load a WAV file via the audio transport bar. The engine performs offline multi-band analysis (RMS, bass, mid, treble, onset, spectral centroid) that can drive fractal, camera, and palette parameters in CLI audio-reactive renders. In-app mapping UI is not yet built.
+Load a WAV file via the audio transport bar. The engine performs offline multi-band analysis (RMS, bass, mid, treble, onset, spectral centroid) that drives fractal, camera, and palette parameters — both in CLI audio-reactive renders and in the app via the mapping panel (feature source → parameter, with depth and smoothing). Render to Video samples features deterministically at export timestamps and muxes the audio into the MP4.
 
 ---
 
@@ -81,6 +81,7 @@ Parsec is a personal project shared in the hope it is useful — these are the r
 - **Deep-zoom Burning Ship at very wide views.** Perturbation is unreliable for the abs-fold map when the delta is large; the renderer uses direct fp64 at shallow zoom to compensate, but extreme wide framings can still show boundary noise. Zoom in for clean results.
 - **Fly-camera speed near some 3D fractals.** A few fractals lack a CPU distance-estimate mirror, so the camera glides at a constant speed near them instead of slowing into detail. Purely a navigation nicety, not a render issue.
 - **Deep-zoom precision ceiling.** Windows/Linux: ~1e-147 (floatexp path). macOS: ~1e-12 (Metal Dekker float-float). The Metal path is not bit-identical at extreme depths but covers all practical use.
+- **Strange Attractor on macOS.** The Attractor fractal has no Metal renderer yet (it raymarches a precomputed trajectory hash rather than a closed-form distance estimator), so on macOS it shows a blank placeholder. It renders normally on Windows/Linux via OpenGL.
 - **Hardware.** No software fallback — a Metal-capable or OpenGL 4.3+ GPU is required depending on platform.
 
 ---

@@ -338,28 +338,31 @@ CLI validation path (already in this repo's `Parsec.Cli`): `parsec audio-analyze
 
 Acceptance criteria: full-track analysis runs for a WAV file; feature values can be sampled at arbitrary timestamps off the render path.
 
-### Audio Phase 3 — Audio-reactive modulation (not started anywhere)
+### Audio Phase 3 — Audio-reactive modulation ✓ DONE
 
-Drive existing visual parameters from audio feature values. Requires new files:
+Drives live visual parameters from audio feature values. `src/Parsec.App/AudioModulationController.cs` samples features per frame and applies additive offsets to fractal/camera/palette `ParamDescriptor`s; `AudioModulationMapping.cs` / `AudioFeatureSource.cs` model the source → target + depth + smoothing. Modulation can be toggled, and timeline playback still works with it active. (Implemented in `Parsec.App`, not `Parsec.Audio` as originally sketched.)
 
-- `src/Parsec.Audio/ModulationMapping.cs` — feature source → `ParamDescriptor` target + depth + smoothing
-- `src/Parsec.Audio/AudioReactiveController.cs` — per-frame sampling and application to live fractal state
+### Audio Phase 4 — Mapping UI ✓ DONE
 
-Files also touched: `FractalView.cs` (apply modulation before each render), `MainWindow.axaml.cs` (wire controller to transport clock).
+`src/Parsec.App/AudioMappingPanel.cs` is the in-app mapping editor (feature source, parameter target, depth, enable). Wired into `MainWindow` via the `AudioMappingHost` content control; schema refreshed on fractal change.
 
-Acceptance criteria: at least RMS drives at least one parameter; modulation can be toggled on/off; timeline playback still works with modulation active.
+### Audio Phase 5 — Timeline + export integration ✓ DONE
 
-### Audio Phase 4 — Mapping UI (not started anywhere)
+`AudioModulationController.ApplyAtTime(t)` performs deterministic feature sampling at export timestamps matching live playback; the Render-to-Video path attaches audio via ffmpeg mux.
 
-Expose a minimal mapping editor: feature source, parameter target, depth slider, enable toggle.
+---
 
-Files touched: `MainWindow.axaml`, `MainWindow.axaml.cs`.
+## Fractal Sonification (geometry → audio)
 
-### Audio Phase 5 — Timeline + export integration (not started anywhere)
+This is the **inverse** of the audio-reactive feature above: sound is generated *from* the fractal geometry rather than geometry being driven from sound. It is a distinct, newly-requested feature (2026-06-09) with its own milestones M0–M6.
 
-Exported animation frames must use deterministic feature sampling at the same timestamps as live playback. ffmpeg mux instructions must account for audio attachment.
+The full plan — architecture, the three-layer separation (Metal telemetry / C# DSP synth / OpenAL spatialization), real-time audio-safety constraints, the telemetry-pass options, the reuse-vs-build matrix, milestones, and pitfalls — lives in **`docs/fractal-sonification-plan.md`**. It was verified against the code on 2026-06-09 (file pointers and the `mandelbox_raymarch.metal` telemetry claims confirmed).
 
-Files touched: `AudioFeatureTrack.cs`, `AudioReactiveController.cs`, `MainWindow.axaml.cs`, `FractalView.cs`.
+Key cross-cutting constraints to keep in mind here:
+- New namespace `Parsec.Audio.Sonification`; new `FractalSonicFrame` type — must not collide with the existing `AudioFeatureFrame`.
+- Sonification and the Phase 3–5 reactive modulation must be **mutually exclusive modes**, or the sonifier reads base/keyframe geometry, to avoid a fractal → sound → params → fractal feedback loop.
+- OpenAL does spatialization only; the DSP/synthesis layer (oscillators, filters, granular, one-pole smoothers) is new C# and does not exist yet.
+- Offline-first (deterministic WAV + existing ffmpeg mux) before live streaming; Mandelbox first before rolling out to other fractals.
 
 ---
 

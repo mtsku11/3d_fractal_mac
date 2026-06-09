@@ -1,6 +1,6 @@
 # Parsec Agent Guide
 
-Parsec is a C#/.NET 9 Avalonia desktop application for GPU fractal exploration and rendering. The current branch direction is a macOS-native build: all 20 fp32 3D fractals and the 2D deep-zoom pipeline now render via Metal on macOS, while preserving the OpenGL backend for Windows/Linux. Audio-reactive work is deferred.
+Parsec is a C#/.NET 9 Avalonia desktop application for GPU fractal exploration and rendering. The current branch direction is a macOS-native build: all 20 fp32 3D fractals and the 2D deep-zoom pipeline now render via Metal on macOS, while preserving the OpenGL backend for Windows/Linux. The audio-reactive feature (audio → visuals) is built. A new fractal-sonification feature (geometry → audio) is now requested — see `docs/fractal-sonification-plan.md`.
 
 ## Key Commands
 
@@ -36,7 +36,10 @@ Note: every project targets `net9.0`. If `dotnet` is unavailable, fix the SDK en
 - `src/Parsec.Rendering.Metal/MetalDeepZoomRenderer.cs`: Metal 2D deep-zoom backend. Dekker float-float arithmetic in `deepzoom_metal.metal`; all 4 formulas; direct + perturbation paths. Shares `ReferenceOrbit` and `DeepZoomView` with the OpenGL path.
 - `src/Parsec.Rendering/Output/ImageOutput.cs`: PNG export helper.
 - `docs/macos-3d-only-build-plan.md`: current macOS 3D-only implementation plan.
-- `docs/audio-reactive/`: deferred audio-reactive planning and implementation history.
+- `docs/fractal-sonification-plan.md`: implementation plan for the geometry → audio sonification feature (M0–M6). File pointers and Metal-kernel claims were verified against the code on 2026-06-09.
+- `src/Parsec.App/AudioModulationController.cs` / `AudioMappingPanel.cs`: existing audio-reactive modulation (audio → visuals). The sonification work must not break these and runs as a mutually-exclusive mode.
+- `src/Parsec.App/FlyCamera.cs`: camera state; source for sonification `CameraSpeed`.
+- `src/Parsec.Rendering.Metal/Shaders/mandelbox_raymarch.metal`: `estimateFull` writes the float4 orbit trap; `traceRay` holds the step loop. The sonification telemetry pass reduces data this kernel currently discards.
 
 ## Engineering Rules
 
@@ -88,15 +91,17 @@ Completed macOS parity milestones (this session):
 Remaining macOS parity milestones:
 
 - **M11:** Package and notarize.
+- **Attractor is not ported to Metal.** It is the only selectable 3D fractal (`FractalType.Attractor`) without a `Metal*Renderer`; on macOS it renders a blank placeholder. `GpuAttractorRenderer` sphere-traces a prebuilt `AttractorHash` over SSBOs (bindings 6/7/8), so porting it needs those buffers, not just an MSL DE. "All 20 fractals on Metal" excludes it. Octonion/Triball/IFS (`Gpu{Octonion,Triball,Raymarching}Renderer`) have OpenGL renderers but are not exposed in the desktop dropdown.
 
-Audio-reactive feature (new work, not in upstream `zoomacroom-games/Parsec`):
+Audio-reactive feature — audio → visuals (new work, not in upstream `zoomacroom-games/Parsec`): **done.**
 
-- **Audio Phase 1–2:** Port `Parsec.Audio` project + UI wiring from `~/projects/fractal_audio` into this repo. Covers WAV playback, offline RMS/FFT analysis, `AudioTransportPanel`, `MainWindow` wiring.
-- **Audio Phase 3:** Audio-reactive modulation — map feature values (RMS, band energy) to existing fractal parameters. First phase not yet started anywhere.
-- **Audio Phase 4:** Mapping UI (feature source, target parameter, depth, enable toggle).
-- **Audio Phase 5:** Timeline + export integration — deterministic feature sampling at export timestamps, ffmpeg audio mux.
+- **Audio Phase 1–2 (done):** `Parsec.Audio` project + UI wiring (WAV playback, offline RMS/FFT analysis, `AudioTransportPanel`, `MainWindow` wiring).
+- **Audio Phase 3–4 (done):** `AudioModulationController` maps feature values to live fractal/camera/palette params; `AudioMappingPanel` is the in-app mapping editor, wired via `AudioMappingHost`.
+- **Audio Phase 5 (done):** deterministic export via `ApplyAtTime(t)` + ffmpeg audio mux on Render-to-Video.
 
-Do not start any audio phase until explicitly requested. See `docs/macos-3d-only-build-plan.md` for full detail.
+Fractal sonification — geometry → audio (NEW, requested 2026-06-09): the inverse pipeline. Metal telemetry pass → `FractalSonicFrame` → C# DSP synth → OpenAL/AVAudioEngine spatialization. Milestones M0–M6 in `docs/fractal-sonification-plan.md`. Build only what is explicitly requested; keep it mutually exclusive with the reactive modulation above to avoid a fractal→sound→params→fractal feedback loop.
+- **M0 (done):** `src/Parsec.Audio/Sonification/FractalSonicFrame.cs` — immutable `record class` with all telemetry fields. Builds cleanly; zero impact on existing code.
+- **M1 (done):** `src/Parsec.App/SonificationController.cs` — computes `CameraSpeed` and `ParameterVelocity` from live state each render frame; geometry fields stubbed to zero until M2. `FractalView` appends ` · son: camSpd=N.NN pVel=N.NNNN` to the status bar when a controller is wired. `MainWindow` creates the controller and refreshes descriptors on fractal-type change.
 
 Non-goals (still deferred indefinitely):
 
@@ -110,4 +115,5 @@ Non-goals (still deferred indefinitely):
 3. `CLAUDE.md`
 4. `skills.md`
 5. `docs/macos-3d-only-build-plan.md`
-6. `docs/audio-reactive/00-repo-inspection.md` only if touching deferred audio code
+6. `docs/fractal-sonification-plan.md` if touching the geometry → audio sonification feature
+7. `docs/audio-reactive/00-repo-inspection.md` only if touching audio-reactive (audio → visuals) code

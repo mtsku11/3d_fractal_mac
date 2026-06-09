@@ -71,21 +71,26 @@ Milestones 1–10 and 12 are complete. All 20 fp32 3D fractals and the 2D deep-z
 
 **Remaining macOS parity work:**
 - **M11:** Packaging and notarization.
+- **Attractor has no Metal renderer.** It's the one selectable 3D fractal (`FractalType.Attractor`) with no `Metal*Renderer` — `HasMetalPreviewRenderer()` returns false for it, so on macOS it shows a dark placeholder + "preview unavailable" status. It's not a closed-form DE: `GpuAttractorRenderer` sphere-traces a prebuilt `AttractorHash` (trajectory + spatial hash) over SSBOs at bindings 6/7/8, so a Metal port needs those data buffers, not just a kernel translation. The "all 20 fp32 3D fractals render via Metal" phrasing counts the 20 ported renderers and excludes Attractor. (Octonion/Triball/IFS have OpenGL renderers but are not in the `FractalType` dropdown.)
 
-**Audio-reactive feature (new — not in upstream):**
+**Audio-reactive feature (audio → visuals; new — not in upstream):**
 The upstream `zoomacroom-games/Parsec` has no audio features. This is entirely new work. Development started in the `fractal_audio` fork at `~/projects/fractal_audio`.
 - **Audio Phase 1–2 (done):** `Parsec.Audio` project ported here (transport, WAV decode, offline RMS/FFT analysis, AudioFeatureFrame/Track), `AudioTransportPanel`, MainWindow wiring. OpenAL playback re-enabled on macOS via Homebrew openal-soft `OverridePath`.
-- **Audio Phase 3–5 (CLI prototype done):** `metal-audio-reactive` CLI command renders audio-reactive fractal animations. Multi-band feature extraction (RMS, bass, mid, treble, onset, centroid) drives fractal shape, camera, lighting, and palette parameters with EMA smoothing and track-normalized dynamics. Tested with Phoenix, QuaternionJulia, and Mandelbulb. In-app mapping UI and timeline/export integration are not yet built.
+- **Audio Phase 3–4 (done):** in-app audio-reactive modulation. `AudioModulationController` samples WAV features per frame and applies them as additive offsets to live fractal/camera/palette `ParamDescriptor`s; `AudioMappingPanel` (mapping editor: feature source → target + depth + smoothing) is wired into `MainWindow` via `AudioMappingHost`. `metal-audio-reactive` CLI command renders the same offline.
+- **Audio Phase 5 (done):** deterministic export — `AudioModulationController.ApplyAtTime(t)` mirrors timeline sampling at export timestamps, with ffmpeg audio mux on the Render-to-Video path.
 
-See `skills.md` for Metal porting recipes and gotchas. See `docs/macos-3d-only-build-plan.md` for the full breakdown of both tracks.
+**Fractal sonification feature (geometry → audio; NEW, requested 2026-06-09):**
+The *inverse* of the audio-reactive system above: generate sound *from* the 3D fractal geometry (the camera is the listener; the fractal is a spatial resonant object). A Metal telemetry pass reduces the DE march into a `FractalSonicFrame` (hit ratio, depth/step stats, normal/trap variance, camera & parameter velocity); a new C# DSP layer synthesizes PCM; OpenAL (or later AVAudioEngine) only places/spatializes the sound. New namespace `Parsec.Audio.Sonification`; new type `FractalSonicFrame` (must not collide with the existing `AudioFeatureFrame`). Offline-first (deterministic WAV + ffmpeg mux), then live streaming, then spatial emitters. Plan and milestones M0–M6 in `docs/fractal-sonification-plan.md`. **Feedback-loop hazard:** sonification (geometry→audio) and reactive modulation (audio→params) must be mutually exclusive, or the sonifier must read base/keyframe geometry rather than audio-modulated state.
+- **M0 (done):** `FractalSonicFrame` immutable `record class` in `Parsec.Audio.Sonification`. Solution builds; no impact on existing code.
+- **M1 (done):** `SonificationController` in `Parsec.App` computes `CameraSpeed` and `ParameterVelocity` from live camera position and param descriptors each frame. Debug suffix ` · son: camSpd=N.NN pVel=N.NNNN` appended to status bar. Geometry fields are stubs (zero) until M2.
+
+See `skills.md` for Metal porting recipes and gotchas. See `docs/macos-3d-only-build-plan.md` for the macOS render track and `docs/fractal-sonification-plan.md` for the sonification feature.
 
 ## Deferred
 
-- audio-reactive in-app UI (mapping panel, timeline/export integration)
 - polished packaging, notarization, and installer work (M11)
-- synth/audio-generation features
 
-Do not expand audio work until explicitly requested.
+The audio-reactive in-app UI (mapping panel + timeline/export integration) is now built, not deferred. Fractal sonification (geometry → audio) is now requested — see `docs/fractal-sonification-plan.md`. Do not expand audio work beyond what is explicitly requested.
 
 ## Technical Strategy
 
@@ -99,9 +104,9 @@ Do not expand audio work until explicitly requested.
 
 ## Do Not Do Yet
 
-- Do not build the in-app audio-reactive mapping UI until explicitly requested.
-- Do not build a synth engine.
-- Do not refactor renderer internals broadly.
+- Sonification synthesis is now in scope (the DSP layer in `docs/fractal-sonification-plan.md` M3), but build it as a backend-neutral PCM synth layer driven by `FractalSonicFrame` telemetry — not a general-purpose music synth, and not on the UI/render or audio thread (see plan §2 real-time audio safety).
+- Do not break or repurpose the existing audio-reactive modulation (`AudioModulationController`/`AudioMappingPanel`); sonification is a separate, mutually-exclusive mode.
+- Do not refactor renderer internals broadly. Prefer the separate low-res telemetry kernel (plan §3 Option B) over modifying the still-stabilizing render kernels.
 - Do not change Windows/Linux OpenGL behavior unless the change is required by a narrow backend seam and can be validated.
 
 `AGENTS.md` holds the fuller engineering rules and context-loading order. `docs/macos-3d-only-build-plan.md` is the current implementation plan.
