@@ -208,8 +208,41 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
         combined.AddRange(Light.BuildSchema().Parameters);
         if (OperatingSystem.IsMacOS())
             combined.AddRange(PostProcess.BuildSchema().Parameters);
+        combined.AddRange(BuildCameraSchema());
         return new ParamSchema { Parameters = combined };
     }
+
+    private IReadOnlyList<ParamDescriptor> BuildCameraSchema() => new[]
+    {
+        new ParamDescriptor {
+            Label = "Azimuth", Group = "Camera", Min = -Math.PI, Max = Math.PI, Decimals = 3,
+            Get = () => _orbitAzimuth,
+            Set = v => { _orbitAzimuth = (float)v; ApplyOrbitToCamera(); } },
+        new ParamDescriptor {
+            Label = "Elevation", Group = "Camera", Min = -1.55, Max = 1.55, Decimals = 3,
+            Get = () => _orbitElevation,
+            Set = v => { _orbitElevation = (float)v; ApplyOrbitToCamera(); } },
+        new ParamDescriptor {
+            Label = "Distance", Group = "Camera", Min = 0.1, Max = 30.0, Decimals = 2,
+            Get = () => _orbitDistance,
+            Set = v => { _orbitDistance = (float)v; ApplyOrbitToCamera(); } },
+        new ParamDescriptor {
+            Label = "Target X", Group = "Camera", Min = -20.0, Max = 20.0, Decimals = 3,
+            Get = () => _orbitTarget.X,
+            Set = v => { _orbitTarget.X = (float)v; ApplyOrbitToCamera(); } },
+        new ParamDescriptor {
+            Label = "Target Y", Group = "Camera", Min = -20.0, Max = 20.0, Decimals = 3,
+            Get = () => _orbitTarget.Y,
+            Set = v => { _orbitTarget.Y = (float)v; ApplyOrbitToCamera(); } },
+        new ParamDescriptor {
+            Label = "Target Z", Group = "Camera", Min = -20.0, Max = 20.0, Decimals = 3,
+            Get = () => _orbitTarget.Z,
+            Set = v => { _orbitTarget.Z = (float)v; ApplyOrbitToCamera(); } },
+        new ParamDescriptor {
+            Label = "FoV", Group = "Camera", Min = 0.1, Max = 1.5, Decimals = 3,
+            Get = () => _cam.FovRadians,
+            Set = v => _cam.FovRadians = (float)v },
+    };
 
     /// <summary>Request a re-render (e.g. after a parameter change from the panel).</summary>
     public void MarkDirty()
@@ -305,6 +338,13 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
         yaw: -MathF.PI / 4f,   // faces back toward the origin from (4,3,4)
         pitch: -0.53f);
 
+    // Orbit camera state: derived from _cam position relative to the target.
+    // SyncOrbitFromCamera() recomputes these after any WASD move.
+    private Vector3 _orbitTarget = Vector3.Zero;
+    private float _orbitAzimuth;
+    private float _orbitElevation;
+    private float _orbitDistance;
+
     // 2D deep-zoom "camera": high-precision center + radius (see DeepZoomView).
     private readonly DeepZoomView _deepView = new();
 
@@ -369,6 +409,27 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
         _moveTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(16) };
         _moveTimer.Tick += OnMoveTick;
         _moveTimer.Start();
+        SyncOrbitFromCamera();
+    }
+
+    /// <summary>Recompute orbit fields from the current camera position and stored target.</summary>
+    private void SyncOrbitFromCamera()
+    {
+        var d = _cam.Position - _orbitTarget;
+        _orbitDistance = Math.Max(d.Length(), 0.01f);
+        _orbitElevation = MathF.Asin(Math.Clamp(d.Y / _orbitDistance, -1f, 1f));
+        _orbitAzimuth = MathF.Atan2(d.X, d.Z);
+    }
+
+    /// <summary>Update camera position and orientation from stored orbit params.</summary>
+    private void ApplyOrbitToCamera()
+    {
+        float cosEl = MathF.Cos(_orbitElevation);
+        _cam.Position = _orbitTarget + new Vector3(
+            _orbitDistance * cosEl * MathF.Sin(_orbitAzimuth),
+            _orbitDistance * MathF.Sin(_orbitElevation),
+            _orbitDistance * cosEl * MathF.Cos(_orbitAzimuth));
+        _cam.LookAt(_orbitTarget);
     }
 
     protected override void OnAttachedToVisualTree(VisualTreeAttachmentEventArgs e)
@@ -634,6 +695,7 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
             };
             float speed = BaseMoveSpeed * Math.Clamp(de, 0.02f, 4.0f);
             _cam.Move(local, speed * dt);
+            SyncOrbitFromCamera();
         }
 
         _dirty = true;

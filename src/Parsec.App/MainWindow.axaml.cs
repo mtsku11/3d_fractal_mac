@@ -83,6 +83,10 @@ public partial class MainWindow : Window
         if (testRenderButton != null)
             testRenderButton.Click += OnTestRenderClick;
 
+        var renderToVideoButton = this.FindControl<Button>("RenderToVideoButton");
+        if (renderToVideoButton != null)
+            renderToVideoButton.Click += OnRenderToVideoClick;
+
         var saveAnimButton = this.FindControl<Button>("SaveAnimButton");
         if (saveAnimButton != null)
             saveAnimButton.Click += OnSaveAnimClick;
@@ -301,7 +305,7 @@ public partial class MainWindow : Window
         _bank.Refresh(_timeline);
     }
 
-    // Palette phase wraps at 2*pi; everything else is linear for the MVP.
+    // Palette phase wraps at 2*pi; everything else is linear.
     private static InterpKind KindFor(ParamDescriptor d) =>
         d.Label.Contains("phase", StringComparison.OrdinalIgnoreCase)
             ? InterpKind.AngularWrap : InterpKind.Linear;
@@ -502,6 +506,114 @@ public partial class MainWindow : Window
             }
         }
         catch (Exception ex) { SetStatus($"Load failed: {ex.Message}"); }
+    }
+
+    // ----------------------------------------------------------- render to video
+    private string VideoDir() => System.IO.Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.MyPictures), "Parsec", "video");
+
+    private void OnRenderToVideoClick(object? sender, RoutedEventArgs e)
+    {
+        if (_view == null || _timeline == null)
+        {
+            SetStatus("Render to video: animation not available for this fractal.");
+            return;
+        }
+        StopPlayback();
+        double duration = _timeline.DurationFrom(0);
+        if (duration <= 0)
+        {
+            SetStatus("Render to video: set a later keyframe first (need >1 keyframe).");
+            return;
+        }
+
+        string stamp    = DateTime.Now.ToString("yyyyMMdd_HHmmss");
+        string framesDir = System.IO.Path.Combine(VideoDir(), $"frames_{stamp}");
+        string outputMp4 = System.IO.Path.Combine(VideoDir(), $"render_{stamp}.mp4");
+        System.IO.Directory.CreateDirectory(VideoDir());
+
+        bool hasAudio  = _audioMod?.TrackSource?.IsFile == true;
+        string? audioPath = hasAudio ? _audioMod!.TrackSource!.LocalPath : null;
+
+        var timeline = _timeline;
+        var audioMod = _audioMod;
+
+        SetStatus($"Rendering ~{(int)(duration * RenderFps)} frames at {TestWidth}x{TestHeight}...");
+
+        // One-shot subscription: fires ffmpeg after frames are written.
+        Action<string>? handler = null;
+        handler = msg =>
+        {
+            _view.AnimationRenderComplete -= handler!;
+            if (msg.StartsWith("Rendered"))
+            {
+                Dispatcher.UIThread.Post(() => SetStatus("Stitching video..."));
+                _ = Task.Run(async () => await RunFfmpegAsync(framesDir, outputMp4, hasAudio, audioPath));
+            }
+            else
+            {
+                Dispatcher.UIThread.Post(() => SetStatus(msg));
+            }
+        };
+        _view.AnimationRenderComplete += handler;
+
+        _view.RequestAnimationRender(framesDir, TestWidth, TestHeight, RenderFps, duration,
+            t =>
+            {
+                timeline.ApplyAtTime(0, t);
+                audioMod?.ApplyAtTime(TimeSpan.FromSeconds(t));
+            });
+    }
+
+    private async Task RunFfmpegAsync(string framesDir, string outputMp4, bool hasAudio, string? audioPath)
+    {
+        string frames     = System.IO.Path.Combine(framesDir, "frame_%05d.png");
+        string audioInput = hasAudio && audioPath != null ? $" -i \"{audioPath}\"" : string.Empty;
+        string audioCodec = hasAudio && audioPath != null ? " -c:a aac -shortest" : string.Empty;
+        string args       = $"-framerate {RenderFps} -i \"{frames}\"{audioInput}" +
+                            $" -c:v libx264 -crf 18 -pix_fmt yuv420p{audioCodec} \"{outputMp4}\"";
+
+        string ffmpeg = FindFfmpeg();
+        var psi = new System.Diagnostics.ProcessStartInfo(ffmpeg, args)
+        {
+            RedirectStandardError = true,
+            UseShellExecute       = false,
+            CreateNoWindow        = true,
+        };
+
+        System.Diagnostics.Process? proc = null;
+        try { proc = System.Diagnostics.Process.Start(psi); }
+        catch
+        {
+            Dispatcher.UIThread.Post(() => SetStatus($"ffmpeg not found — frames saved to {framesDir}"));
+            return;
+        }
+
+        if (proc == null)
+        {
+            Dispatcher.UIThread.Post(() => SetStatus($"ffmpeg not found — frames saved to {framesDir}"));
+            return;
+        }
+
+        await proc.StandardError.ReadToEndAsync(); // drain stderr so process doesn't block
+        await proc.WaitForExitAsync();
+
+        if (proc.ExitCode == 0)
+        {
+            try { System.IO.Directory.Delete(framesDir, recursive: true); } catch { }
+            Dispatcher.UIThread.Post(() => SetStatus($"Video saved to {outputMp4}"));
+        }
+        else
+        {
+            Dispatcher.UIThread.Post(() => SetStatus($"ffmpeg failed (code {proc.ExitCode}) — frames in {framesDir}"));
+        }
+    }
+
+    private static string FindFfmpeg()
+    {
+        foreach (var candidate in new[] { "/opt/homebrew/bin/ffmpeg", "/usr/local/bin/ffmpeg", "/usr/bin/ffmpeg" })
+            if (System.IO.File.Exists(candidate)) return candidate;
+        return "ffmpeg";
     }
 
     private void SetStatus(string text)

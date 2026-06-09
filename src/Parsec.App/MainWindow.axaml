@@ -82,6 +82,9 @@
         <Button Name="TestRenderButton" HorizontalAlignment="Stretch"
                 HorizontalContentAlignment="Center" Margin="0,8,0,0"
                 Content="Test Render (720p video)" />
+        <Button Name="RenderToVideoButton" HorizontalAlignment="Stretch"
+                HorizontalContentAlignment="Center" Margin="0,4,0,0"
+                Content="Render to Video" />
         <Grid ColumnDefinitions="*,*" Margin="0,8,0,0">
           <Button Name="SaveAnimButton" Grid.Column="0" HorizontalAlignment="Stretch"
                   HorizontalContentAlignment="Center" Margin="0,0,2,0" Content="Save Anim" />

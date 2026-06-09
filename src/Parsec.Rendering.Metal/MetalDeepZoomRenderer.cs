@@ -258,6 +258,36 @@ public sealed class MetalDeepZoomRenderer : IDisposable
         return (hi, lo);
     }
 
+    /// <summary>
+    /// Render with an optional post-process grade pass. The deep-zoom kernel
+    /// still packs RGBA8 internally; this unpacks to float4, applies the grade,
+    /// and repacks. Suitable for CLI audio-reactive rendering where the grade
+    /// drives brightness/saturation animation.
+    /// </summary>
+    public uint[] RenderGraded(
+        DeepZoomView view, int width, int height,
+        PaletteParams palette, Color background,
+        RaymarchSettings settings,
+        PostProcessParams? postProcess,
+        bool interactive = false, int interactiveIter = 0)
+    {
+        uint[] rgba8 = Render(view, width, height, palette, background, settings,
+                              interactive, interactiveIter);
+        if (postProcess is null) return rgba8;
+
+        int count = width * height;
+        var hdr = new float[count * 4];
+        for (int i = 0; i < count; i++)
+        {
+            uint px = rgba8[i];
+            hdr[i * 4 + 0] = (px & 0xFFu) / 255f;
+            hdr[i * 4 + 1] = ((px >> 8) & 0xFFu) / 255f;
+            hdr[i * 4 + 2] = ((px >> 16) & 0xFFu) / 255f;
+            hdr[i * 4 + 3] = 1f;
+        }
+        return MetalPostProcess.Apply(_device, _queue, hdr, width, height, postProcess);
+    }
+
     private void EnsureReference(DeepZoomView view, bool interactive, int iterations)
     {
         // During interaction, skip expensive bignum recompute and reuse the

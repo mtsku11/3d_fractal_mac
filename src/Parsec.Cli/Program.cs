@@ -1099,6 +1099,166 @@ public static class Program
             catch (Exception ex) { Console.Error.WriteLine($"metal-audio-reactive FAILED: {ex.Message}\n{ex.StackTrace}"); return 1; }
         }
 
+        if (args[0] is "metal-audio-deepzoom")
+        {
+            if (!OperatingSystem.IsMacOS()) { Console.Error.WriteLine("metal-audio-deepzoom requires macOS."); return 1; }
+            try
+            {
+                string wavPath = args.Length > 1 ? args[1]
+                    : Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "..",
+                        "Chopin - Nocturne op.9 No.2 - andrea romano (128k).wav");
+                if (!File.Exists(wavPath)) { Console.Error.WriteLine($"WAV not found: {wavPath}"); return 1; }
+                double startSec    = args.Length > 2 ? double.Parse(args[2]) : 0.0;
+                double durationSec = args.Length > 3 ? double.Parse(args[3]) : 10.0;
+                string outMp4      = args.Length > 4 ? args[4] : ResolveOutputPath("audio-deepzoom.mp4");
+
+                int fps = 30, w = 640, h = 480;
+                int totalFrames = (int)(durationSec * fps);
+
+                // Julia set at shallow zoom — always on the direct fp64 path (Radius >> 1e-6).
+                // Kappa starts near the classic hairy-Julia point (-0.7269, 0.1889) and is
+                // gently swept by treble.  Radius breathes with bass.  Palette cycles with mids.
+                // No reference orbit recompute overhead — EnsureReference at shallow zoom with
+                // P≈50 bits and ~1000 iterations costs <1 ms.
+                const double baseKappaRe = -0.7269, baseKappaIm = 0.1889;
+                const double baseRadius  = 1.1;
+
+                Console.WriteLine($"Audio-reactive deep zoom (Julia, shallow): {totalFrames} frames at {w}x{h}");
+
+                Console.Write("  Analyzing audio... ");
+                var analyzer = new Parsec.Audio.WaveAudioAnalyzer();
+                var track    = analyzer.AnalyzeAsync(new Uri("file://" + Path.GetFullPath(wavPath)),
+                                   null, CancellationToken.None).GetAwaiter().GetResult();
+                Console.WriteLine($"{track.Frames.Count} feature frames");
+
+                double maxRms=0, maxBass=0, maxMid=0, maxTreble=0, maxOnset=0;
+                for (int i = 0; i < totalFrames; i++)
+                {
+                    var f = track.Sample(TimeSpan.FromSeconds(startSec + (double)i / fps));
+                    maxRms    = Math.Max(maxRms,    f.Rms);
+                    maxBass   = Math.Max(maxBass,   f.BassEnergy);
+                    maxMid    = Math.Max(maxMid,    f.MidEnergy);
+                    maxTreble = Math.Max(maxTreble, f.TrebleEnergy);
+                    maxOnset  = Math.Max(maxOnset,  f.OnsetStrength);
+                }
+                float Norm(double val, double peak) => peak > 0 ? (float)Math.Min(val / peak, 1.0) : 0f;
+
+                // EMA-smoothed state
+                float smoothRadius    = (float)baseRadius;
+                float smoothKappaRe   = (float)baseKappaRe;
+                float smoothKappaIm   = (float)baseKappaIm;
+                float smoothFreq      = 1.0f;
+                float smoothPhase     = 0f;
+                float smoothBrightness = 1f;
+                const float ema = 0.15f;
+
+                using var renderer = new MetalDeepZoomRenderer();
+                if (!renderer.IsAvailable) { Console.Error.WriteLine("Metal deep-zoom backend not available."); return 1; }
+
+                var bg  = new Color(0.02f, 0.02f, 0.04f);
+                var settings = new RaymarchSettings { HeroSamples = 1 };
+
+                var frameDir = Path.Combine(Path.GetTempPath(), $"parsec-dz-{Guid.NewGuid():N}");
+                Directory.CreateDirectory(frameDir);
+                var sw = System.Diagnostics.Stopwatch.StartNew();
+
+                for (int i = 0; i < totalFrames; i++)
+                {
+                    double t     = startSec + (double)i / fps;
+                    var frame    = track.Sample(TimeSpan.FromSeconds(t));
+
+                    float nRms    = Norm(frame.Rms,    maxRms);
+                    float nBass   = Norm(frame.BassEnergy, maxBass);
+                    float nMid    = Norm(frame.MidEnergy,  maxMid);
+                    float nTreble = Norm(frame.TrebleEnergy, maxTreble);
+                    float nOnset  = Norm(frame.OnsetStrength, maxOnset);
+
+                    float rmsExp = MathF.Pow(nRms, 0.35f);
+
+                    // Bass → zoom breathing: radius oscillates ±0.25 around base
+                    float targetRadius = (float)baseRadius + (MathF.Pow(nBass, 0.5f) - 0.5f) * 0.5f;
+                    smoothRadius += ema * (targetRadius - smoothRadius);
+
+                    // Treble → kappa drift: slowly shifts the Julia shape
+                    float targetKRe = (float)baseKappaRe + (MathF.Pow(nTreble, 0.4f) - 0.5f) * 0.12f;
+                    float targetKIm = (float)baseKappaIm + rmsExp * 0.08f;
+                    smoothKappaRe += ema * (targetKRe - smoothKappaRe);
+                    smoothKappaIm += ema * (targetKIm - smoothKappaIm);
+
+                    // Mids → palette frequency (0.6 → 2.5)
+                    float targetFreq = 0.6f + MathF.Pow(nMid, 0.4f) * 1.9f;
+                    smoothFreq += ema * (targetFreq - smoothFreq);
+
+                    // Treble + time → palette phase rotation
+                    float phaseSpeed = 0.004f + nTreble * 0.012f;
+                    smoothPhase += phaseSpeed;
+
+                    // Onset → brightness flash
+                    float targetBright = 1.0f + MathF.Pow(nOnset, 0.5f) * 0.8f;
+                    smoothBrightness += ema * (targetBright - smoothBrightness);
+
+                    var palette = new PaletteParams
+                    {
+                        Base      = new Vector3(0.5f, 0.45f, 0.4f),
+                        Amp       = new Vector3(0.45f, 0.4f, 0.35f),
+                        Frequency = smoothFreq,
+                        Phase     = new Vector3(smoothPhase, smoothPhase + 0.2f, smoothPhase + 0.45f),
+                        TrapScale = 1.0f,
+                        TrapMix   = Vector3.Zero,
+                        ShellMix  = 0f,
+                    };
+
+                    var pp = new PostProcessParams
+                    {
+                        Brightness = smoothBrightness,
+                        Contrast   = 1.05f,
+                        Gamma      = 0.9f,
+                        Saturation = 1.3f,
+                        HdrEnabled = false,
+                    };
+
+                    var view = new DeepZoomView
+                    {
+                        CenterRe      = "0.0",
+                        CenterIm      = "0.0",
+                        Radius        = Math.Clamp(smoothRadius, 0.6, 1.8),
+                        MaxIterations = 600,
+                        Formula       = 2,  // Julia
+                        KappaRe       = smoothKappaRe,
+                        KappaIm       = smoothKappaIm,
+                    };
+
+                    uint[] pixels = renderer.RenderGraded(view, w, h, palette, bg, settings, pp);
+
+                    var info = new SKImageInfo(w, h, SKColorType.Rgba8888, SKAlphaType.Premul);
+                    var bmp  = new SKBitmap(info);
+                    var bytes = new byte[pixels.Length * 4];
+                    Buffer.BlockCopy(pixels, 0, bytes, 0, bytes.Length);
+                    Marshal.Copy(bytes, 0, bmp.GetPixels(), bytes.Length);
+                    ImageOutput.SavePng(bmp, Path.Combine(frameDir, $"frame_{i:D4}.png"));
+
+                    Console.Write($"\r  frame {i+1}/{totalFrames} r={smoothRadius:F3} k=({smoothKappaRe:F4},{smoothKappaIm:F4}) — {renderer.LastComputeMs}ms   ");
+                }
+                sw.Stop();
+                Console.WriteLine($"\nRendered {totalFrames} frames in {sw.ElapsedMilliseconds}ms ({sw.ElapsedMilliseconds/totalFrames}ms avg)");
+
+                Directory.CreateDirectory(Path.GetDirectoryName(outMp4)!);
+                string ffArgs = $"-y -framerate {fps} -i \"{Path.Combine(frameDir, "frame_%04d.png")}\" " +
+                    $"-ss {startSec} -t {durationSec} -i \"{Path.GetFullPath(wavPath)}\" " +
+                    $"-c:v libx264 -crf 18 -preset fast -pix_fmt yuv420p -c:a aac -shortest \"{outMp4}\"";
+                var proc = System.Diagnostics.Process.Start(
+                    new System.Diagnostics.ProcessStartInfo("ffmpeg", ffArgs)
+                    { RedirectStandardError = true, UseShellExecute = false })!;
+                proc.WaitForExit();
+                Directory.Delete(frameDir, recursive: true);
+                if (proc.ExitCode != 0) { Console.Error.WriteLine("ffmpeg failed."); return 1; }
+                var fi = new FileInfo(outMp4);
+                Console.WriteLine($"  -> {outMp4}  ({fi.Length / 1024} KB)");
+                return 0;
+            }
+            catch (Exception ex) { Console.Error.WriteLine($"metal-audio-deepzoom FAILED: {ex.Message}\n{ex.StackTrace}"); return 1; }
+        }
+
         if (args[0] is "gpu-render")
         {
             if (args.Length < 2)
