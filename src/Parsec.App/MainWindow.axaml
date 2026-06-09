@@ -93,6 +93,9 @@
         </Grid>
         <ContentControl Name="AudioHost" Margin="0,12,0,0" />
         <ContentControl Name="AudioMappingHost" Margin="0,8,0,0" />
+        <Button Name="SonifyButton" HorizontalAlignment="Stretch"
+                HorizontalContentAlignment="Center" Margin="0,8,0,0"
+                Content="Live Sonify: OFF" />
       </StackPanel>
       <Border Name="PanelHost" Grid.Row="1" />
     </Grid>

@@ -1,5 +1,6 @@
 using System.Numerics;
 using System.Runtime.InteropServices;
+using Parsec.Audio.Sonification;
 using Parsec.Cli.Examples;
 using Parsec.Rendering;
 using Parsec.Rendering.DeepZoom;
@@ -1362,6 +1363,354 @@ public static class Program
                 return 0;
             }
             catch (Exception ex) { Console.Error.WriteLine($"metal-m12-stills FAILED: {ex.Message}\n{ex.StackTrace}"); return 1; }
+        }
+
+        if (args[0] is "metal-telemetry-smoke")
+        {
+            if (!OperatingSystem.IsMacOS()) { Console.Error.WriteLine("metal-telemetry-smoke requires macOS."); return 1; }
+            try
+            {
+                using var renderer = new MetalMandelboxRenderer();
+                if (!renderer.IsAvailable) { Console.Error.WriteLine("Metal backend not available."); return 1; }
+
+                var fractal  = new MandelboxParams();
+                var settings = new RaymarchSettings(
+                    MaxSteps: 160, HitEpsilon: 1.5e-3f, MaxDistance: 40f, NormalEpsilon: 2e-3f,
+                    EnableSoftShadows: false, ShadowSteps: 0, ShadowSoftness: 12f,
+                    EnableAmbientOcclusion: false, AOSamples: 0, AOStepDistance: 0f, AOIntensity: 0f,
+                    HeroSamples: 1, EnableReflections: false, ReflectionBounces: 0,
+                    Gloss: 0f, F0: 0f, LightIntensity: 1f);
+
+                // Three camera positions: outside (mostly sky), standard view, inside bound sphere.
+                // M2 acceptance: closer → higher hit ratio, lower mean depth.
+                var positions = new[]
+                {
+                    ("outside",  new Camera3D(new Vector3(0f,  5f, 30f), Vector3.Zero, Vector3.UnitY, MathF.PI / 4f, 64f / 36f)),
+                    ("standard", new Camera3D(new Vector3(0f,  3f, 12f), Vector3.Zero, Vector3.UnitY, MathF.PI / 4f, 64f / 36f)),
+                    ("close",    new Camera3D(new Vector3(0f,  0f,  2f), Vector3.Zero, Vector3.UnitY, MathF.PI / 4f, 64f / 36f)),
+                };
+
+                Console.WriteLine("metal-telemetry-smoke — Mandelbox telemetry pass at 3 camera positions");
+                Console.WriteLine($"  {"pos",-10} {"hit",-6} {"depth",-7} {"dVar",-7} {"stepMn",-8} {"stepP90",-8} {"nVar",-7} {"trap.x",-7} ms");
+                Console.WriteLine($"  {new string('-', 75)}");
+
+                var results = new List<(string label, FractalGeometryStats stats, long ms)>();
+                foreach (var (label, cam) in positions)
+                {
+                    var sw = System.Diagnostics.Stopwatch.StartNew();
+                    var stats = renderer.RunTelemetryPass(fractal, cam, settings);
+                    sw.Stop();
+
+                    if (stats == null)
+                    {
+                        Console.Error.WriteLine($"  {label,-10} FAIL: RunTelemetryPass returned null");
+                        return 1;
+                    }
+
+                    var s = stats.Value;
+                    Console.WriteLine($"  {label,-10} {s.HitRatio:F3}  {s.MeanDepth,6:F2}  {s.DepthVariance,6:F2}  {s.StepMean,7:F1}  {s.StepP90,7:F0}  {s.NormalVariance,6:F3}  {s.TrapMean.X,6:F3}  {sw.ElapsedMilliseconds}ms");
+                    results.Add((label, s, sw.ElapsedMilliseconds));
+                }
+
+                // Assertions: closer camera → higher hit ratio and lower mean depth.
+                var outside  = results[0].stats;
+                var standard = results[1].stats;
+                var close    = results[2].stats;
+
+                int failures = 0;
+                void Assert(bool cond, string msg)
+                {
+                    if (!cond) { Console.Error.WriteLine($"  FAIL: {msg}"); failures++; }
+                    else         Console.WriteLine($"  PASS: {msg}");
+                }
+
+                Console.WriteLine();
+                Assert(standard.HitRatio > outside.HitRatio,
+                    $"standard.HitRatio ({standard.HitRatio:F3}) > outside.HitRatio ({outside.HitRatio:F3})");
+                Assert(close.HitRatio > outside.HitRatio,
+                    $"close.HitRatio ({close.HitRatio:F3}) > outside.HitRatio ({outside.HitRatio:F3})");
+                Assert(close.MeanDepth < standard.MeanDepth || close.HitRatio > 0.95f,
+                    $"close.MeanDepth ({close.MeanDepth:F2}) < standard.MeanDepth ({standard.MeanDepth:F2}) (or close hits >95%)");
+
+                // Sanity: all floats are finite (no NaN/Inf from broken struct readback)
+                bool allFinite =
+                    float.IsFinite(standard.HitRatio) && float.IsFinite(standard.MeanDepth) &&
+                    float.IsFinite(standard.StepMean) && float.IsFinite(standard.NormalVariance) &&
+                    float.IsFinite(standard.TrapMean.X);
+                Assert(allFinite, "all standard-view stats are finite (no NaN/Inf)");
+
+                Console.WriteLine();
+                return failures == 0 ? 0 : 1;
+            }
+            catch (Exception ex) { Console.Error.WriteLine($"metal-telemetry-smoke FAILED: {ex.Message}\n{ex.StackTrace}"); return 1; }
+        }
+
+        if (args[0] is "metal-sonify-drone")
+        {
+            if (!OperatingSystem.IsMacOS()) { Console.Error.WriteLine("metal-sonify-drone requires macOS."); return 1; }
+            try
+            {
+                double duration = args.Length >= 2 && double.TryParse(args[1], out var d) ? d : 8.0;
+                string outPath  = args.Length >= 3 ? args[2] : ResolveOutputPath("fractal_drone.wav");
+
+                const double controlHz  = 30.0;
+                int totalFrames = (int)Math.Ceiling(duration * controlHz);
+
+                Console.WriteLine($"metal-sonify-drone — Mandelbox fly-in {duration:F1}s @ {controlHz:F0} Hz ({totalFrames} telemetry frames)");
+
+                using var renderer = new MetalMandelboxRenderer();
+                if (!renderer.IsAvailable) { Console.Error.WriteLine("Metal backend not available."); return 1; }
+
+                var fractal  = new MandelboxParams();
+                var settings = new RaymarchSettings(
+                    MaxSteps: 160, HitEpsilon: 1.5e-3f, MaxDistance: 40f, NormalEpsilon: 2e-3f,
+                    EnableSoftShadows: false, ShadowSteps: 0, ShadowSoftness: 12f,
+                    EnableAmbientOcclusion: false, AOSamples: 0, AOStepDistance: 0f, AOIntensity: 0f,
+                    HeroSamples: 1, EnableReflections: false, ReflectionBounces: 0,
+                    Gloss: 0f, F0: 0f, LightIntensity: 1f);
+
+                // Fly-in: from far outside to a close-ish view, looking at origin
+                var startPos = new Vector3(0f, 5f, 30f);
+                var endPos   = new Vector3(0f, 1.5f, 7f);
+                const float fov    = MathF.PI / 4f;
+                const float aspect = 16f / 9f;
+
+                var frames = new List<FractalSonicFrame>(totalFrames);
+                Vector3 prevPos = startPos;
+
+                Console.WriteLine($"  {"fi",-5}  {"hit",-6} {"depth",-6} {"sP90",-6} {"nVar",-6} {"spd",-5}");
+                Console.WriteLine($"  {new string('-', 45)}");
+
+                for (int fi = 0; fi < totalFrames; fi++)
+                {
+                    float t   = totalFrames > 1 ? fi / (float)(totalFrames - 1) : 0f;
+                    var   pos = Vector3.Lerp(startPos, endPos, t);
+                    var   cam = new Camera3D(pos, Vector3.Zero, Vector3.UnitY, fov, aspect);
+
+                    var stats    = renderer.RunTelemetryPass(fractal, cam, settings);
+                    float camSpd = (pos - prevPos).Length() * (float)controlHz;
+                    prevPos = pos;
+
+                    frames.Add(new FractalSonicFrame(
+                        Time:              fi / controlHz,
+                        HitRatio:          stats?.HitRatio       ?? 0f,
+                        MeanDepth:         stats?.MeanDepth       ?? 0f,
+                        DepthVariance:     stats?.DepthVariance   ?? 0f,
+                        StepMean:          stats?.StepMean        ?? 0f,
+                        StepP90:           stats?.StepP90         ?? 0f,
+                        NormalMean:        stats?.NormalMean       ?? Vector3.Zero,
+                        NormalVariance:    stats?.NormalVariance   ?? 0f,
+                        TrapMean:          stats?.TrapMean         ?? Vector4.Zero,
+                        TrapVariance:      stats?.TrapVariance     ?? Vector4.Zero,
+                        CameraSpeed:       camSpd,
+                        ParameterVelocity: 0f));
+
+                    // Print a row approximately every second
+                    if (fi % (int)controlHz == 0 || fi == totalFrames - 1)
+                    {
+                        var f = frames[^1];
+                        Console.WriteLine($"  {fi,4}   {f.HitRatio:F3}  {f.MeanDepth,5:F1}  {f.StepP90,4:F0}  {f.NormalVariance:F3}  {f.CameraSpeed:F2}");
+                    }
+                }
+
+                Console.WriteLine($"\n  Synthesizing {FractalDroneSynth.DefaultSampleRate} Hz WAV ({totalFrames} frames)...");
+                var sw  = System.Diagnostics.Stopwatch.StartNew();
+                var pcm = FractalDroneSynth.Synthesize(frames, controlHz);
+                sw.Stop();
+
+                string? dir = Path.GetDirectoryName(outPath);
+                if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
+                WavEncoder.Write(outPath, pcm, FractalDroneSynth.DefaultSampleRate);
+
+                long   fileBytes = new FileInfo(outPath).Length;
+                int    peakSamp  = pcm.Length > 0 ? pcm.Max(s => Math.Abs((int)s)) : 0;
+                double peakDb    = 20.0 * Math.Log10(peakSamp / 32767.0 + 1e-10);
+                Console.WriteLine($"  synthesis {sw.ElapsedMilliseconds} ms | peak {peakDb:F1} dBFS | {fileBytes / 1024} KB");
+                Console.WriteLine($"\nOK → {outPath}");
+                return 0;
+            }
+            catch (Exception ex) { Console.Error.WriteLine($"metal-sonify-drone FAILED: {ex.Message}\n{ex.StackTrace}"); return 1; }
+        }
+
+        if (args[0] is "metal-m5-cells")
+        {
+            // Dump the 4×4 spatial cell array from one frame at a mid-fly-in camera position.
+            if (!OperatingSystem.IsMacOS()) { Console.Error.WriteLine("metal-m5-cells requires macOS."); return 1; }
+            try
+            {
+                var renderer = new MetalMandelboxRenderer();
+                if (!renderer.IsAvailable) { Console.Error.WriteLine("Metal unavailable."); return 1; }
+
+                var fractal = new MandelboxParams();
+                var settings = new RaymarchSettings(
+                    MaxSteps: 80, HitEpsilon: 1.5e-3f, MaxDistance: 40f, NormalEpsilon: 2e-3f,
+                    EnableSoftShadows: false, ShadowSteps: 0, ShadowSoftness: 12f,
+                    EnableAmbientOcclusion: false, AOSamples: 0, AOStepDistance: 0.1f, AOIntensity: 0f,
+                    LightIntensity: 1f, EnableReflections: false, ReflectionBounces: 0, Gloss: 0f, F0: 0f);
+
+                // Camera mid-fly-in: (0, 2.5, 14) looking at origin
+                var cam = new Camera3D(new Vector3(0f, 2.5f, 14f), Vector3.Zero, Vector3.UnitY,
+                    MathF.PI / 5f, 640f / 480f);
+
+                var stats = renderer.RunTelemetryPass(fractal, cam, settings);
+                if (stats == null) { Console.Error.WriteLine("Telemetry returned null."); return 1; }
+
+                Console.WriteLine($"Global: hit={stats.Value.HitRatio:F3} depth={stats.Value.MeanDepth:F1} nVar={stats.Value.NormalVariance:F3}");
+                Console.WriteLine();
+                Console.WriteLine("4×4 spatial cells (row-major, ty=0 is top of screen):");
+                Console.WriteLine($"  {"idx",-4} {"ty",3} {"tx",3}  {"hit",5}  {"depth",6}  {"energy",7}  {"step%",6}  {"trap.x",7}  WorldPos");
+                Console.WriteLine(new string('-', 85));
+
+                var cells = stats.Value.Cells;
+                if (cells != null)
+                {
+                    for (int i = 0; i < cells.Length; i++)
+                    {
+                        int ty2 = i / 4, tx2 = i % 4;
+                        var c = cells[i];
+                        Console.WriteLine($"  {i,-4} {ty2,3} {tx2,3}  {c.HitRatio,5:F3}  {c.MeanDepth,6:F2}  {c.Energy,7:F4}  {c.StepComplexity,6:F3}  {c.TrapMean.X,7:F4}  ({c.WorldPosition.X:F2},{c.WorldPosition.Y:F2},{c.WorldPosition.Z:F2})");
+                    }
+                }
+                else
+                {
+                    Console.WriteLine("  (no cells returned)");
+                }
+                return 0;
+            }
+            catch (Exception ex) { Console.Error.WriteLine($"metal-m5-cells FAILED: {ex.Message}\n{ex.StackTrace}"); return 1; }
+        }
+
+        if (args[0] is "metal-sonify-clip")
+        {
+            if (!OperatingSystem.IsMacOS()) { Console.Error.WriteLine("metal-sonify-clip requires macOS."); return 1; }
+            try
+            {
+                double duration = args.Length >= 2 && double.TryParse(args[1], out var d) ? d : 8.0;
+                string outMp4   = args.Length >= 3 ? args[2] : ResolveOutputPath("fractal_drone.mp4");
+
+                const int    fps    = 30;
+                const int    w      = 640;
+                const int    h      = 480;
+                int totalFrames     = (int)Math.Round(duration * fps);
+
+                Console.WriteLine($"metal-sonify-clip — Mandelbox fly-in {duration:F1}s @ {fps} fps ({totalFrames} frames, {w}x{h})");
+                Console.WriteLine("  Renders each frame + telemetry pass; drone audio is synthesised from the geometry.");
+
+                using var renderer = new MetalMandelboxRenderer();
+                if (!renderer.IsAvailable) { Console.Error.WriteLine("Metal backend not available."); return 1; }
+
+                var fractal = new MandelboxParams();
+                var settings = new RaymarchSettings(
+                    MaxSteps: 160, HitEpsilon: 1.5e-3f, MaxDistance: 40f, NormalEpsilon: 2e-3f,
+                    EnableSoftShadows: true,  ShadowSteps: 40, ShadowSoftness: 12f,
+                    EnableAmbientOcclusion: true, AOSamples: 4, AOStepDistance: 0.06f, AOIntensity: 0.9f,
+                    HeroSamples: 1, EnableReflections: false, ReflectionBounces: 0,
+                    Gloss: 0f, F0: 0f, LightIntensity: 1.3f);
+
+                var bg      = new Color(0.02f, 0.02f, 0.06f);
+                var surface = new Color(0.55f, 0.62f, 0.75f);
+                var light   = Vector3.Normalize(new Vector3(1.2f, 2f, 1.5f));
+                var palette = PaletteParams.Default;
+                var post    = new PostProcessParams { Brightness = 1.05f, Contrast = 1.1f,
+                                                    Saturation = 1.2f, Gamma = 2.2f };
+
+                var startPos = new Vector3(0f, 5f, 30f);
+                var endPos   = new Vector3(0f, 1.5f, 7f);
+                const float fov    = MathF.PI / 4f;
+                const float aspect = (float)w / h;
+
+                var frameDir = Path.Combine(Path.GetTempPath(), $"parsec-sonify-{Guid.NewGuid():N}");
+                Directory.CreateDirectory(frameDir);
+
+                var sonicFrames = new List<FractalSonicFrame>(totalFrames);
+                Vector3 prevPos = startPos;
+
+                Console.WriteLine($"\n  {"fi",-5}  {"hit",-6} {"depth",-6} {"sP90",-5} {"nVar",-6} {"spd",-5}  render ms");
+                Console.WriteLine($"  {new string('-', 55)}");
+
+                var totalSw = System.Diagnostics.Stopwatch.StartNew();
+
+                for (int fi = 0; fi < totalFrames; fi++)
+                {
+                    float t   = totalFrames > 1 ? fi / (float)(totalFrames - 1) : 0f;
+                    var   pos = Vector3.Lerp(startPos, endPos, t);
+                    var   cam = new Camera3D(pos, Vector3.Zero, Vector3.UnitY, fov, aspect);
+
+                    // Render frame
+                    uint[] pixels = renderer.RenderMandelbox(fractal, cam, w, h, settings, bg, surface, light, palette, post);
+
+                    // Save PNG
+                    var info = new SKImageInfo(w, h, SKColorType.Rgba8888, SKAlphaType.Premul);
+                    var bmp  = new SKBitmap(info);
+                    var bytes = new byte[pixels.Length * 4];
+                    Buffer.BlockCopy(pixels, 0, bytes, 0, bytes.Length);
+                    Marshal.Copy(bytes, 0, bmp.GetPixels(), bytes.Length);
+                    ImageOutput.SavePng(bmp, Path.Combine(frameDir, $"frame_{fi:D4}.png"));
+                    bmp.Dispose();
+
+                    // Telemetry pass (separate low-res kernel — same camera position)
+                    var stats   = renderer.RunTelemetryPass(fractal, cam, settings);
+                    float camSpd = (pos - prevPos).Length() * fps;
+                    prevPos = pos;
+
+                    sonicFrames.Add(new FractalSonicFrame(
+                        Time:              fi / (double)fps,
+                        HitRatio:          stats?.HitRatio       ?? 0f,
+                        MeanDepth:         stats?.MeanDepth       ?? 0f,
+                        DepthVariance:     stats?.DepthVariance   ?? 0f,
+                        StepMean:          stats?.StepMean        ?? 0f,
+                        StepP90:           stats?.StepP90         ?? 0f,
+                        NormalMean:        stats?.NormalMean       ?? Vector3.Zero,
+                        NormalVariance:    stats?.NormalVariance   ?? 0f,
+                        TrapMean:          stats?.TrapMean         ?? Vector4.Zero,
+                        TrapVariance:      stats?.TrapVariance     ?? Vector4.Zero,
+                        CameraSpeed:       camSpd,
+                        ParameterVelocity: 0f));
+
+                    if (fi % fps == 0 || fi == totalFrames - 1)
+                    {
+                        var sf = sonicFrames[^1];
+                        Console.WriteLine($"  {fi,4}   {sf.HitRatio:F3}  {sf.MeanDepth,5:F1}  {sf.StepP90,4:F0}  {sf.NormalVariance:F3}  {sf.CameraSpeed:F2}  {renderer.LastComputeMs}ms");
+                    }
+                    else
+                    {
+                        Console.Write($"\r  frame {fi + 1}/{totalFrames}");
+                    }
+                }
+
+                totalSw.Stop();
+                Console.WriteLine($"\n  {totalFrames} frames in {totalSw.ElapsedMilliseconds} ms ({totalSw.ElapsedMilliseconds / totalFrames} ms avg)");
+
+                // Synthesise WAV from telemetry frames (1 sonic frame per video frame → controlRate = fps)
+                Console.Write($"\n  Synthesising {FractalDroneSynth.DefaultSampleRate} Hz WAV from {sonicFrames.Count} geometry frames...");
+                var synthSw  = System.Diagnostics.Stopwatch.StartNew();
+                var pcm      = FractalDroneSynth.Synthesize(sonicFrames, fps);
+                synthSw.Stop();
+
+                string wavPath = Path.Combine(frameDir, "drone.wav");
+                WavEncoder.Write(wavPath, pcm, FractalDroneSynth.DefaultSampleRate);
+                int peakSamp = pcm.Length > 0 ? pcm.Max(s => Math.Abs((int)s)) : 0;
+                double peakDb = 20.0 * Math.Log10(peakSamp / 32767.0 + 1e-10);
+                Console.WriteLine($" {synthSw.ElapsedMilliseconds} ms | peak {peakDb:F1} dBFS");
+
+                // Mux with ffmpeg
+                Directory.CreateDirectory(Path.GetDirectoryName(outMp4)!);
+                string ffArgs = $"-y -framerate {fps} -i \"{Path.Combine(frameDir, "frame_%04d.png")}\" " +
+                                $"-i \"{wavPath}\" " +
+                                $"-c:v libx264 -crf 18 -preset fast -pix_fmt yuv420p -c:a aac -shortest \"{outMp4}\"";
+                Console.Write("  Running ffmpeg...");
+                var proc = System.Diagnostics.Process.Start(
+                    new System.Diagnostics.ProcessStartInfo("ffmpeg", ffArgs)
+                    { RedirectStandardError = true, UseShellExecute = false })!;
+                proc.WaitForExit();
+                Directory.Delete(frameDir, recursive: true);
+
+                if (proc.ExitCode != 0) { Console.Error.WriteLine(" ffmpeg failed."); return 1; }
+                var fi2   = new FileInfo(outMp4);
+                Console.WriteLine($" done.\nOK → {outMp4}  ({fi2.Length / 1024} KB)");
+                return 0;
+            }
+            catch (Exception ex) { Console.Error.WriteLine($"metal-sonify-clip FAILED: {ex.Message}\n{ex.StackTrace}"); return 1; }
         }
 
         var matches = examples.Where(e => e.Name == args[0]).ToList();

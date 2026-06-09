@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Numerics;
 using Parsec.Audio.Sonification;
+using Parsec.Rendering.Metal;
 
 namespace Parsec.App;
 
@@ -9,6 +10,7 @@ namespace Parsec.App;
 /// Produces <see cref="FractalSonicFrame"/>s from live camera and parameter state.
 /// M1: populates CameraSpeed and ParameterVelocity from CPU state; geometry fields
 /// are stubs (zero) until M2 adds the Metal telemetry pass.
+/// M5: propagates spatial cells and camera orientation for OpenAL 3D emitters.
 /// </summary>
 public sealed class SonificationController
 {
@@ -19,10 +21,12 @@ public sealed class SonificationController
     private double[]? _prevParamValues;
     private double _prevParamTime = -1;
 
+    // Volatile so the audio worker thread always sees the latest frame without
+    // a lock (FractalSonicFrame is a reference type; pointer reads are atomic on x64/ARM64).
     private FractalSonicFrame _latestFrame =
         new(0, 0, 0, 0, 0, 0, Vector3.Zero, 0, Vector4.Zero, Vector4.Zero, 0, 0);
 
-    public FractalSonicFrame LatestFrame => _latestFrame;
+    public FractalSonicFrame LatestFrame => Volatile.Read(ref _latestFrame);
 
     public void SetDescriptors(IReadOnlyList<ParamDescriptor> descriptors)
     {
@@ -31,26 +35,32 @@ public sealed class SonificationController
         _prevParamTime = -1;
     }
 
-    public FractalSonicFrame Update(double nowSeconds, Vector3 cameraPos)
+    public FractalSonicFrame Update(double nowSeconds, Vector3 cameraPos,
+        Vector3 cameraForward, Vector3 cameraUp,
+        FractalGeometryStats? telemetry = null)
     {
         float camSpeed = ComputeCameraSpeed(nowSeconds, cameraPos);
         float paramVelocity = ComputeParamVelocity(nowSeconds);
 
         var frame = new FractalSonicFrame(
-            Time: nowSeconds,
-            HitRatio: 0f,
-            MeanDepth: 0f,
-            DepthVariance: 0f,
-            StepMean: 0f,
-            StepP90: 0f,
-            NormalMean: Vector3.Zero,
-            NormalVariance: 0f,
-            TrapMean: Vector4.Zero,
-            TrapVariance: Vector4.Zero,
-            CameraSpeed: camSpeed,
-            ParameterVelocity: paramVelocity);
+            Time:              nowSeconds,
+            HitRatio:          telemetry?.HitRatio          ?? 0f,
+            MeanDepth:         telemetry?.MeanDepth          ?? 0f,
+            DepthVariance:     telemetry?.DepthVariance      ?? 0f,
+            StepMean:          telemetry?.StepMean           ?? 0f,
+            StepP90:           telemetry?.StepP90            ?? 0f,
+            NormalMean:        telemetry?.NormalMean         ?? Vector3.Zero,
+            NormalVariance:    telemetry?.NormalVariance     ?? 0f,
+            TrapMean:          telemetry?.TrapMean           ?? Vector4.Zero,
+            TrapVariance:      telemetry?.TrapVariance       ?? Vector4.Zero,
+            CameraSpeed:       camSpeed,
+            ParameterVelocity: paramVelocity,
+            CameraPosition:    cameraPos,
+            CameraForward:     cameraForward,
+            CameraUp:          cameraUp,
+            Cells:             ConvertCells(telemetry?.Cells));
 
-        _latestFrame = frame;
+        Volatile.Write(ref _latestFrame, frame);
         return frame;
     }
 
@@ -92,5 +102,19 @@ public sealed class SonificationController
         _prevParamValues = current;
         _prevParamTime = nowSeconds;
         return velocity;
+    }
+
+    private static FractalSonicCell[]? ConvertCells(MetalSpatialCell[]? src)
+    {
+        if (src == null || src.Length == 0) return null;
+        var result = new FractalSonicCell[src.Length];
+        for (int i = 0; i < src.Length; i++)
+        {
+            ref readonly var c = ref src[i];
+            result[i] = new FractalSonicCell(
+                c.WorldPosition, c.HitRatio, c.MeanDepth,
+                c.StepComplexity, c.NormalMean, c.TrapMean, c.Energy);
+        }
+        return result;
     }
 }

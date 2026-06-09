@@ -6,6 +6,7 @@ using Avalonia.Interactivity;
 using Avalonia.Markup.Xaml;
 using Avalonia.Threading;
 using Parsec.Audio;
+using Parsec.Audio.Sonification;
 
 namespace Parsec.App;
 
@@ -20,6 +21,9 @@ public partial class MainWindow : Window
     private AudioMappingPanel? _audioMappingPanel;
     private DispatcherTimer? _modTimer;
     private readonly SonificationController _sonification = new();
+
+    private FractalDroneStream? _droneStream;
+    private bool _sonifyActive;
 
     // Animation timeline state.
     private KeyframeBank? _bank;
@@ -99,6 +103,10 @@ public partial class MainWindow : Window
         if (loadAnimButton != null)
             loadAnimButton.Click += OnLoadAnimClick;
 
+        var sonifyButton = this.FindControl<Button>("SonifyButton");
+        if (sonifyButton != null)
+            sonifyButton.Click += OnSonifyClick;
+
         if (_view != null && status != null)
         {
             _view.HeroRenderComplete += text => status.Text = text;
@@ -147,8 +155,45 @@ public partial class MainWindow : Window
     private async void OnWindowClosed(object? sender, EventArgs e)
     {
         _modTimer?.Stop();
+        _droneStream?.Stop();
+        _droneStream = null;
         if (_audioTransport != null)
             await _audioTransport.DisposeAsync();
+    }
+
+    // ----------------------------------------------------------- sonification toggle
+
+    private void OnSonifyClick(object? sender, RoutedEventArgs e)
+    {
+        if (_sonifyActive)
+        {
+            _sonifyActive = false;
+            _droneStream?.Stop();
+            _droneStream = null;
+            _modTimer?.Start();   // resume reactive modulation
+            if (sender is Button btn) btn.Content = "Live Sonify: OFF";
+            SetStatus("Live sonification stopped.");
+        }
+        else
+        {
+            // Mutual exclusion: pause reactive modulation while sonifying
+            _modTimer?.Stop();
+
+            _droneStream = new FractalDroneStream(() => _sonification.LatestFrame);
+            bool ok = _droneStream.Start();
+
+            if (!ok)
+            {
+                _droneStream = null;
+                _modTimer?.Start();
+                SetStatus("Live Sonify: OpenAL unavailable. Install openal-soft (brew install openal-soft).");
+                return;
+            }
+
+            _sonifyActive = true;
+            if (sender is Button btn) btn.Content = "Live Sonify: ON";
+            SetStatus("Live sonification started. Fly around Mandelbox to hear geometry.");
+        }
     }
 
     // ----------------------------------------------------------- hero / generate

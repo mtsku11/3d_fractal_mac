@@ -81,6 +81,8 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
     private bool _ready;
     private bool _dirty = true;
     private readonly System.Diagnostics.Stopwatch _sonicClock = System.Diagnostics.Stopwatch.StartNew();
+    private readonly System.Diagnostics.Stopwatch _telemetryThrottle = System.Diagnostics.Stopwatch.StartNew();
+    private Parsec.Rendering.Metal.FractalGeometryStats? _lastTelemetry;
 
     /// <summary>Optional sonification controller. Set by the host (MainWindow) when sonification is enabled.</summary>
     public SonificationController? Sonification { get; set; }
@@ -408,7 +410,9 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
     private static string SonicDebugSuffix(Audio.Sonification.FractalSonicFrame? frame)
     {
         if (frame == null) return string.Empty;
-        return $" · son: camSpd={frame.CameraSpeed:F2} pVel={frame.ParameterVelocity:F4}";
+        return $" · son: camSpd={frame.CameraSpeed:F2} pVel={frame.ParameterVelocity:F4}" +
+               $" hit={frame.HitRatio:F2} depth={frame.MeanDepth:F1} steps={frame.StepMean:F0}" +
+               $" nVar={frame.NormalVariance:F2} trap=({frame.TrapMean.X:F2},{frame.TrapMean.Y:F2},{frame.TrapMean.Z:F2},{frame.TrapMean.W:F2})";
     }
 
     public FractalView()
@@ -896,7 +900,21 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
 
             if (renderedPreview)
             {
-                var sonicFrame = Sonification?.Update(_sonicClock.Elapsed.TotalSeconds, _cam.Position);
+                // Run telemetry pass for Mandelbox (~30 Hz, best-effort)
+                if (Sonification != null && ActiveType == FractalType.Mandelbox
+                    && _metalRenderer?.IsAvailable == true
+                    && _telemetryThrottle.ElapsedMilliseconds >= 33)
+                {
+                    _telemetryThrottle.Restart();
+                    try { _lastTelemetry = _metalRenderer.RunTelemetryPass(Mandelbox.ToParams(), camera, PreviewSettings()); }
+                    catch { _lastTelemetry = null; }
+                }
+                else if (ActiveType != FractalType.Mandelbox || _metalRenderer?.IsAvailable != true)
+                {
+                    _lastTelemetry = null;
+                }
+
+                var sonicFrame = Sonification?.Update(_sonicClock.Elapsed.TotalSeconds, _cam.Position, _cam.Forward, _cam.UpLocal, _lastTelemetry);
                 Status($"Metal {ActiveType} · {rw}x{rh} · compute {_metalComputeMs} ms · readback {_metalReadbackMs} ms · total {_totalFrameMs} ms  ·  WASD+QE move · drag to look{SonicDebugSuffix(sonicFrame)}");
             }
         }
@@ -1102,7 +1120,7 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
             bool atMaxDepth = ActiveType == FractalType.DeepZoom
                 && _deepView.Radius <= DeepZoomView.MinRadius * 1.05;
             {
-                var sonicFrame = Sonification?.Update(_sonicClock.Elapsed.TotalSeconds, _cam.Position);
+                var sonicFrame = Sonification?.Update(_sonicClock.Elapsed.TotalSeconds, _cam.Position, _cam.Forward, _cam.UpLocal, _lastTelemetry);
                 string sonicSuffix = SonicDebugSuffix(sonicFrame);
                 Status(ActiveType == FractalType.DeepZoom
                     ? $"Deep Zoom 2D · {(_deepView.Formula switch { 1 => "Prospector", 2 => "Julia", 3 => "Burning Ship", _ => "Mandelbrot" })} · radius {_deepView.Radius:e2}{(atMaxDepth ? " · max depth" : "")} · {rw}x{rh} · drag pan · scroll zoom"
