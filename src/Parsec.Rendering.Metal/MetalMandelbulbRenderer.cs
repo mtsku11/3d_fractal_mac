@@ -62,7 +62,8 @@ public sealed class MetalMandelbulbRenderer : IDisposable
         Color surface,
         Vector3 lightDirection,
         PaletteParams palette,
-        Vector2 subpixelJitter = default)
+        Vector2 subpixelJitter = default,
+        PostProcessParams? postProcess = null)
     {
         ThrowIfDisposed();
         if (!_isAvailable)
@@ -72,13 +73,16 @@ public sealed class MetalMandelbulbRenderer : IDisposable
         // sample with that jitter and return immediately. When called from in-app
         // hero renders with no jitter, run the full SSAA accumulation loop.
         if (subpixelJitter != Vector2.Zero)
-            return DispatchOneSample(fractal, camera, width, height, settings, background, surface, lightDirection, palette, subpixelJitter);
+            return MetalPostProcess.Apply(_device, _queue,
+                DispatchOneSample(fractal, camera, width, height, settings, background, surface, lightDirection, palette, subpixelJitter),
+                width, height, postProcess);
 
-        return MetalSsaa.Accumulate(settings.HeroSamples, width, height, jitter =>
+        var hdr = MetalSsaa.AccumulateHdr(settings.HeroSamples, width, height, jitter =>
             DispatchOneSample(fractal, camera, width, height, settings, background, surface, lightDirection, palette, jitter));
+        return MetalPostProcess.Apply(_device, _queue, hdr, width, height, postProcess);
     }
 
-    private uint[] DispatchOneSample(
+    private float[] DispatchOneSample(
         MandelbulbParams fractal,
         Camera3D camera,
         int width,
@@ -93,7 +97,7 @@ public sealed class MetalMandelbulbRenderer : IDisposable
         int pixelCount = width * height;
         using var foldBuf   = UploadStruct(_device, BuildFoldParams(fractal));
         using var renderBuf = UploadStruct(_device, BuildRenderParams(camera, width, height, lightDirection, background, surface, settings, palette, jitter));
-        using var outBuf    = _device.NewBuffer((ulong)(pixelCount * sizeof(uint)), MTLResourceOptions.ResourceStorageModeShared);
+        using var outBuf    = _device.NewBuffer((ulong)(pixelCount * 4 * sizeof(float)), MTLResourceOptions.ResourceStorageModeShared);
 
         var cmd = _queue.CommandBuffer();
         var enc = cmd.ComputeCommandEncoder();
@@ -114,7 +118,7 @@ public sealed class MetalMandelbulbRenderer : IDisposable
         LastComputeMs = computeSw.ElapsedMilliseconds;
 
         var readbackSw = System.Diagnostics.Stopwatch.StartNew();
-        var result = ReadUintBuffer(outBuf, pixelCount);
+        var result = ReadFloat4Buffer(outBuf, pixelCount);
         LastReadbackMs = readbackSw.ElapsedMilliseconds;
         return result;
     }
@@ -208,12 +212,13 @@ public sealed class MetalMandelbulbRenderer : IDisposable
         return buf;
     }
 
-    private static unsafe uint[] ReadUintBuffer(MTLBuffer buf, int count)
+    private static unsafe float[] ReadFloat4Buffer(MTLBuffer buf, int count)
     {
-        var result = new uint[count];
-        fixed (uint* dst = result)
+        var result = new float[count * 4];
+        fixed (float* dst = result)
         {
-            Buffer.MemoryCopy((void*)buf.Contents, dst, (long)count * sizeof(uint), (long)count * sizeof(uint));
+            Buffer.MemoryCopy((void*)buf.Contents, dst,
+                (long)result.Length * sizeof(float), (long)result.Length * sizeof(float));
         }
         return result;
     }

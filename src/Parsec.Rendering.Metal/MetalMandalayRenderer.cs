@@ -31,23 +31,25 @@ public sealed class MetalMandalayRenderer : IDisposable
 
     public uint[] RenderMandalay(MandalayParams md, Camera3D camera, int width, int height,
         RaymarchSettings settings, Color background, Color surface, Vector3 lightDirection,
-        PaletteParams palette)
+        PaletteParams palette,
+        PostProcessParams? postProcess = null)
     {
         ThrowIfDisposed();
         if (!_isAvailable) throw new InvalidOperationException("Metal backend unavailable.");
-        return MetalSsaa.Accumulate(settings.HeroSamples, width, height, jitter =>
+        var _hdrAcc = MetalSsaa.AccumulateHdr(settings.HeroSamples, width, height, jitter =>
         {
             using var fb = UploadStruct(_device, BuildFoldParams(md));
             using var rb = UploadStruct(_device, BuildRenderParams(camera, width, height, lightDirection, background, surface, settings, palette, jitter));
-            using var ob = _device.NewBuffer((ulong)(width * height * sizeof(uint)), MTLResourceOptions.ResourceStorageModeShared);
+            using var ob = _device.NewBuffer((ulong)(width * height * 4 * sizeof(float)), MTLResourceOptions.ResourceStorageModeShared);
             var cmd = _queue.CommandBuffer(); var enc = cmd.ComputeCommandEncoder();
             enc.SetComputePipelineState(_pso!); enc.SetBuffer(fb,0,0); enc.SetBuffer(rb,0,1); enc.SetBuffer(ob,0,2);
             enc.DispatchThreadgroups(new MTLSize{width=(ulong)((width+7)/8),height=(ulong)((height+7)/8),depth=1}, new MTLSize{width=8,height=8,depth=1});
             enc.EndEncoding();
             var sw = System.Diagnostics.Stopwatch.StartNew(); cmd.Commit(); cmd.WaitUntilCompleted(); LastComputeMs = sw.ElapsedMilliseconds;
-            sw.Restart(); var result = ReadUintBuffer(ob, width * height); LastReadbackMs = sw.ElapsedMilliseconds;
+            sw.Restart(); var result = ReadFloat4Buffer(ob, width * height); LastReadbackMs = sw.ElapsedMilliseconds;
             return result;
         });
+        return MetalPostProcess.Apply(_device, _queue, _hdrAcc, width, height, postProcess);
     }
 
     public void Dispose() { if (_disposed) return; _disposed = true; if (_isAvailable) { _pso.Dispose(); _queue.Dispose(); _device.Dispose(); } }
@@ -77,7 +79,7 @@ public sealed class MetalMandalayRenderer : IDisposable
     }
 
     private static MTLBuffer UploadStruct<T>(MTLDevice device, T value) where T : struct { int size=Marshal.SizeOf<T>(); var buf=device.NewBuffer((ulong)size,MTLResourceOptions.ResourceStorageModeShared); Marshal.StructureToPtr(value,buf.Contents,false); return buf; }
-    private static unsafe uint[] ReadUintBuffer(MTLBuffer buf, int count) { var r=new uint[count]; fixed(uint*d=r) Buffer.MemoryCopy((void*)buf.Contents,d,(long)count*sizeof(uint),(long)count*sizeof(uint)); return r; }
+    private static unsafe float[] ReadFloat4Buffer(MTLBuffer buf, int count) { var r=new float[count*4]; fixed(float*d=r) Buffer.MemoryCopy((void*)buf.Contents,d,(long)r.Length*sizeof(float),(long)r.Length*sizeof(float)); return r; }
     private static string LoadEmbeddedMsl(string fn) { var asm=Assembly.GetExecutingAssembly(); using var s=asm.GetManifestResourceStream($"Parsec.Rendering.Metal.Shaders.{fn}")??throw new FileNotFoundException(fn); using var r=new StreamReader(s); return r.ReadToEnd(); }
     private void ThrowIfDisposed() { if(_disposed) throw new ObjectDisposedException(nameof(MetalMandalayRenderer)); }
 

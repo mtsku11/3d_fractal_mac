@@ -17,7 +17,7 @@ Requires an **active** display on macOS — will fail with `activeDisplays=0` if
 ```
 dotnet run --project src/Parsec.Cli/Parsec.Cli.csproj -- <command>
 ```
-Commands: `metal-smoke [w] [h]`, `metal-bulb-smoke [w] [h]`, `metal-new-smoke` (all 14 new renderers), `gpu-smoke`, `gpu-render <name>`, `gpu-de-validate`, `attractor-stats`, `metal-orbit-gif`, `metal-morph-mp4`, `metal-audio-reactive [wav] [startSec] [durationSec] [outMp4]`, `all`, `list`.
+Commands: `metal-smoke [w] [h]`, `metal-bulb-smoke [w] [h]`, `metal-new-smoke` (all 14 new renderers), `metal-m12-stills` (4 fractals at 512×512 with varied grade params), `gpu-smoke`, `gpu-render <name>`, `gpu-de-validate`, `attractor-stats`, `metal-orbit-gif`, `metal-morph-mp4`, `metal-audio-reactive [wav] [startSec] [durationSec] [outMp4]`, `all`, `list`.
 
 ---
 
@@ -94,39 +94,51 @@ float tanX = tanY * ((float)width / height);
 
 ---
 
-## Metal SSAA — adding hero-still supersampling to a Metal renderer
+## Metal SSAA + HDR post-processing — M12 pipeline
 
-All 20 Metal renderers use `MetalSsaa.Accumulate` (in `Parsec.Rendering.Metal/MetalSsaa.cs`) to run N Halton-jittered samples and average the result. The pattern is:
+All 20 3D Metal renderers use the HDR path (M12). The kernel emits `float4`; `AccumulateHdr` accumulates in float space; `MetalPostProcess.Apply` grades and packs to RGBA8.
 
+**Kernel output contract (all 20 `*_raymarch.metal`, not `deepzoom_metal.metal`):**
+```metal
+device float4* output [[buffer(2)]],
+...
+output[idx] = float4(color, 1.0f);  // no clamp, no pack — post does it
+```
+
+**C# renderer pattern:**
 ```csharp
 public uint[] RenderFoo(FooParams fractal, Camera3D camera, int width, int height,
     RaymarchSettings settings, Color background, Color surface,
-    Vector3 lightDirection, PaletteParams palette)
+    Vector3 lightDirection, PaletteParams palette,
+    PostProcessParams? postProcess = null)
 {
     ThrowIfDisposed();
     if (!_isAvailable) throw new InvalidOperationException("Metal backend unavailable.");
-    return MetalSsaa.Accumulate(settings.HeroSamples, width, height, jitter =>
+    var hdr = MetalSsaa.AccumulateHdr(settings.HeroSamples, width, height, jitter =>
     {
-        using var fb  = UploadStruct(_device, BuildFoldParams(fractal));
-        using var rb  = UploadStruct(_device, BuildRenderParams(..., palette, jitter));
-        using var ob  = _device.NewBuffer(...SharedMode...);
-        using var cmd = _queue.CommandBuffer();
-        using var enc = cmd.ComputeCommandEncoder();
+        var fb = UploadStruct(_device, BuildFoldParams(fractal));
+        var rb = UploadStruct(_device, BuildRenderParams(..., palette, jitter));
+        var ob = _device.NewBuffer((ulong)(width * height * 4 * sizeof(float)),
+                                   MTLResourceOptions.ResourceStorageModeShared);
+        var cmd = _queue.CommandBuffer(); var enc = cmd.ComputeCommandEncoder();
         enc.SetComputePipelineState(_pso!);
         enc.SetBuffer(fb, 0, 0); enc.SetBuffer(rb, 0, 1); enc.SetBuffer(ob, 0, 2);
         enc.DispatchThreadgroups(...); enc.EndEncoding();
         cmd.Commit(); cmd.WaitUntilCompleted();
-        return ReadUintBuffer(ob, width * height);
+        return ReadFloat4Buffer(ob, width * height);  // returns float[count*4]
     });
+    return MetalPostProcess.Apply(_device, _queue, hdr, width, height, postProcess);
 }
 ```
 
 Key points:
-- `BuildRenderParams` must accept `Vector2 jitter` and set `SubpixelJitter = new Vector4(jitter.X, jitter.Y, 0f, 0f)` in the returned struct.
-- `MetalSsaa.Accumulate` short-circuits when `sampleCount == 1` — passes `Vector2.Zero` and returns immediately, so preview renders (which always use `HeroSamples: 1`) cost nothing extra.
-- CPU accumulation is free on Apple Silicon unified memory: N `Buffer.MemoryCopy` calls each cost <1 ms.
-- `settings.HeroSamples` is already set from `FractalView.HeroSampleCount` (the UI ComboBox) via `HeroSettings()` — no call-site changes needed.
-- **CLI morph exception:** `MetalMandelbulbRenderer.RenderMandelbulb` keeps a `Vector2 subpixelJitter = default` param. Non-zero explicit jitter bypasses the loop and calls `DispatchOneSample` directly; zero jitter (in-app) runs the SSAA loop.
+- Output buffer is `4 * sizeof(float)` per pixel (not `sizeof(uint)`).
+- `ReadFloat4Buffer` returns `float[count * 4]` (stride 4: R, G, B, A per pixel).
+- `AccumulateHdr` short-circuits at `sampleCount == 1`, same as old `Accumulate`.
+- `PostProcessParams` defaults are identity — output identical to pre-M12 at default params.
+- `MetalSsaa.Accumulate` (old RGBA8 path) retained for `MetalDeepZoomRenderer` only.
+- `BuildRenderParams` must accept `Vector2 jitter` and pack it into `SubpixelJitter`.
+- **CLI morph exception:** `MetalMandelbulbRenderer` retains the `Vector2 subpixelJitter = default` overload; it also goes through `MetalPostProcess.Apply`.
 
 ---
 

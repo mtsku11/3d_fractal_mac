@@ -300,7 +300,7 @@ float3 shadeDirect(Hit h, float hitEps, float maxDist,
 kernel void kleinian_raymarch(
     constant FoldParams&   fp     [[buffer(0)]],
     constant RenderParams& rp     [[buffer(1)]],
-    device   uint*         output [[buffer(2)]],
+    device   float4*       output [[buffer(2)]],
     uint2 gid [[thread_position_in_grid]])
 {
     int px = int(gid.x);
@@ -356,6 +356,5 @@ kernel void kleinian_raymarch(
     }
 
     int idx = py * rp.imageWidth + px;
-    uint3 q = uint3(clamp(color, float3(0.0f), float3(1.0f)) * 255.0f + 0.5f);
-    output[idx] = (255u << 24) | (q.b << 16) | (q.g << 8) | q.r;
+    output[idx] = float4(color, 1.0f);
 }

@@ -123,6 +123,9 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
     /// <summary>Orbit-trap palette, shared across all fractals.</summary>
     public PaletteState Palette { get; } = new();
 
+    /// <summary>HDR grade parameters for the Metal post-process pass, shared across all 3D fractals.</summary>
+    public PostProcessState PostProcess { get; } = new();
+
     /// <summary>Glossy-reflection material controls, shared across all fractals.</summary>
     public ReflectionState Reflection { get; } = new();
 
@@ -203,6 +206,8 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
         combined.AddRange(Palette.BuildSchema().Parameters);
         combined.AddRange(Reflection.BuildSchema().Parameters);
         combined.AddRange(Light.BuildSchema().Parameters);
+        if (OperatingSystem.IsMacOS())
+            combined.AddRange(PostProcess.BuildSchema().Parameters);
         return new ParamSchema { Parameters = combined };
     }
 
@@ -1393,7 +1398,7 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
             background: new Color(0.02f, 0.03f, 0.07f),
             surface: Color.Rgb(170, 150, 130),
             lightDirection: Light.ToDirection(),
-            palette: Palette.ToParams());
+            palette: Palette.ToParams(), postProcess: PostProcess.ToParams());
         _metalComputeMs  = _metalRenderer!.LastComputeMs;
         _metalReadbackMs = _metalRenderer!.LastReadbackMs;
         return pixels;
@@ -1407,7 +1412,7 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
             background: new Color(0.02f, 0.03f, 0.07f),
             surface: Color.Rgb(210, 175, 140),
             lightDirection: Light.ToDirection(),
-            palette: Palette.ToParams());
+            palette: Palette.ToParams(), postProcess: PostProcess.ToParams());
         _metalComputeMs  = _metalMandelbulbRenderer!.LastComputeMs;
         _metalReadbackMs = _metalMandelbulbRenderer!.LastReadbackMs;
         return pixels;
@@ -1421,7 +1426,7 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
             background: new Color(0.02f, 0.03f, 0.07f),
             surface: Color.Rgb(190, 175, 155),
             lightDirection: Light.ToDirection(),
-            palette: Palette.ToParams());
+            palette: Palette.ToParams(), postProcess: PostProcess.ToParams());
         _metalComputeMs  = _metalRotBoxRenderer!.LastComputeMs;
         _metalReadbackMs = _metalRotBoxRenderer!.LastReadbackMs;
         return pixels;
@@ -1435,7 +1440,7 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
             background: new Color(0.02f, 0.03f, 0.07f),
             surface: Color.Rgb(150, 125, 100),
             lightDirection: Light.ToDirection(),
-            palette: Palette.ToParams());
+            palette: Palette.ToParams(), postProcess: PostProcess.ToParams());
         _metalComputeMs  = _metalKifsRenderer!.LastComputeMs;
         _metalReadbackMs = _metalKifsRenderer!.LastReadbackMs;
         return pixels;
@@ -1449,7 +1454,7 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
             background: new Color(0.02f, 0.03f, 0.07f),
             surface: Color.Rgb(150, 125, 100),
             lightDirection: Light.ToDirection(),
-            palette: Palette.ToParams());
+            palette: Palette.ToParams(), postProcess: PostProcess.ToParams());
         _metalComputeMs  = _metalKleinianRenderer!.LastComputeMs;
         _metalReadbackMs = _metalKleinianRenderer!.LastReadbackMs;
         return pixels;
@@ -1463,66 +1468,66 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
             background: new Color(0.02f, 0.03f, 0.07f),
             surface: Color.Rgb(190, 170, 145),
             lightDirection: Light.ToDirection(),
-            palette: Palette.ToParams());
+            palette: Palette.ToParams(), postProcess: PostProcess.ToParams());
         _metalComputeMs  = _metalHybridRenderer!.LastComputeMs;
         _metalReadbackMs = _metalHybridRenderer!.LastReadbackMs;
         return pixels;
     }
 
     private uint[] RenderWithMetalBurningShip(Camera3D camera, int width, int height) {
-        var pixels = _metalBurningShipRenderer!.RenderBurningShip(BurningShip.ToParams(), camera, width, height, PreviewSettings(), new Color(0.02f, 0.03f, 0.07f), Color.Rgb(225, 140, 90), Light.ToDirection(), Palette.ToParams());
+        var pixels = _metalBurningShipRenderer!.RenderBurningShip(BurningShip.ToParams(), camera, width, height, PreviewSettings(), new Color(0.02f, 0.03f, 0.07f), Color.Rgb(225, 140, 90), Light.ToDirection(), Palette.ToParams(), PostProcess.ToParams());
         _metalComputeMs = _metalBurningShipRenderer!.LastComputeMs; _metalReadbackMs = _metalBurningShipRenderer!.LastReadbackMs; return pixels; }
 
     private uint[] RenderWithMetalQuaternionJulia(Camera3D camera, int width, int height) {
-        var pixels = _metalQuaternionJuliaRenderer!.RenderQuaternionJulia(QuaternionJulia.ToParams(), camera, width, height, PreviewSettings(), new Color(0.02f, 0.03f, 0.07f), Color.Rgb(210, 180, 150), Light.ToDirection(), Palette.ToParams());
+        var pixels = _metalQuaternionJuliaRenderer!.RenderQuaternionJulia(QuaternionJulia.ToParams(), camera, width, height, PreviewSettings(), new Color(0.02f, 0.03f, 0.07f), Color.Rgb(210, 180, 150), Light.ToDirection(), Palette.ToParams(), PostProcess.ToParams());
         _metalComputeMs = _metalQuaternionJuliaRenderer!.LastComputeMs; _metalReadbackMs = _metalQuaternionJuliaRenderer!.LastReadbackMs; return pixels; }
 
     private uint[] RenderWithMetalQJBox(Camera3D camera, int width, int height) {
-        var pixels = _metalQJBoxRenderer!.RenderQJBox(QJBox.ToParams(), camera, width, height, PreviewSettings(), new Color(0.02f, 0.03f, 0.07f), Color.Rgb(195, 170, 145), Light.ToDirection(), Palette.ToParams());
+        var pixels = _metalQJBoxRenderer!.RenderQJBox(QJBox.ToParams(), camera, width, height, PreviewSettings(), new Color(0.02f, 0.03f, 0.07f), Color.Rgb(195, 170, 145), Light.ToDirection(), Palette.ToParams(), PostProcess.ToParams());
         _metalComputeMs = _metalQJBoxRenderer!.LastComputeMs; _metalReadbackMs = _metalQJBoxRenderer!.LastReadbackMs; return pixels; }
 
     private uint[] RenderWithMetalMenger(Camera3D camera, int width, int height) {
-        var pixels = _metalMengerRenderer!.RenderMenger(Menger.ToParams(), camera, width, height, PreviewSettings(), new Color(0.02f, 0.03f, 0.07f), Color.Rgb(195, 170, 145), Light.ToDirection(), Palette.ToParams());
+        var pixels = _metalMengerRenderer!.RenderMenger(Menger.ToParams(), camera, width, height, PreviewSettings(), new Color(0.02f, 0.03f, 0.07f), Color.Rgb(195, 170, 145), Light.ToDirection(), Palette.ToParams(), PostProcess.ToParams());
         _metalComputeMs = _metalMengerRenderer!.LastComputeMs; _metalReadbackMs = _metalMengerRenderer!.LastReadbackMs; return pixels; }
 
     private uint[] RenderWithMetalBicomplex(Camera3D camera, int width, int height) {
-        var pixels = _metalBicomplexRenderer!.RenderBicomplex(Bicomplex.ToParams(), camera, width, height, PreviewSettings(), new Color(0.02f, 0.03f, 0.07f), Color.Rgb(200, 175, 150), Light.ToDirection(), Palette.ToParams());
+        var pixels = _metalBicomplexRenderer!.RenderBicomplex(Bicomplex.ToParams(), camera, width, height, PreviewSettings(), new Color(0.02f, 0.03f, 0.07f), Color.Rgb(200, 175, 150), Light.ToDirection(), Palette.ToParams(), PostProcess.ToParams());
         _metalComputeMs = _metalBicomplexRenderer!.LastComputeMs; _metalReadbackMs = _metalBicomplexRenderer!.LastReadbackMs; return pixels; }
 
     private uint[] RenderWithMetalApollonian(Camera3D camera, int width, int height) {
-        var pixels = _metalApollonianRenderer!.RenderApollonian(Apollonian.ToParams(), camera, width, height, PreviewSettings(), new Color(0.02f, 0.03f, 0.07f), Color.Rgb(200, 175, 150), Light.ToDirection(), Palette.ToParams());
+        var pixels = _metalApollonianRenderer!.RenderApollonian(Apollonian.ToParams(), camera, width, height, PreviewSettings(), new Color(0.02f, 0.03f, 0.07f), Color.Rgb(200, 175, 150), Light.ToDirection(), Palette.ToParams(), PostProcess.ToParams());
         _metalComputeMs = _metalApollonianRenderer!.LastComputeMs; _metalReadbackMs = _metalApollonianRenderer!.LastReadbackMs; return pixels; }
 
     private uint[] RenderWithMetalPhoenix(Camera3D camera, int width, int height) {
-        var pixels = _metalPhoenixRenderer!.RenderPhoenix(Phoenix.ToParams(), camera, width, height, PreviewSettings(), new Color(0.02f, 0.03f, 0.07f), Color.Rgb(210, 180, 150), Light.ToDirection(), Palette.ToParams());
+        var pixels = _metalPhoenixRenderer!.RenderPhoenix(Phoenix.ToParams(), camera, width, height, PreviewSettings(), new Color(0.02f, 0.03f, 0.07f), Color.Rgb(210, 180, 150), Light.ToDirection(), Palette.ToParams(), PostProcess.ToParams());
         _metalComputeMs = _metalPhoenixRenderer!.LastComputeMs; _metalReadbackMs = _metalPhoenixRenderer!.LastReadbackMs; return pixels; }
 
     private uint[] RenderWithMetalBiomorph(Camera3D camera, int width, int height) {
-        var pixels = _metalBiomorphRenderer!.RenderBiomorph(Biomorph.ToParams(), camera, width, height, PreviewSettings(), new Color(0.02f, 0.03f, 0.07f), Color.Rgb(220, 180, 140), Light.ToDirection(), Palette.ToParams());
+        var pixels = _metalBiomorphRenderer!.RenderBiomorph(Biomorph.ToParams(), camera, width, height, PreviewSettings(), new Color(0.02f, 0.03f, 0.07f), Color.Rgb(220, 180, 140), Light.ToDirection(), Palette.ToParams(), PostProcess.ToParams());
         _metalComputeMs = _metalBiomorphRenderer!.LastComputeMs; _metalReadbackMs = _metalBiomorphRenderer!.LastReadbackMs; return pixels; }
 
     private uint[] RenderWithMetalMosely(Camera3D camera, int width, int height) {
-        var pixels = _metalMoselyRenderer!.RenderMosely(Mosely.ToParams(), camera, width, height, PreviewSettings(), new Color(0.02f, 0.03f, 0.07f), Color.Rgb(170, 150, 130), Light.ToDirection(), Palette.ToParams());
+        var pixels = _metalMoselyRenderer!.RenderMosely(Mosely.ToParams(), camera, width, height, PreviewSettings(), new Color(0.02f, 0.03f, 0.07f), Color.Rgb(170, 150, 130), Light.ToDirection(), Palette.ToParams(), PostProcess.ToParams());
         _metalComputeMs = _metalMoselyRenderer!.LastComputeMs; _metalReadbackMs = _metalMoselyRenderer!.LastReadbackMs; return pixels; }
 
     private uint[] RenderWithMetalPseudoKleinian4D(Camera3D camera, int width, int height) {
-        var pixels = _metalPK4DRenderer!.RenderPseudoKleinian4D(PseudoKleinian4D.ToParams(), camera, width, height, PreviewSettings(), new Color(0.02f, 0.03f, 0.07f), Color.Rgb(165, 150, 130), Light.ToDirection(), Palette.ToParams());
+        var pixels = _metalPK4DRenderer!.RenderPseudoKleinian4D(PseudoKleinian4D.ToParams(), camera, width, height, PreviewSettings(), new Color(0.02f, 0.03f, 0.07f), Color.Rgb(165, 150, 130), Light.ToDirection(), Palette.ToParams(), PostProcess.ToParams());
         _metalComputeMs = _metalPK4DRenderer!.LastComputeMs; _metalReadbackMs = _metalPK4DRenderer!.LastReadbackMs; return pixels; }
 
     private uint[] RenderWithMetalRiemannSphere(Camera3D camera, int width, int height) {
-        var pixels = _metalRiemannSphereRenderer!.RenderRiemannSphere(RiemannSphere.ToParams(), camera, width, height, PreviewSettings(), new Color(0.02f, 0.03f, 0.07f), Color.Rgb(205, 160, 135), Light.ToDirection(), Palette.ToParams());
+        var pixels = _metalRiemannSphereRenderer!.RenderRiemannSphere(RiemannSphere.ToParams(), camera, width, height, PreviewSettings(), new Color(0.02f, 0.03f, 0.07f), Color.Rgb(205, 160, 135), Light.ToDirection(), Palette.ToParams(), PostProcess.ToParams());
         _metalComputeMs = _metalRiemannSphereRenderer!.LastComputeMs; _metalReadbackMs = _metalRiemannSphereRenderer!.LastReadbackMs; return pixels; }
 
     private uint[] RenderWithMetalMandalay(Camera3D camera, int width, int height) {
-        var pixels = _metalMandalayRenderer!.RenderMandalay(Mandalay.ToParams(), camera, width, height, PreviewSettings(), new Color(0.02f, 0.03f, 0.07f), Color.Rgb(175, 165, 150), Light.ToDirection(), Palette.ToParams());
+        var pixels = _metalMandalayRenderer!.RenderMandalay(Mandalay.ToParams(), camera, width, height, PreviewSettings(), new Color(0.02f, 0.03f, 0.07f), Color.Rgb(175, 165, 150), Light.ToDirection(), Palette.ToParams(), PostProcess.ToParams());
         _metalComputeMs = _metalMandalayRenderer!.LastComputeMs; _metalReadbackMs = _metalMandalayRenderer!.LastReadbackMs; return pixels; }
 
     private uint[] RenderWithMetalAnisotropic(Camera3D camera, int width, int height) {
-        var pixels = _metalAnisotropicRenderer!.RenderAnisotropic(Anisotropic.ToParams(), camera, width, height, PreviewSettings(), new Color(0.02f, 0.03f, 0.07f), Color.Rgb(160, 158, 170), Light.ToDirection(), Palette.ToParams());
+        var pixels = _metalAnisotropicRenderer!.RenderAnisotropic(Anisotropic.ToParams(), camera, width, height, PreviewSettings(), new Color(0.02f, 0.03f, 0.07f), Color.Rgb(160, 158, 170), Light.ToDirection(), Palette.ToParams(), PostProcess.ToParams());
         _metalComputeMs = _metalAnisotropicRenderer!.LastComputeMs; _metalReadbackMs = _metalAnisotropicRenderer!.LastReadbackMs; return pixels; }
 
     private uint[] RenderWithMetalOrbitHybrid(Camera3D camera, int width, int height) {
-        var pixels = _metalOrbitHybridRenderer!.RenderOrbitHybrid(OrbitHybrid.ToParams(), camera, width, height, PreviewSettings(), new Color(0.02f, 0.03f, 0.07f), Color.Rgb(195, 170, 135), Light.ToDirection(), Palette.ToParams());
+        var pixels = _metalOrbitHybridRenderer!.RenderOrbitHybrid(OrbitHybrid.ToParams(), camera, width, height, PreviewSettings(), new Color(0.02f, 0.03f, 0.07f), Color.Rgb(195, 170, 135), Light.ToDirection(), Palette.ToParams(), PostProcess.ToParams());
         _metalComputeMs = _metalOrbitHybridRenderer!.LastComputeMs; _metalReadbackMs = _metalOrbitHybridRenderer!.LastReadbackMs; return pixels; }
 
     private uint[] RenderWithMetalDeepZoom(int width, int height)
@@ -1537,7 +1542,7 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
     }
 
     private uint[] RenderWithMetalAmazingBox(Camera3D camera, int width, int height) {
-        var pixels = _metalRenderer!.RenderMandelbox(Fractal.ToParams(), camera, width, height, PreviewSettings(), new Color(0.02f, 0.03f, 0.07f), Color.Rgb(150, 125, 100), Light.ToDirection(), Palette.ToParams());
+        var pixels = _metalRenderer!.RenderMandelbox(Fractal.ToParams(), camera, width, height, PreviewSettings(), new Color(0.02f, 0.03f, 0.07f), Color.Rgb(150, 125, 100), Light.ToDirection(), Palette.ToParams(), PostProcess.ToParams());
         _metalComputeMs = _metalRenderer!.LastComputeMs; _metalReadbackMs = _metalRenderer!.LastReadbackMs; return pixels; }
 
     private RaymarchSettings PreviewSettings() => new(
@@ -1572,69 +1577,69 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
                     _deepView, width, height, Palette.ToParams(), bg, HeroSettings()), width, height),
             FractalType.DeepZoom => DeepZoomBitmap(width, height),
             FractalType.Mandelbulb => OperatingSystem.IsMacOS()
-                ? PixelsToSkBitmap(_metalMandelbulbRenderer!.RenderMandelbulb(Mandelbulb.ToParams(), cam, width, height, HeroSettings(), bg, Color.Rgb(210, 175, 140), light, pal), width, height)
+                ? PixelsToSkBitmap(_metalMandelbulbRenderer!.RenderMandelbulb(Mandelbulb.ToParams(), cam, width, height, HeroSettings(), bg, Color.Rgb(210, 175, 140), light, pal, postProcess: PostProcess.ToParams()), width, height)
                 : _mandelbulbRenderer!.Render(Mandelbulb.ToParams(), cam, width, height, HeroSettings(), bg, Color.Rgb(210, 175, 140), light, pal, tileRows: 32),
             FractalType.BurningShip => OperatingSystem.IsMacOS()
-                ? PixelsToSkBitmap(_metalBurningShipRenderer!.RenderBurningShip(BurningShip.ToParams(), cam, width, height, HeroSettings(), bg, Color.Rgb(225, 140, 90), light, pal), width, height)
+                ? PixelsToSkBitmap(_metalBurningShipRenderer!.RenderBurningShip(BurningShip.ToParams(), cam, width, height, HeroSettings(), bg, Color.Rgb(225, 140, 90), light, pal, PostProcess.ToParams()), width, height)
                 : _burningShipRenderer!.Render(BurningShip.ToParams(), cam, width, height, HeroSettings(), bg, Color.Rgb(225, 140, 90), light, pal, tileRows: 32),
             FractalType.QuaternionJulia => OperatingSystem.IsMacOS()
-                ? PixelsToSkBitmap(_metalQuaternionJuliaRenderer!.RenderQuaternionJulia(QuaternionJulia.ToParams(), cam, width, height, HeroSettings(), bg, Color.Rgb(210, 180, 150), light, pal), width, height)
+                ? PixelsToSkBitmap(_metalQuaternionJuliaRenderer!.RenderQuaternionJulia(QuaternionJulia.ToParams(), cam, width, height, HeroSettings(), bg, Color.Rgb(210, 180, 150), light, pal, PostProcess.ToParams()), width, height)
                 : _qjuliaRenderer!.Render(QuaternionJulia.ToParams(), cam, width, height, HeroSettings(), bg, Color.Rgb(210, 180, 150), light, pal, tileRows: 32),
             FractalType.RotBox => OperatingSystem.IsMacOS()
-                ? PixelsToSkBitmap(_metalRotBoxRenderer!.RenderRotBox(RotBox.ToParams(), cam, width, height, HeroSettings(), bg, Color.Rgb(190, 175, 155), light, pal), width, height)
+                ? PixelsToSkBitmap(_metalRotBoxRenderer!.RenderRotBox(RotBox.ToParams(), cam, width, height, HeroSettings(), bg, Color.Rgb(190, 175, 155), light, pal, PostProcess.ToParams()), width, height)
                 : _rotboxRenderer!.Render(RotBox.ToParams(), cam, width, height, HeroSettings(), bg, Color.Rgb(190, 175, 155), light, pal, tileRows: 32),
             FractalType.Hybrid => OperatingSystem.IsMacOS()
-                ? PixelsToSkBitmap(_metalHybridRenderer!.RenderHybrid(Hybrid.ToParams(), cam, width, height, HeroSettings(), bg, Color.Rgb(190, 170, 145), light, pal), width, height)
+                ? PixelsToSkBitmap(_metalHybridRenderer!.RenderHybrid(Hybrid.ToParams(), cam, width, height, HeroSettings(), bg, Color.Rgb(190, 170, 145), light, pal, PostProcess.ToParams()), width, height)
                 : _hybridRenderer!.Render(Hybrid.ToParams(), cam, width, height, HeroSettings(), bg, Color.Rgb(190, 170, 145), light, pal, tileRows: 32),
             FractalType.QJBox => OperatingSystem.IsMacOS()
-                ? PixelsToSkBitmap(_metalQJBoxRenderer!.RenderQJBox(QJBox.ToParams(), cam, width, height, HeroSettings(), bg, Color.Rgb(195, 170, 145), light, pal), width, height)
+                ? PixelsToSkBitmap(_metalQJBoxRenderer!.RenderQJBox(QJBox.ToParams(), cam, width, height, HeroSettings(), bg, Color.Rgb(195, 170, 145), light, pal, PostProcess.ToParams()), width, height)
                 : _qjboxRenderer!.Render(QJBox.ToParams(), cam, width, height, HeroSettings(), bg, Color.Rgb(195, 170, 145), light, pal, tileRows: 32),
             FractalType.Menger => OperatingSystem.IsMacOS()
-                ? PixelsToSkBitmap(_metalMengerRenderer!.RenderMenger(Menger.ToParams(), cam, width, height, HeroSettings(), bg, Color.Rgb(195, 170, 145), light, pal), width, height)
+                ? PixelsToSkBitmap(_metalMengerRenderer!.RenderMenger(Menger.ToParams(), cam, width, height, HeroSettings(), bg, Color.Rgb(195, 170, 145), light, pal, PostProcess.ToParams()), width, height)
                 : _mengerRenderer!.Render(Menger.ToParams(), cam, width, height, HeroSettings(), bg, Color.Rgb(195, 170, 145), light, pal, tileRows: 32),
             FractalType.Bicomplex => OperatingSystem.IsMacOS()
-                ? PixelsToSkBitmap(_metalBicomplexRenderer!.RenderBicomplex(Bicomplex.ToParams(), cam, width, height, HeroSettings(), bg, Color.Rgb(200, 175, 150), light, pal), width, height)
+                ? PixelsToSkBitmap(_metalBicomplexRenderer!.RenderBicomplex(Bicomplex.ToParams(), cam, width, height, HeroSettings(), bg, Color.Rgb(200, 175, 150), light, pal, PostProcess.ToParams()), width, height)
                 : _bicomplexRenderer!.Render(Bicomplex.ToParams(), cam, width, height, HeroSettings(), bg, Color.Rgb(200, 175, 150), light, pal, tileRows: 32),
             FractalType.Apollonian => OperatingSystem.IsMacOS()
-                ? PixelsToSkBitmap(_metalApollonianRenderer!.RenderApollonian(Apollonian.ToParams(), cam, width, height, HeroSettings(), bg, Color.Rgb(200, 175, 150), light, pal), width, height)
+                ? PixelsToSkBitmap(_metalApollonianRenderer!.RenderApollonian(Apollonian.ToParams(), cam, width, height, HeroSettings(), bg, Color.Rgb(200, 175, 150), light, pal, PostProcess.ToParams()), width, height)
                 : _apollonianRenderer!.Render(Apollonian.ToParams(), cam, width, height, HeroSettings(), bg, Color.Rgb(200, 175, 150), light, pal, tileRows: 32),
             FractalType.Phoenix => OperatingSystem.IsMacOS()
-                ? PixelsToSkBitmap(_metalPhoenixRenderer!.RenderPhoenix(Phoenix.ToParams(), cam, width, height, HeroSettings(), bg, Color.Rgb(210, 180, 150), light, pal), width, height)
+                ? PixelsToSkBitmap(_metalPhoenixRenderer!.RenderPhoenix(Phoenix.ToParams(), cam, width, height, HeroSettings(), bg, Color.Rgb(210, 180, 150), light, pal, PostProcess.ToParams()), width, height)
                 : _phoenixRenderer!.Render(Phoenix.ToParams(), cam, width, height, HeroSettings(), bg, Color.Rgb(210, 180, 150), light, pal, tileRows: 32),
             FractalType.Biomorph => OperatingSystem.IsMacOS()
-                ? PixelsToSkBitmap(_metalBiomorphRenderer!.RenderBiomorph(Biomorph.ToParams(), cam, width, height, HeroSettings(), bg, Color.Rgb(220, 180, 140), light, pal), width, height)
+                ? PixelsToSkBitmap(_metalBiomorphRenderer!.RenderBiomorph(Biomorph.ToParams(), cam, width, height, HeroSettings(), bg, Color.Rgb(220, 180, 140), light, pal, PostProcess.ToParams()), width, height)
                 : _biomorphRenderer!.Render(Biomorph.ToParams(), cam, width, height, HeroSettings(), bg, Color.Rgb(220, 180, 140), light, pal, tileRows: 32),
             FractalType.Attractor => _attractorRenderer!.Render(Attractor.ToRenderParams(), cam,
                 width, height, HeroSettings(), bg, Color.Rgb(230, 120, 70), light, pal, tileRows: 32),
             FractalType.Kleinian => OperatingSystem.IsMacOS()
-                ? PixelsToSkBitmap(_metalKleinianRenderer!.RenderKleinian(Kleinian.ToParams(), cam, width, height, HeroSettings(), bg, Color.Rgb(150, 125, 100), light, pal), width, height)
+                ? PixelsToSkBitmap(_metalKleinianRenderer!.RenderKleinian(Kleinian.ToParams(), cam, width, height, HeroSettings(), bg, Color.Rgb(150, 125, 100), light, pal, PostProcess.ToParams()), width, height)
                 : _kleinianRenderer!.Render(Kleinian.ToParams(), cam, width, height, HeroSettings(), bg, Color.Rgb(150, 125, 100), light, pal, tileRows: 32),
             FractalType.Kifs => OperatingSystem.IsMacOS()
-                ? PixelsToSkBitmap(_metalKifsRenderer!.RenderKifs(Kifs.ToParams(), cam, width, height, HeroSettings(), bg, Color.Rgb(150, 125, 100), light, pal), width, height)
+                ? PixelsToSkBitmap(_metalKifsRenderer!.RenderKifs(Kifs.ToParams(), cam, width, height, HeroSettings(), bg, Color.Rgb(150, 125, 100), light, pal, PostProcess.ToParams()), width, height)
                 : _kifsRenderer!.Render(Kifs.ToParams(), cam, width, height, HeroSettings(), bg, Color.Rgb(150, 125, 100), light, pal, tileRows: 32),
             FractalType.Mosely => OperatingSystem.IsMacOS()
-                ? PixelsToSkBitmap(_metalMoselyRenderer!.RenderMosely(Mosely.ToParams(), cam, width, height, HeroSettings(), bg, Color.Rgb(170, 150, 130), light, pal), width, height)
+                ? PixelsToSkBitmap(_metalMoselyRenderer!.RenderMosely(Mosely.ToParams(), cam, width, height, HeroSettings(), bg, Color.Rgb(170, 150, 130), light, pal, PostProcess.ToParams()), width, height)
                 : _moselyRenderer!.Render(Mosely.ToParams(), cam, width, height, HeroSettings(), bg, Color.Rgb(170, 150, 130), light, pal, tileRows: 32),
             FractalType.PseudoKleinian4D => OperatingSystem.IsMacOS()
-                ? PixelsToSkBitmap(_metalPK4DRenderer!.RenderPseudoKleinian4D(PseudoKleinian4D.ToParams(), cam, width, height, HeroSettings(), bg, Color.Rgb(165, 150, 130), light, pal), width, height)
+                ? PixelsToSkBitmap(_metalPK4DRenderer!.RenderPseudoKleinian4D(PseudoKleinian4D.ToParams(), cam, width, height, HeroSettings(), bg, Color.Rgb(165, 150, 130), light, pal, PostProcess.ToParams()), width, height)
                 : _pk4dRenderer!.Render(PseudoKleinian4D.ToParams(), cam, width, height, HeroSettings(), bg, Color.Rgb(165, 150, 130), light, pal, tileRows: 32),
             FractalType.RiemannSphere => OperatingSystem.IsMacOS()
-                ? PixelsToSkBitmap(_metalRiemannSphereRenderer!.RenderRiemannSphere(RiemannSphere.ToParams(), cam, width, height, HeroSettings(1.5e-3f), bg, Color.Rgb(205, 160, 135), light, pal), width, height)
+                ? PixelsToSkBitmap(_metalRiemannSphereRenderer!.RenderRiemannSphere(RiemannSphere.ToParams(), cam, width, height, HeroSettings(1.5e-3f), bg, Color.Rgb(205, 160, 135), light, pal, PostProcess.ToParams()), width, height)
                 : _riemannRenderer!.Render(RiemannSphere.ToParams(), cam, width, height, HeroSettings(1.5e-3f), bg, Color.Rgb(205, 160, 135), light, pal, tileRows: 32),
             FractalType.Mandalay => OperatingSystem.IsMacOS()
-                ? PixelsToSkBitmap(_metalMandalayRenderer!.RenderMandalay(Mandalay.ToParams(), cam, width, height, HeroSettings(), bg, Color.Rgb(175, 165, 150), light, pal), width, height)
+                ? PixelsToSkBitmap(_metalMandalayRenderer!.RenderMandalay(Mandalay.ToParams(), cam, width, height, HeroSettings(), bg, Color.Rgb(175, 165, 150), light, pal, PostProcess.ToParams()), width, height)
                 : _mandalayRenderer!.Render(Mandalay.ToParams(), cam, width, height, HeroSettings(), bg, Color.Rgb(175, 165, 150), light, pal, tileRows: 32),
             FractalType.Anisotropic => OperatingSystem.IsMacOS()
-                ? PixelsToSkBitmap(_metalAnisotropicRenderer!.RenderAnisotropic(Anisotropic.ToParams(), cam, width, height, HeroSettings(), bg, Color.Rgb(160, 158, 170), light, pal), width, height)
+                ? PixelsToSkBitmap(_metalAnisotropicRenderer!.RenderAnisotropic(Anisotropic.ToParams(), cam, width, height, HeroSettings(), bg, Color.Rgb(160, 158, 170), light, pal, PostProcess.ToParams()), width, height)
                 : _anisoRenderer!.Render(Anisotropic.ToParams(), cam, width, height, HeroSettings(), bg, Color.Rgb(160, 158, 170), light, pal, tileRows: 32),
             FractalType.OrbitHybrid => OperatingSystem.IsMacOS()
-                ? PixelsToSkBitmap(_metalOrbitHybridRenderer!.RenderOrbitHybrid(OrbitHybrid.ToParams(), cam, width, height, HeroSettings(), bg, Color.Rgb(195, 170, 135), light, pal), width, height)
+                ? PixelsToSkBitmap(_metalOrbitHybridRenderer!.RenderOrbitHybrid(OrbitHybrid.ToParams(), cam, width, height, HeroSettings(), bg, Color.Rgb(195, 170, 135), light, pal, PostProcess.ToParams()), width, height)
                 : _orbitHybridRenderer!.Render(OrbitHybrid.ToParams(), cam, width, height, HeroSettings(), bg, Color.Rgb(195, 170, 135), light, pal, tileRows: 32),
             FractalType.AmazingBox => OperatingSystem.IsMacOS()
-                ? PixelsToSkBitmap(_metalRenderer!.RenderMandelbox(Fractal.ToParams(), cam, width, height, HeroSettings(), bg, Color.Rgb(150, 125, 100), light, pal), width, height)
+                ? PixelsToSkBitmap(_metalRenderer!.RenderMandelbox(Fractal.ToParams(), cam, width, height, HeroSettings(), bg, Color.Rgb(150, 125, 100), light, pal, PostProcess.ToParams()), width, height)
                 : _boxRenderer!.Render(Fractal.ToParams(), cam, width, height, HeroSettings(), bg, Color.Rgb(150, 125, 100), light, pal, tileRows: 32),
             FractalType.Mandelbox => OperatingSystem.IsMacOS()
-                ? PixelsToSkBitmap(_metalRenderer!.RenderMandelbox(Mandelbox.ToParams(), cam, width, height, HeroSettings(), bg, Color.Rgb(170, 150, 130), light, pal), width, height)
+                ? PixelsToSkBitmap(_metalRenderer!.RenderMandelbox(Mandelbox.ToParams(), cam, width, height, HeroSettings(), bg, Color.Rgb(170, 150, 130), light, pal, PostProcess.ToParams()), width, height)
                 : _boxRenderer!.Render(Mandelbox.ToParams(), cam, width, height, HeroSettings(), bg, Color.Rgb(170, 150, 130), light, pal, tileRows: 32),
             _ => _boxRenderer!.Render(Fractal.ToParams(), cam,
                 width, height, HeroSettings(), bg, Color.Rgb(150, 125, 100), light, pal, tileRows: 32),

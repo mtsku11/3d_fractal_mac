@@ -12,10 +12,54 @@ internal static class MetalSsaa
 {
     /// <summary>
     /// Render <paramref name="sampleCount"/> Halton-jittered samples via
-    /// <paramref name="renderOneSample"/>, accumulate as float, and return a
-    /// packed RGBA8 uint[] (same packing as the Metal shaders: ABGR little-endian,
-    /// i.e. R in bits 0-7, G in 8-15, B in 16-23, A = 255 in 24-31).
-    /// When sampleCount == 1 the lambda is called once with Vector2.Zero.
+    /// <paramref name="renderOneSample"/> (which returns a float4-per-pixel HDR buffer,
+    /// stride 4: R,G,B,A), accumulate as float, and return the averaged float4 buffer.
+    /// When sampleCount == 1 the lambda is called once with Vector2.Zero and returned as-is.
+    /// The caller is responsible for applying the post-process pass on the result.
+    /// </summary>
+    internal static float[] AccumulateHdr(
+        int sampleCount,
+        int width,
+        int height,
+        Func<Vector2, float[]> renderOneSample)
+    {
+        int n = Math.Max(1, sampleCount);
+        int pixelCount = width * height;
+
+        if (n == 1)
+            return renderOneSample(Vector2.Zero);
+
+        var accumR = new float[pixelCount];
+        var accumG = new float[pixelCount];
+        var accumB = new float[pixelCount];
+
+        for (int s = 0; s < n; s++)
+        {
+            var jitter = HaltonJitter(s);
+            var pixels = renderOneSample(jitter);
+            for (int i = 0; i < pixelCount; i++)
+            {
+                accumR[i] += pixels[i * 4 + 0];
+                accumG[i] += pixels[i * 4 + 1];
+                accumB[i] += pixels[i * 4 + 2];
+            }
+        }
+
+        float invN = 1f / n;
+        var result = new float[pixelCount * 4];
+        for (int i = 0; i < pixelCount; i++)
+        {
+            result[i * 4 + 0] = accumR[i] * invN;
+            result[i * 4 + 1] = accumG[i] * invN;
+            result[i * 4 + 2] = accumB[i] * invN;
+            result[i * 4 + 3] = 1f;
+        }
+        return result;
+    }
+
+    /// <summary>
+    /// RGBA8 variant used only by <see cref="MetalDeepZoomRenderer"/>, which packs
+    /// RGBA8 inside its kernel and does not go through the HDR post-process path.
     /// </summary>
     internal static uint[] Accumulate(
         int sampleCount,

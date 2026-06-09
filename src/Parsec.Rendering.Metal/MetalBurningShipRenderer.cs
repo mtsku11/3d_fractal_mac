@@ -42,15 +42,16 @@ public sealed class MetalBurningShipRenderer : IDisposable
     public uint[] RenderBurningShip(
         BurningShipParams bs, Camera3D camera, int width, int height,
         RaymarchSettings settings, Color background, Color surface,
-        Vector3 lightDirection, PaletteParams palette)
+        Vector3 lightDirection, PaletteParams palette,
+        PostProcessParams? postProcess = null)
     {
         ThrowIfDisposed();
         if (!_isAvailable) throw new InvalidOperationException("Metal backend unavailable.");
-        return MetalSsaa.Accumulate(settings.HeroSamples, width, height, jitter =>
+        var _hdrAcc = MetalSsaa.AccumulateHdr(settings.HeroSamples, width, height, jitter =>
         {
             var foldBuf   = UploadStruct(_device, BuildFoldParams(bs));
             var renderBuf = UploadStruct(_device, BuildRenderParams(camera, width, height, lightDirection, background, surface, settings, palette, jitter));
-            var outBuf    = _device.NewBuffer((ulong)(width * height * sizeof(uint)), MTLResourceOptions.ResourceStorageModeShared);
+            var outBuf    = _device.NewBuffer((ulong)(width * height * 4 * sizeof(float)), MTLResourceOptions.ResourceStorageModeShared);
 
             var cmd = _queue.CommandBuffer();
             var enc = cmd.ComputeCommandEncoder();
@@ -63,11 +64,12 @@ public sealed class MetalBurningShipRenderer : IDisposable
             cmd.Commit(); cmd.WaitUntilCompleted();
             LastComputeMs = sw.ElapsedMilliseconds;
             sw.Restart();
-            var result = ReadUintBuffer(outBuf, width * height);
+            var result = ReadFloat4Buffer(outBuf, width * height);
             LastReadbackMs = sw.ElapsedMilliseconds;
             foldBuf.Dispose(); renderBuf.Dispose(); outBuf.Dispose();
             return result;
         });
+        return MetalPostProcess.Apply(_device, _queue, _hdrAcc, width, height, postProcess);
     }
 
     public void Dispose()
@@ -126,11 +128,12 @@ public sealed class MetalBurningShipRenderer : IDisposable
         return buf;
     }
 
-    private static unsafe uint[] ReadUintBuffer(MTLBuffer buf, int count)
+    private static unsafe float[] ReadFloat4Buffer(MTLBuffer buf, int count)
     {
-        var result = new uint[count];
-        fixed (uint* dst = result)
-            Buffer.MemoryCopy((void*)buf.Contents, dst, (long)count * sizeof(uint), (long)count * sizeof(uint));
+        var result = new float[count * 4];
+        fixed (float* dst = result)
+            Buffer.MemoryCopy((void*)buf.Contents, dst,
+                (long)result.Length * sizeof(float), (long)result.Length * sizeof(float));
         return result;
     }
 

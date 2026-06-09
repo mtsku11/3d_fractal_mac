@@ -53,6 +53,7 @@ public sealed class MetalMandelboxRenderer : IThreeDimensionalRenderBackend
         }
     }
 
+    // Backward-compatible overload satisfying IThreeDimensionalRenderBackend (identity post-process).
     public uint[] RenderMandelbox(
         MandelboxParams fractal,
         Camera3D camera,
@@ -63,16 +64,29 @@ public sealed class MetalMandelboxRenderer : IThreeDimensionalRenderBackend
         Color surface,
         Vector3 lightDirection,
         PaletteParams palette)
+        => RenderMandelbox(fractal, camera, width, height, settings, background, surface, lightDirection, palette, null);
+
+    public uint[] RenderMandelbox(
+        MandelboxParams fractal,
+        Camera3D camera,
+        int width,
+        int height,
+        RaymarchSettings settings,
+        Color background,
+        Color surface,
+        Vector3 lightDirection,
+        PaletteParams palette,
+        PostProcessParams? postProcess)
     {
         ThrowIfDisposed();
         if (!_isAvailable)
             throw new InvalidOperationException("Metal backend is not available on this machine.");
-        return MetalSsaa.Accumulate(settings.HeroSamples, width, height, jitter =>
+        var hdr = MetalSsaa.AccumulateHdr(settings.HeroSamples, width, height, jitter =>
         {
             int pixelCount = width * height;
             using var foldBuf   = UploadStruct(_device, BuildFoldParams(fractal));
             using var renderBuf = UploadStruct(_device, BuildRenderParams(camera, width, height, lightDirection, background, surface, settings, palette, jitter));
-            using var outBuf    = _device.NewBuffer((ulong)(pixelCount * sizeof(uint)), MTLResourceOptions.ResourceStorageModeShared);
+            using var outBuf    = _device.NewBuffer((ulong)(pixelCount * 4 * sizeof(float)), MTLResourceOptions.ResourceStorageModeShared);
 
             var cmd = _queue.CommandBuffer();
             var enc = cmd.ComputeCommandEncoder();
@@ -93,10 +107,11 @@ public sealed class MetalMandelboxRenderer : IThreeDimensionalRenderBackend
             LastComputeMs = computeSw.ElapsedMilliseconds;
 
             var readbackSw = System.Diagnostics.Stopwatch.StartNew();
-            var result = ReadUintBuffer(outBuf, pixelCount);
+            var result = ReadFloat4Buffer(outBuf, pixelCount);
             LastReadbackMs = readbackSw.ElapsedMilliseconds;
             return result;
         });
+        return MetalPostProcess.Apply(_device, _queue, hdr, width, height, postProcess);
     }
 
     public void Dispose()
@@ -188,12 +203,13 @@ public sealed class MetalMandelboxRenderer : IThreeDimensionalRenderBackend
         return buf;
     }
 
-    private static unsafe uint[] ReadUintBuffer(MTLBuffer buf, int count)
+    private static unsafe float[] ReadFloat4Buffer(MTLBuffer buf, int count)
     {
-        var result = new uint[count];
-        fixed (uint* dst = result)
+        var result = new float[count * 4];
+        fixed (float* dst = result)
         {
-            Buffer.MemoryCopy((void*)buf.Contents, dst, (long)count * sizeof(uint), (long)count * sizeof(uint));
+            Buffer.MemoryCopy((void*)buf.Contents, dst,
+                (long)result.Length * sizeof(float), (long)result.Length * sizeof(float));
         }
         return result;
     }

@@ -1140,6 +1140,70 @@ public static class Program
             }
         }
 
+        if (args[0] is "metal-m12-stills")
+        {
+            if (!OperatingSystem.IsMacOS()) { Console.Error.WriteLine("metal-m12-stills requires macOS."); return 1; }
+            try
+            {
+                const int W = 512, H = 512;
+                var settings = new RaymarchSettings { HeroSamples = 1 };
+                var bg   = new Color(0.04f, 0.04f, 0.06f);
+                var sf   = new Color(0.65f, 0.62f, 0.58f);
+                var light = Vector3.Normalize(new Vector3(1.2f, 2f, 1.5f));
+                var pal  = PaletteParams.Default;
+                var cam3 = new Camera3D(new Vector3(0f, 3f, 12f), Vector3.Zero, Vector3.UnitY, MathF.PI / 4f, 1f);
+                var camBulb = new Camera3D(new Vector3(0f, 0f, 2.4f), Vector3.Zero, Vector3.UnitY, MathF.PI / 4f, 1f);
+                var camKifs = new Camera3D(new Vector3(4f, 3f, 6f), Vector3.Zero, Vector3.UnitY, MathF.PI / 4f, 1f);
+                var camPhoenix = new Camera3D(new Vector3(0f, 0f, 3f), Vector3.Zero, Vector3.UnitY, MathF.PI / 4f, 1f);
+
+                // 1. Mandelbox — identity grade (default params)
+                {
+                    using var r = new MetalMandelboxRenderer();
+                    var pp = new PostProcessParams();
+                    var pixels = r.RenderMandelbox(new MandelboxParams(), cam3, W, H, settings, bg, sf, light, pal, pp);
+                    var path = ResolveOutputPath("m12-mandelbox.png");
+                    SaveUintPixels(pixels, W, H, path);
+                    Console.WriteLine($"  Mandelbox (identity grade)   -> {path}");
+                }
+
+                // 2. Mandelbulb — boosted brightness + saturation
+                {
+                    using var r = new MetalMandelbulbRenderer();
+                    var pp = new PostProcessParams { Brightness = 1.4f, Saturation = 1.6f, Gamma = 0.9f };
+                    var pixels = r.RenderMandelbulb(new MandelbulbParams(), camBulb, W, H, settings, bg, sf, light, pal, postProcess: pp);
+                    var path = ResolveOutputPath("m12-mandelbulb.png");
+                    SaveUintPixels(pixels, W, H, path);
+                    Console.WriteLine($"  Mandelbulb (bright+sat)      -> {path}");
+                }
+
+                // 3. Phoenix — cut off, pulled back camera to see full 3D surface
+                {
+                    using var r = new MetalPhoenixRenderer();
+                    var ph = new PhoenixParams { Cut = false, BoundRadius = 5f };
+                    var camPh2 = new Camera3D(new Vector3(0f, 1.5f, 5f), Vector3.Zero, Vector3.UnitY, MathF.PI / 4f, 1f);
+                    var pp = new PostProcessParams { Brightness = 1.2f, HdrEnabled = true };
+                    var pixels = r.RenderPhoenix(ph, camPh2, W, H, settings, bg, sf, light, pal, pp);
+                    var path = ResolveOutputPath("m12-phoenix.png");
+                    SaveUintPixels(pixels, W, H, path);
+                    Console.WriteLine($"  Phoenix (no cut, full shape) -> {path}");
+                }
+
+                // 4. KIFS — high contrast, desaturated
+                {
+                    using var r = new MetalKifsRenderer();
+                    var pp = new PostProcessParams { Contrast = 1.8f, Saturation = 0.4f, Gamma = 1.3f };
+                    var pixels = r.RenderKifs(new KifsParams(), camKifs, W, H, settings, bg, sf, light, pal, pp);
+                    var path = ResolveOutputPath("m12-kifs.png");
+                    SaveUintPixels(pixels, W, H, path);
+                    Console.WriteLine($"  KIFS (hi-contrast desatured)  -> {path}");
+                }
+
+                Console.WriteLine("Done.");
+                return 0;
+            }
+            catch (Exception ex) { Console.Error.WriteLine($"metal-m12-stills FAILED: {ex.Message}\n{ex.StackTrace}"); return 1; }
+        }
+
         var matches = examples.Where(e => e.Name == args[0]).ToList();
         if (matches.Count == 0)
         {
@@ -1177,6 +1241,18 @@ public static class Program
             Console.Error.WriteLine($"  {example.Name,-24} FAILED: {ex.Message}");
             return false;
         }
+    }
+
+    private static uint[] PixelsToRgba(uint[] pixels) => pixels;
+
+    private static void SaveUintPixels(uint[] pixels, int w, int h, string path)
+    {
+        var info = new SKImageInfo(w, h, SKColorType.Rgba8888, SKAlphaType.Premul);
+        var bmp = new SKBitmap(info);
+        var bytes = new byte[pixels.Length * 4];
+        Buffer.BlockCopy(pixels, 0, bytes, 0, bytes.Length);
+        Marshal.Copy(bytes, 0, bmp.GetPixels(), bytes.Length);
+        ImageOutput.SavePng(bmp, path);
     }
 
     /// <summary>

@@ -254,6 +254,46 @@ Expected files touched: packaging scripts, entitlements/signing/notarization fil
 
 Acceptance criteria: deferred until the app has a useful macOS 3D render path.
 
+### 12. HDR post-processing pipeline ✓ COMPLETE
+
+Goal: add a final tone-mapping / color-grading stage so fractals look cinematic rather than like clamped shader output, and expose grade parameters as cheap per-frame audio-modulation targets.
+
+**Reference model (Mandelbulber2, GPL-3.0 — design inspiration only, no code copied).**
+`cImage::CalculatePixel` grade order (ported verbatim to MSL):
+1. `c *= brightness`
+2. `c = (c - 0.5) * contrast + 0.5`; `c = max(c, 0)`
+3. `if (hdrEnabled) c = tanh(c)` — tanh tone map (not ACES)
+4. `V = sqrt(R²·0.299 + G²·0.587 + B²·0.114); c = V + (c - V) * saturation` — Rec.601 luma saturation
+5. `clamp(c, 0, 1)`
+6. `pow(c, 1/gamma)`
+
+**Implementation:**
+
+New files:
+- `src/Parsec.Rendering.Metal/Shaders/postprocess.metal` — MSL grade kernel. buffer(0) = `float4[]` HDR input, buffer(1) = `GpuPostProcessParams`, buffer(2) = `uint[]` RGBA8 output. 32-byte GPU struct: `{ int imageWidth; int imageHeight; float brightness; float contrast; float gamma; float saturation; int hdrEnabled; int pad0; }`.
+- `src/Parsec.Rendering.Metal/MetalPostProcess.cs` — static class with lazy-compiled PSO (double-checked lock). `internal static uint[] Apply(device, queue, float[] hdrPixels, w, h, PostProcessParams?)`. Null params → identity (no-op). Gamma clamped to ≥ 0.01f.
+- `src/Parsec.Rendering.Metal/PostProcessParams.cs` — public struct `{ Brightness=1, Contrast=1, Gamma=1, Saturation=1, HdrEnabled=false }`. Default is identity → output identical to pre-M12.
+- `src/Parsec.App/PostProcessState.cs` — mirrors `PaletteState`. `BuildSchema()` exposes 4 float sliders in group "Post: grade" (Brightness 0–4, Contrast 0–4, Saturation 0–3, Gamma 0.1–4). `HdrEnabled` is a bool field, not a slider (toggle not yet wired to UI).
+
+Modified files:
+- All 20 `*_raymarch.metal` (not `deepzoom_metal.metal`): `device uint* output` → `device float4* output`; removed RGBA8 pack; last line is `output[idx] = float4(color, 1.0f)`.
+- `MetalSsaa.cs`: `AccumulateHdr(int, int, int, Func<Vector2, float[]>) → float[]` added — accumulates in float space, returns stride-4 float[] (R,G,B,A per pixel). Old `Accumulate(Func<Vector2, uint[]>)` retained — used only by `MetalDeepZoomRenderer` (2D path, still packs RGBA8 in kernel).
+- All 20 `Metal*Renderer.cs`: `MetalSsaa.Accumulate` → `MetalSsaa.AccumulateHdr`; buffer size `sizeof(uint)` → `4 * sizeof(float)`; `ReadUintBuffer` → `ReadFloat4Buffer` (returns `float[count*4]`); call `MetalPostProcess.Apply(...)` after accumulation.
+- `FractalView.cs`: `PostProcess` property (`PostProcessState`), schema wired in `BuildActiveSchema` (macOS-only), all 21 `RenderWithMetal*` and `RenderActiveTo` call sites pass `PostProcess.ToParams()`.
+- `Parsec.Rendering.Metal.csproj`: `postprocess.metal` added as `EmbeddedResource`.
+- `Program.cs`: `metal-m12-stills` CLI command — renders Mandelbox (identity), Mandelbulb (brightness+saturation), Phoenix (tanh tone map), KIFS (hi-contrast desaturated) at 512×512; saved to `outputs/m12-*.png`.
+
+**CLI validation:** `metal-new-smoke` — 14/14 pass. `metal-m12-stills` — all four stills render with visibly distinct grade effects.
+
+**Note on `MetalDeepZoomRenderer` exclusion:** 2D deep-zoom path packs RGBA8 in its kernel and uses the old `MetalSsaa.Accumulate`. This is intentional — deep zoom has no 3D shading to grade, and the HDR contract change does not apply to it.
+
+**3D Phoenix shape note:** the Phoenix fractal's 3D extension (Mandelbulb-style spherical lifting of the memory-term formula) produces a wrinkled spheroid, not the feathery tentacles of the 2D Julia-Phoenix slice. The default `Cut=true` with `PlaneOffset=0` shows a cross-section through the center; use `Cut=false` to see the full 3D surface.
+
+Risks / notes:
+- The HDR target adds memory and one extra pass; on unified memory this should stay cheap, but measure post-pass time at 1080p before adding bloom blur passes.
+- `tanh` tone map matches the reference; ACES is the film-standard alternative if the highlight rolloff looks wrong.
+- Mandelbulber2 and Fragmentarium are GPL-3.0; this project derives from GPL-3.0 upstream, so license direction is compatible, but the work is a clean-room port of the *algorithm*, not a code copy.
+
 ---
 
 ## Audio-Reactive Feature
@@ -346,3 +386,6 @@ Files touched: `AudioFeatureTrack.cs`, `AudioReactiveController.cs`, `MainWindow
 - SharpMetal NuGet metadata: https://www.nuget.org/packages/SharpMetal/
 - SPIRV-Cross project: https://github.com/KhronosGroup/SPIRV-Cross
 - Apple Metal resources and specifications: https://developer.apple.com/metal/resources/
+- Mandelbulber2 (M12 post-processing reference, GPL-3.0): https://github.com/buddhi1980/mandelbulber2 — `mandelbulber2/src/cimage.cpp`, `cimage.hpp`, `image_adjustments.h` (`CalculatePixel`, `CompileImage`, float-buffer chain)
+- Fragmentarium (M12 two-pass structural reference): https://github.com/Syntopia/Fragmentarium
+- Apple Metal HDR post-processing sample code: https://developer.apple.com/metal/sample-code/
