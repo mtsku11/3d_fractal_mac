@@ -35,12 +35,26 @@ public static class DirectOrbitSynth
     private const float MinProjectedRms = 0.30f;
     private const float MaxProjectionBoost = 6.0f;
 
+    // Proximity/enclosure macros (kept in sync with FractalDroneStream.FillDirectOrbit):
+    //   proximity = exp(−MeanDepth/ProxRefDist) gated by HitRatio → master brightness/bass/level
+    //   enclosure = HitRatio → reverb feedback/damp/wet (open void = short dry, inside = long bloom)
+    private const float ProxRefDist  = 2.5f;   // world units — fractals are roughly unit-scale
+    private const float MacroSlewTau = 0.35f;  // s — one-pole slew on prox/encl per control frame
+
+    // Fold-event layer: per-cell orbit delta between consecutive frames fires a chime.
+    private const int   MaxChimesPerFrame = 3;
+    private const float ChimeRefractorySec = 0.25f;
+    private const float MorphAttackTau  = 0.08f;
+    private const float MorphReleaseTau = 1.2f;
+
     public static short[] Synthesize(
         IReadOnlyList<FractalSonicFrame> frames,
         double controlRateHz = 30.0,
-        int sampleRate       = DefaultSampleRate)
+        int sampleRate       = DefaultSampleRate,
+        FractalVoice voice   = FractalVoice.Mandelbox)
     {
         if (frames.Count == 0) return [];
+        var profile = DirectOrbitProfile.ForVoice(voice);
 
         int spf = (int)Math.Round(sampleRate / controlRateHz);
         var output = new short[frames.Count * spf * 2];
@@ -59,16 +73,30 @@ public static class DirectOrbitSynth
         for (int ci = 0; ci < NCells; ci++)
             prevSeg[ci] = new Vector3[OrbtLen]; // initialise to silence
 
-        // Per-cell step rates: bottom row is each column's root; rows and columns ascend by pure fifths.
+        // Fold-event chimes: decaying two-partial sines at 8× each cell's orbit fundamental
+        var chimeEnv = new float[NCells];
+        var chimePh1 = new float[NCells];
+        var chimePh2 = new float[NCells];
+        var chimeFreq = new float[NCells];
+        var foldDelta = new float[NCells];
+        var refract   = new int[NCells];
+        float chimeDecay = MathF.Exp(-1f / (profile.ChimeDecaySec * sampleRate));
+        int refractFrames = (int)MathF.Ceiling(ChimeRefractorySec * (float)controlRateHz);
+
+        // Proximity/enclosure macro state + morph bus
+        float dtFrame  = 1f / (float)controlRateHz;
+        float macroCf  = 1f - MathF.Exp(-dtFrame / MacroSlewTau);
+        float morphAtkCf = 1f - MathF.Exp(-dtFrame / MorphAttackTau);
+        float morphRelCf = 1f - MathF.Exp(-dtFrame / MorphReleaseTau);
+        float prox = 0f, encl = 0f, morph = 0f;
+        float mLpfL = 0f, mLpfR = 0f, mBassL = 0f, mBassR = 0f;
+        float bassCf = 1f - MathF.Exp(-2f * MathF.PI * 180f / sampleRate);
+        var cellSpsEff = new float[NCells];
+
+        // Per-cell step rates: bottom row is each column's root; rows and columns ascend
+        // by the profile/geometry lattice generator. Recomputed per frame so a
+        // geometry-derived LatticeRatio retunes the grid live (see frame loop).
         var cellSps = new float[NCells];
-        for (int ci = 0; ci < NCells; ci++)
-        {
-            int col = ci % 4;
-            int row = ci / 4;
-            float columnRoot = MathF.Pow(1.5f, col);
-            float rowRatio   = MathF.Pow(1.5f, 3 - row);
-            cellSps[ci] = SamplesPerStep / (columnRoot * rowRatio);
-        }
 
         // DC-blocker pole: R = 1 − 2π·fc/sr  (first-order HPF, fc ≈ 20 Hz)
         float hpfR = 1f - 2f * MathF.PI * 20f / sampleRate;
@@ -107,7 +135,10 @@ public static class DirectOrbitSynth
         const int    RevPreD = 882;
         const int    RevCm0D = 2111, RevCm1D = 2237, RevCm2D = 2381, RevCm3D = 2521;
         const int    RevAp0D = 601,  RevAp1D = 441,  RevAp2D = 341,  RevAp3D = 225;
-        const float  RevFb   = 0.86f, RevDamp = 0.20f, RevApG = 0.50f, RevWet = 0.25f;
+        const float  RevApG = 0.50f;
+        // fb/damp/wet are enclosure-driven per frame: open void → short dry tail,
+        // deep inside the fractal → long bright bloom (T60 ≈ 0.8 s → ~5 s).
+        float revFb = 0.70f, revDamp = 0.35f, revWet = 0.10f;
         var revPre  = new float[RevPreD];
         var revCm0  = new float[RevCm0D + 1]; var revCm1 = new float[RevCm1D + 1];
         var revCm2  = new float[RevCm2D + 1]; var revCm3 = new float[RevCm3D + 1];
@@ -149,6 +180,71 @@ public static class DirectOrbitSynth
 
             srGlideT = Math.Clamp(-frame.ZoomVelocity * 12f, -36f, 36f);
 
+            // ── Proximity/enclosure macros (slewed) ──
+            // prox: 1 at the surface, →0 far away; gated by HitRatio so an empty view
+            // (MeanDepth reported as 0 when no rays hit) never reads as "close".
+            float proxT = MathF.Exp(-MathF.Max(0f, frame.MeanDepth) / ProxRefDist)
+                        * Math.Min(1f, frame.HitRatio * 5f);
+            float enclT = Math.Clamp(frame.HitRatio, 0f, 1f);
+            prox += macroCf * (proxT - prox);
+            encl += macroCf * (enclT - encl);
+            float mCutHz   = 1200f + 8800f * MathF.Pow(prox, 0.7f);
+            float mCf      = 1f - MathF.Exp(-2f * MathF.PI * mCutHz / sampleRate);
+            float dryGain  = 0.45f + 0.55f * prox;
+            float bassAmt  = 0.9f * prox;
+            revFb   = profile.RevFb0   + (profile.RevFb1   - profile.RevFb0)   * encl;
+            revDamp = profile.RevDamp0 + (profile.RevDamp1 - profile.RevDamp0) * encl;
+            revWet  = profile.RevWet0  + (profile.RevWet1  - profile.RevWet0)  * encl;
+
+            // ── Morph bus: ParameterVelocity → shimmer + fold sensitivity ──
+            float morphT = Math.Clamp(frame.ParameterVelocity * 4f, 0f, 1f);
+            morph += (morphT > morph ? morphAtkCf : morphRelCf) * (morphT - morph);
+
+            // ── Lattice: geometry-derived generator when present, else profile default.
+            // Recomputed per frame so parameter morphs retune the whole grid live.
+            // Phase restarts each frame with a 5 ms crossfade, so per-frame step-rate
+            // changes (retune + the ±~35-cent morph shimmer below) are click-free.
+            float ratio = frame.LatticeRatio > 1.001f ? frame.LatticeRatio : profile.LatticeRatio;
+            for (int ci = 0; ci < NCells; ci++)
+            {
+                float pitchMul = profile.RootDivisor
+                               * MathF.Pow(ratio, ci % 4)        // column root
+                               * MathF.Pow(ratio, 3 - ci / 4);   // row above bottom
+                cellSps[ci]   = SamplesPerStep / pitchMul;
+                chimeFreq[ci] = sampleRate * 8f / (cellSps[ci] * OrbtLen);
+                cellSpsEff[ci] = cellSps[ci] /
+                    (1f + morph * 0.02f * MathF.Sin(2f * MathF.PI * (0.6f + 0.37f * ci) * (float)frame.Time));
+            }
+
+            // ── Fold-event detection: frame-to-frame orbit delta per cell ──
+            // Both segments are peak-normalised, so the mean pointwise distance is a
+            // scale-free measure of how much that cell's geometry just changed.
+            for (int ci = 0; ci < NCells; ci++)
+            {
+                if (refract[ci] > 0) refract[ci]--;
+                float dSum = 0f, pSum = 0f;
+                for (int i = 0; i < OrbtLen; i++)
+                {
+                    dSum += (newSeg[ci][i] - prevSeg[ci][i]).Length();
+                    pSum += prevSeg[ci][i].LengthSquared();
+                }
+                // A cell appearing from silence (startup, or entering view) is not a fold
+                foldDelta[ci] = pSum < 1e-6f ? 0f : dSum / OrbtLen;
+            }
+            float foldThr = 0.45f - 0.25f * morph;
+            for (int k = 0; k < MaxChimesPerFrame; k++)
+            {
+                int best = -1; float bestDelta = foldThr;
+                for (int ci = 0; ci < NCells; ci++)
+                    if (refract[ci] == 0 && foldDelta[ci] > bestDelta)
+                    { best = ci; bestDelta = foldDelta[ci]; }
+                if (best < 0) break;
+                chimeEnv[best] = Math.Min(0.9f, (bestDelta - foldThr) * 1.8f) * 0.6f;
+                chimePh1[best] = 0f; chimePh2[best] = 0f;
+                refract[best]  = refractFrames;
+                foldDelta[best] = 0f; // exclude from remaining picks this frame
+            }
+
             // Energy-weighted horizontal centroid of the fractal on screen → Shepard pan.
             // Fractal drifting left makes the Shepard drone follow it left, not sit centred.
             float ePanNum = 0f, ePanDen = 0f;
@@ -180,11 +276,11 @@ public static class DirectOrbitSynth
                         float newGain  = MathF.Sin(t * MathF.PI / 2f); // 0 → 1
 
                         // Prev: continue from where it left off, clamped to avoid end-of-orbit wrap
-                        float prevP = MathF.Min(prevPhase[ci] + si / cellSps[ci],
+                        float prevP = MathF.Min(prevPhase[ci] + si / cellSpsEff[ci],
                                                 OrbtLen - 1.001f);
                         var (pL, pR, _) = Project(prevSeg[ci], prevP, camRight, camUp, camFwd);
 
-                        float newP = si / cellSps[ci];
+                        float newP = si / cellSpsEff[ci];
                         var (nL, nR, _) = Project(newSeg[ci], newP, camRight, camUp, camFwd);
 
                         rawL = prevGain * pL + newGain * nL;
@@ -192,7 +288,7 @@ public static class DirectOrbitSynth
                     }
                     else
                     {
-                        float phase = si / cellSps[ci];
+                        float phase = si / cellSpsEff[ci];
                         var (nL, nR, _) = Project(newSeg[ci], phase, camRight, camUp, camFwd);
                         rawL = nL;
                         rawR = nR;
@@ -222,6 +318,29 @@ public static class DirectOrbitSynth
                     sumR += tiltedR * panR[ci] * cellGain;
                 }
 
+                // Fold-event chimes: two-partial decaying sines at the cell's pan position
+                for (int ci = 0; ci < NCells; ci++)
+                {
+                    if (chimeEnv[ci] < 1e-4f) continue;
+                    chimePh1[ci] += chimeFreq[ci] / sampleRate;
+                    chimePh2[ci] += chimeFreq[ci] * profile.ChimePartial / sampleRate;
+                    if (chimePh1[ci] >= 1f) chimePh1[ci] -= 1f;
+                    if (chimePh2[ci] >= 1f) chimePh2[ci] -= 1f;
+                    float cs = chimeEnv[ci] * (MathF.Sin(2f * MathF.PI * chimePh1[ci])
+                             + 0.35f * MathF.Sin(2f * MathF.PI * chimePh2[ci]));
+                    chimeEnv[ci] *= chimeDecay;
+                    sumL += cs * panL[ci] * 0.5f;
+                    sumR += cs * panR[ci] * 0.5f;
+                }
+
+                // Proximity master chain: brightness LPF + bass lift + level (far = dark/thin/quiet)
+                mLpfL += mCf * (sumL - mLpfL);
+                mLpfR += mCf * (sumR - mLpfR);
+                mBassL += bassCf * (mLpfL - mBassL);
+                mBassR += bassCf * (mLpfR - mBassR);
+                float dryL = (mLpfL + bassAmt * mBassL) * dryGain;
+                float dryR = (mLpfR + bassAmt * mBassR) * dryGain;
+
                 // Shepard–Risset zoom layer (mono centre, 0.065 gain — matches HybridSynth)
                 srGlideSm += srGlideCf * (srGlideT - srGlideSm);
                 srBase += srGlideSm / (12f * sampleRate);
@@ -236,22 +355,23 @@ public static class DirectOrbitSynth
                 }
                 shep = shep / NSR * 0.065f;
 
-                // Freeverb reverb: mono input → pre-delay → 4 comb-LPF → 4 allpass → bloom
-                float revIn  = (sumL + sumR) * 0.70710678f;
+                // Freeverb reverb: mono input → pre-delay → 4 comb-LPF → 4 allpass → bloom.
+                // fb/damp/wet are enclosure-driven (set per control frame above).
+                float revIn  = (dryL + dryR) * 0.70710678f;
                 float preOut = revPre[revPreW]; revPre[revPreW] = revIn;
                 revPreW = (revPreW + 1) % RevPreD;
-                float cSum = RevCombLpf(preOut, revCm0, ref revCm0w, RevCm0D, RevFb, ref revCm0lpf, RevDamp)
-                           + RevCombLpf(preOut, revCm1, ref revCm1w, RevCm1D, RevFb, ref revCm1lpf, RevDamp)
-                           + RevCombLpf(preOut, revCm2, ref revCm2w, RevCm2D, RevFb, ref revCm2lpf, RevDamp)
-                           + RevCombLpf(preOut, revCm3, ref revCm3w, RevCm3D, RevFb, ref revCm3lpf, RevDamp);
+                float cSum = RevCombLpf(preOut, revCm0, ref revCm0w, RevCm0D, revFb, ref revCm0lpf, revDamp)
+                           + RevCombLpf(preOut, revCm1, ref revCm1w, RevCm1D, revFb, ref revCm1lpf, revDamp)
+                           + RevCombLpf(preOut, revCm2, ref revCm2w, RevCm2D, revFb, ref revCm2lpf, revDamp)
+                           + RevCombLpf(preOut, revCm3, ref revCm3w, RevCm3D, revFb, ref revCm3lpf, revDamp);
                 float rOut = RevAllPass(cSum * 0.25f, revAp0, ref revAp0w, RevAp0D, RevApG);
                 rOut = RevAllPass(rOut, revAp1, ref revAp1w, RevAp1D, RevApG);
                 rOut = RevAllPass(rOut, revAp2, ref revAp2w, RevAp2D, RevApG);
                 rOut = RevAllPass(rOut, revAp3, ref revAp3w, RevAp3D, RevApG);
-                float bloom = rOut * RevWet;
+                float bloom = rOut * revWet;
                 // Master bus: tanh limiter with reverb bloom, Shepard panned to the fractal
-                float sigL = 0.85f * (float)Math.Tanh((sumL + bloom) * 1.1f) + shep * shepGL;
-                float sigR = 0.85f * (float)Math.Tanh((sumR + bloom) * 1.1f) + shep * shepGR;
+                float sigL = 0.85f * (float)Math.Tanh((dryL + bloom) * 1.1f) + shep * shepGL;
+                float sigR = 0.85f * (float)Math.Tanh((dryR + bloom) * 1.1f) + shep * shepGR;
                 output[idx++] = Clip16(sigL);
                 output[idx++] = Clip16(sigR);
                 si++;
@@ -261,7 +381,7 @@ public static class DirectOrbitSynth
             for (int ci = 0; ci < NCells; ci++)
             {
                 prevSeg[ci]   = newSeg[ci];
-                prevPhase[ci] = spf / cellSps[ci];
+                prevPhase[ci] = spf / cellSpsEff[ci];
             }
         }
         return output;

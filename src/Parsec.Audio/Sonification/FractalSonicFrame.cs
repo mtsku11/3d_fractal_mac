@@ -35,4 +35,8 @@ public sealed record class FractalSonicFrame(
     float[]? FieldScanWaveformTL = null,
     float[]? FieldScanWaveformTR = null,
     float[]? FieldScanWaveformBL = null,
-    float[]? FieldScanWaveformBR = null);
+    float[]? FieldScanWaveformBR = null,
+    // DirectOrbit profiles: geometry-derived lattice generator (octave-reduced, (1,2)).
+    // 0 = no geometry ratio — the synth falls back to the voice profile's default.
+    // Kleinian: eigenvalue ratio; Mandelbulb: (power+1)/power. Morphs retune the grid live.
+    float    LatticeRatio = 0f);

@@ -137,14 +137,21 @@ public sealed class FractalDroneStream : IDisposable
     private const float MinProjectedRms = 0.30f;
     private const float MaxProjectionBoost = 6.0f;
 
-    // DirectOrbit Freeverb-style mono reverb (~2 s decay, 20 ms pre-delay)
+    // DirectOrbit Freeverb-style mono reverb (20 ms pre-delay).
+    // fb/damp/wet are enclosure-driven per buffer (see FillDirectOrbit) — open void
+    // gives a short dry tail, deep inside the fractal a long bright bloom.
     private const int    DoRevPreD  = 882;
     private const int    DoRevCm0D  = 2111, DoRevCm1D = 2237, DoRevCm2D = 2381, DoRevCm3D = 2521;
     private const int    DoRevAp0D  = 601,  DoRevAp1D = 441,  DoRevAp2D = 341,  DoRevAp3D = 225;
-    private const float  DoRevFb    = 0.86f;
-    private const float  DoRevDamp  = 0.20f;
     private const float  DoRevApG   = 0.50f;
-    private const float  DoRevWet   = 0.25f;
+
+    // Proximity/enclosure macros + fold-event layer (kept in sync with DirectOrbitSynth)
+    private const float DoProxRefDist       = 2.5f;
+    private const float DoMacroSlewTau      = 0.35f;
+    private const int   DoMaxChimesPerFrame = 3;
+    private const float DoChimeRefractorySec = 0.25f;
+    private const float DoMorphAttackTau    = 0.08f;
+    private const float DoMorphReleaseTau   = 1.2f;
 
     private SonificationMode _mode = SonificationMode.Hybrid;
     private float            _blendAmount = 0f;  // 0 = pure Hybrid, 1 = pure DirectOrbit
@@ -161,6 +168,21 @@ public sealed class FractalDroneStream : IDisposable
     private readonly float[]     _doLpfL, _doLpfR;                     // one-pole LPF
     private readonly float[]     _doTiltLpfL, _doTiltLpfR;             // spectral-tilt
     private readonly float[]     _doCellSps;                           // per-cell step rate (detune)
+    private readonly float[]     _doCellSpsEff;                        // morph-shimmered step rate (per buffer)
+
+    // Fold-event chimes (preallocated; only touched on audio thread)
+    private readonly float[] _doChimeEnv, _doChimePh1, _doChimePh2, _doChimeFreq, _doFoldDelta;
+    private readonly int[]   _doRefract;
+
+    // Per-fractal DirectOrbit identity (register, lattice, space, chime character)
+    private DirectOrbitProfile _doProfile;
+    private float _doChimeDecay;
+
+    // Proximity/enclosure macro + morph-bus state
+    private float _doProx, _doEncl, _doMorph;
+    private float _doMLpfL, _doMLpfR, _doMBassL, _doMBassR;   // master proximity LPF + bass shelf
+    private float _doRevFb = 0.70f, _doRevDamp = 0.35f, _doRevWet = 0.10f;
+    private static readonly float _doBassCf = 1f - MathF.Exp(-2f * MathF.PI * 180f / SampleRate);
 
     // DirectOrbit reverb delay buffers (pre-allocated; never reallocated on audio thread)
     private readonly float[] _doRevPreBuf = new float[DoRevPreD];
@@ -238,18 +260,16 @@ public sealed class FractalDroneStream : IDisposable
         _doDcHL       = new float[NCells]; _doDcHR  = new float[NCells];
         _doLpfL       = new float[NCells]; _doLpfR  = new float[NCells];
         _doTiltLpfL   = new float[NCells]; _doTiltLpfR = new float[NCells];
+        _doCellSpsEff = new float[NCells];
+        _doChimeEnv   = new float[NCells]; _doChimePh1 = new float[NCells];
+        _doChimePh2   = new float[NCells]; _doChimeFreq = new float[NCells];
+        _doFoldDelta  = new float[NCells]; _doRefract  = new int[NCells];
 
-        // Per-cell step rates: bottom row is each column's root; rows and columns ascend by pure fifths.
-        // Keep in sync with DirectOrbitSynth.
+        // Per-cell step rates are computed per buffer in FillDirectOrbit from the
+        // voice profile + geometry lattice ratio (keep in sync with DirectOrbitSynth).
         _doCellSps = new float[NCells];
-        for (int ci = 0; ci < NCells; ci++)
-        {
-            int col = ci % 4;
-            int row = ci / 4;
-            float columnRoot = MathF.Pow(1.5f, col);
-            float rowRatio   = MathF.Pow(1.5f, 3 - row);
-            _doCellSps[ci] = SamplesPerStep / (columnRoot * rowRatio);
-        }
+        _doProfile    = DirectOrbitProfile.ForVoice(voice);
+        _doChimeDecay = MathF.Exp(-1f / (_doProfile.ChimeDecaySec * SampleRate));
 
         _wtMorphCf       = Coeff(0.05f, SampleRate);
         _wsMorphCf       = Coeff(0.05f, SampleRate);
@@ -340,7 +360,17 @@ public sealed class FractalDroneStream : IDisposable
         Array.Clear(_doRevAp0buf); Array.Clear(_doRevAp1buf);
         Array.Clear(_doRevAp2buf); Array.Clear(_doRevAp3buf);
         _doRevAp0w = _doRevAp1w = _doRevAp2w = _doRevAp3w = 0;
+        ResetDirectOrbitMacroState();
         // Keep Shepard state — glide layer is mode-independent
+    }
+
+    private void ResetDirectOrbitMacroState()
+    {
+        Array.Clear(_doChimeEnv); Array.Clear(_doChimePh1); Array.Clear(_doChimePh2);
+        Array.Clear(_doFoldDelta); Array.Clear(_doRefract);
+        _doProx = _doEncl = _doMorph = 0f;
+        _doMLpfL = _doMLpfR = _doMBassL = _doMBassR = 0f;
+        _doRevFb = 0.70f; _doRevDamp = 0.35f; _doRevWet = 0.10f;
     }
 
     /// <summary>
@@ -378,6 +408,8 @@ public sealed class FractalDroneStream : IDisposable
         _voice       = voice;
         _jiQuantizer = VoiceQuantizer(voice);
         _voiceRootHz = VoiceRootHz(voice);
+        _doProfile    = DirectOrbitProfile.ForVoice(voice);
+        _doChimeDecay = MathF.Exp(-1f / (_doProfile.ChimeDecaySec * SampleRate));
 
         // Clear reverb delay state so the new voice starts from silence
         Array.Clear(_ap0buf); Array.Clear(_ap1buf);
@@ -425,6 +457,7 @@ public sealed class FractalDroneStream : IDisposable
         Array.Clear(_doRevAp0buf); Array.Clear(_doRevAp1buf);
         Array.Clear(_doRevAp2buf); Array.Clear(_doRevAp3buf);
         _doRevAp0w = _doRevAp1w = _doRevAp2w = _doRevAp3w = 0;
+        ResetDirectOrbitMacroState();
     }
 
     public void Dispose()
@@ -679,6 +712,77 @@ public sealed class FractalDroneStream : IDisposable
         _srGlideT = Math.Clamp(-frame.ZoomVelocity * 12f, -36f, 36f);
 
         int n = buf.Length / 2;   // stereo interleaved output matches ALFormat.Stereo16
+        float dtFrame = (float)n / SampleRate;
+
+        // ── Proximity/enclosure macros (slewed; kept in sync with DirectOrbitSynth) ──
+        // prox: 1 at the surface, →0 far away; gated by HitRatio so an empty view
+        // (MeanDepth reported as 0 when no rays hit) never reads as "close".
+        float macroCf = 1f - MathF.Exp(-dtFrame / DoMacroSlewTau);
+        float proxT = MathF.Exp(-MathF.Max(0f, frame.MeanDepth) / DoProxRefDist)
+                    * Math.Min(1f, frame.HitRatio * 5f);
+        float enclT = Math.Clamp(frame.HitRatio, 0f, 1f);
+        _doProx += macroCf * (proxT - _doProx);
+        _doEncl += macroCf * (enclT - _doEncl);
+        float mCutHz  = 1200f + 8800f * MathF.Pow(_doProx, 0.7f);
+        float mCf     = 1f - MathF.Exp(-2f * MathF.PI * mCutHz / SampleRate);
+        float dryGain = 0.45f + 0.55f * _doProx;
+        float bassAmt = 0.9f * _doProx;
+        _doRevFb   = _doProfile.RevFb0   + (_doProfile.RevFb1   - _doProfile.RevFb0)   * _doEncl;
+        _doRevDamp = _doProfile.RevDamp0 + (_doProfile.RevDamp1 - _doProfile.RevDamp0) * _doEncl;
+        _doRevWet  = _doProfile.RevWet0  + (_doProfile.RevWet1  - _doProfile.RevWet0)  * _doEncl;
+
+        // ── Morph bus: ParameterVelocity → shimmer + fold sensitivity ──
+        float morphT = Math.Clamp(frame.ParameterVelocity * 4f, 0f, 1f);
+        float morphCf = morphT > _doMorph
+            ? 1f - MathF.Exp(-dtFrame / DoMorphAttackTau)
+            : 1f - MathF.Exp(-dtFrame / DoMorphReleaseTau);
+        _doMorph += morphCf * (morphT - _doMorph);
+
+        // ── Lattice: geometry-derived generator when present, else profile default.
+        // Recomputed per buffer so parameter morphs retune the whole grid live.
+        // Phase restarts each buffer with a 5 ms crossfade, so per-buffer step-rate
+        // changes (retune + the ±~35-cent morph shimmer below) are click-free.
+        // Keep in sync with DirectOrbitSynth.
+        float latRatio = frame.LatticeRatio > 1.001f ? frame.LatticeRatio : _doProfile.LatticeRatio;
+        for (int ci = 0; ci < NCells; ci++)
+        {
+            float pitchMul = _doProfile.RootDivisor
+                           * MathF.Pow(latRatio, ci % 4)        // column root
+                           * MathF.Pow(latRatio, 3 - ci / 4);   // row above bottom
+            _doCellSps[ci]   = SamplesPerStep / pitchMul;
+            _doChimeFreq[ci] = SampleRate * 8f / (_doCellSps[ci] * OrbtLen);
+            _doCellSpsEff[ci] = _doCellSps[ci] /
+                (1f + _doMorph * 0.02f * MathF.Sin(2f * MathF.PI * (0.6f + 0.37f * ci) * (float)frame.Time));
+        }
+
+        // ── Fold-event detection: buffer-to-buffer orbit delta per cell ──
+        for (int ci = 0; ci < NCells; ci++)
+        {
+            if (_doRefract[ci] > 0) _doRefract[ci]--;
+            float dSum = 0f, pSum = 0f;
+            for (int i = 0; i < OrbtLen; i++)
+            {
+                dSum += (_doNewSeg[ci][i] - _doPrevSeg[ci][i]).Length();
+                pSum += _doPrevSeg[ci][i].LengthSquared();
+            }
+            // A cell appearing from silence (startup, or entering view) is not a fold
+            _doFoldDelta[ci] = pSum < 1e-6f ? 0f : dSum / OrbtLen;
+        }
+        int refractFrames = (int)MathF.Ceiling(DoChimeRefractorySec / dtFrame);
+        float foldThr = 0.45f - 0.25f * _doMorph;
+        for (int k = 0; k < DoMaxChimesPerFrame; k++)
+        {
+            int best = -1; float bestDelta = foldThr;
+            for (int ci = 0; ci < NCells; ci++)
+                if (_doRefract[ci] == 0 && _doFoldDelta[ci] > bestDelta)
+                { best = ci; bestDelta = _doFoldDelta[ci]; }
+            if (best < 0) break;
+            _doChimeEnv[best] = Math.Min(0.9f, (bestDelta - foldThr) * 1.8f) * 0.6f;
+            _doChimePh1[best] = 0f; _doChimePh2[best] = 0f;
+            _doRefract[best]  = refractFrames;
+            _doFoldDelta[best] = 0f; // exclude from remaining picks this buffer
+        }
+
         for (int si = 0; si < n; si++)
         {
             float sumL = 0f, sumR = 0f;
@@ -691,17 +795,17 @@ public sealed class FractalDroneStream : IDisposable
                     float t        = (float)si / XfadeSamples;
                     float prevGain = MathF.Cos(t * MathF.PI / 2f);
                     float newGain  = MathF.Sin(t * MathF.PI / 2f);
-                    float prevP    = MathF.Min(_doPrevPhase[ci] + si / _doCellSps[ci],
+                    float prevP    = MathF.Min(_doPrevPhase[ci] + si / _doCellSpsEff[ci],
                                                OrbtLen - 1.001f);
                     var (pL, pR, _) = DoProject(_doPrevSeg[ci], prevP, camRight, camUp, camFwd);
-                    float newP = si / _doCellSps[ci];
+                    float newP = si / _doCellSpsEff[ci];
                     var (nL, nR, _) = DoProject(_doNewSeg[ci], newP, camRight, camUp, camFwd);
                     rawL = prevGain * pL + newGain * nL;
                     rawR = prevGain * pR + newGain * nR;
                 }
                 else
                 {
-                    float phase = si / _doCellSps[ci];
+                    float phase = si / _doCellSpsEff[ci];
                     var (nL, nR, _) = DoProject(_doNewSeg[ci], phase, camRight, camUp, camFwd);
                     rawL = nL; rawR = nR;
                 }
@@ -726,6 +830,29 @@ public sealed class FractalDroneStream : IDisposable
                 sumR += tiltedR * _doPanR[ci] * cellGain;
             }
 
+            // Fold-event chimes: two-partial decaying sines at the cell's pan position
+            for (int ci = 0; ci < NCells; ci++)
+            {
+                if (_doChimeEnv[ci] < 1e-4f) continue;
+                _doChimePh1[ci] += _doChimeFreq[ci] / SampleRate;
+                _doChimePh2[ci] += _doChimeFreq[ci] * _doProfile.ChimePartial / SampleRate;
+                if (_doChimePh1[ci] >= 1f) _doChimePh1[ci] -= 1f;
+                if (_doChimePh2[ci] >= 1f) _doChimePh2[ci] -= 1f;
+                float cs = _doChimeEnv[ci] * (MathF.Sin(2f * MathF.PI * _doChimePh1[ci])
+                         + 0.35f * MathF.Sin(2f * MathF.PI * _doChimePh2[ci]));
+                _doChimeEnv[ci] *= _doChimeDecay;
+                sumL += cs * _doPanL[ci] * 0.5f;
+                sumR += cs * _doPanR[ci] * 0.5f;
+            }
+
+            // Proximity master chain: brightness LPF + bass lift + level (far = dark/thin/quiet)
+            _doMLpfL += mCf * (sumL - _doMLpfL);
+            _doMLpfR += mCf * (sumR - _doMLpfR);
+            _doMBassL += _doBassCf * (_doMLpfL - _doMBassL);
+            _doMBassR += _doBassCf * (_doMLpfR - _doMBassR);
+            float dryL = (_doMLpfL + bassAmt * _doMBassL) * dryGain;
+            float dryR = (_doMLpfR + bassAmt * _doMBassR) * dryGain;
+
             _srGlideSm += _srGlideCf * (_srGlideT - _srGlideSm);
             _srBase += _srGlideSm / (12f * SampleRate);
             if (_srBase >= 1f) _srBase -= 1f; else if (_srBase < 0f) _srBase += 1f;
@@ -740,21 +867,22 @@ public sealed class FractalDroneStream : IDisposable
             shep = shep / NSR * 0.065f;
 
             // Mono reverb bus from the stereo dry signal; dry DirectOrbit panning stays stereo.
-            float revIn  = (sumL + sumR) * 0.70710678f;
+            // fb/damp/wet are enclosure-driven (set per buffer above).
+            float revIn  = (dryL + dryR) * 0.70710678f;
             float preOut = _doRevPreBuf[_doRevPreW];
             _doRevPreBuf[_doRevPreW] = revIn;
             _doRevPreW = (_doRevPreW + 1) % DoRevPreD;
-            float cSum = StreamCombLpf(preOut, _doRevCm0buf, ref _doRevCm0w, DoRevCm0D, DoRevFb, ref _doRevCm0lpf, DoRevDamp)
-                       + StreamCombLpf(preOut, _doRevCm1buf, ref _doRevCm1w, DoRevCm1D, DoRevFb, ref _doRevCm1lpf, DoRevDamp)
-                       + StreamCombLpf(preOut, _doRevCm2buf, ref _doRevCm2w, DoRevCm2D, DoRevFb, ref _doRevCm2lpf, DoRevDamp)
-                       + StreamCombLpf(preOut, _doRevCm3buf, ref _doRevCm3w, DoRevCm3D, DoRevFb, ref _doRevCm3lpf, DoRevDamp);
+            float cSum = StreamCombLpf(preOut, _doRevCm0buf, ref _doRevCm0w, DoRevCm0D, _doRevFb, ref _doRevCm0lpf, _doRevDamp)
+                       + StreamCombLpf(preOut, _doRevCm1buf, ref _doRevCm1w, DoRevCm1D, _doRevFb, ref _doRevCm1lpf, _doRevDamp)
+                       + StreamCombLpf(preOut, _doRevCm2buf, ref _doRevCm2w, DoRevCm2D, _doRevFb, ref _doRevCm2lpf, _doRevDamp)
+                       + StreamCombLpf(preOut, _doRevCm3buf, ref _doRevCm3w, DoRevCm3D, _doRevFb, ref _doRevCm3lpf, _doRevDamp);
             float revOut = StreamAllPass(cSum * 0.25f, _doRevAp0buf, ref _doRevAp0w, DoRevAp0D, DoRevApG);
             revOut = StreamAllPass(revOut, _doRevAp1buf, ref _doRevAp1w, DoRevAp1D, DoRevApG);
             revOut = StreamAllPass(revOut, _doRevAp2buf, ref _doRevAp2w, DoRevAp2D, DoRevApG);
             revOut = StreamAllPass(revOut, _doRevAp3buf, ref _doRevAp3w, DoRevAp3D, DoRevApG);
-            float bloom = revOut * DoRevWet;
-            float sigL = 0.85f * (float)Math.Tanh((sumL + bloom) * 1.1f) + shep;
-            float sigR = 0.85f * (float)Math.Tanh((sumR + bloom) * 1.1f) + shep;
+            float bloom = revOut * _doRevWet;
+            float sigL = 0.85f * (float)Math.Tanh((dryL + bloom) * 1.1f) + shep;
+            float sigR = 0.85f * (float)Math.Tanh((dryR + bloom) * 1.1f) + shep;
             int di = si * 2;
             buf[di]     = Clip16(sigL);
             buf[di + 1] = Clip16(sigR);
@@ -764,7 +892,7 @@ public sealed class FractalDroneStream : IDisposable
         for (int ci = 0; ci < NCells; ci++)
         {
             Array.Copy(_doNewSeg[ci], _doPrevSeg[ci], OrbtLen);
-            _doPrevPhase[ci] = n / _doCellSps[ci];
+            _doPrevPhase[ci] = n / _doCellSpsEff[ci];
         }
     }
 

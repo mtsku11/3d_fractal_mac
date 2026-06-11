@@ -4658,11 +4658,11 @@ public static class Program
                 }
 
                 static string SynthAndReport(List<FractalSonicFrame> frames, double hz,
-                    string label, string outPath)
+                    string label, string outPath, FractalVoice voice)
                 {
                     Console.Write($"  Synth {label}...  ");
                     var sw = System.Diagnostics.Stopwatch.StartNew();
-                    var pcm = DirectOrbitSynth.Synthesize(frames, controlRateHz: hz);
+                    var pcm = DirectOrbitSynth.Synthesize(frames, controlRateHz: hz, voice: voice);
                     sw.Stop();
                     WavEncoder.Write(outPath, pcm, DirectOrbitSynth.DefaultSampleRate, 2);
                     double peak = 20.0 * Math.Log10(
@@ -4691,7 +4691,7 @@ public static class Program
                             new Vector3(0f, 5f, 30f), new Vector3(0f, 1.5f, 7f),
                             new MandelboxParams { Scale = 2.0f }, r,
                             (rr, p, c, s) => rr.RunTelemetryPass(p, c, s), settingsMbx);
-                        SynthAndReport(fr, controlHz, "mandelbox", Path.Combine(outDir, "m9c_mandelbox_direct.wav"));
+                        SynthAndReport(fr, controlHz, "mandelbox", Path.Combine(outDir, "m9c_mandelbox_direct.wav"), FractalVoice.Mandelbox);
                     }
                 }
 
@@ -4706,7 +4706,7 @@ public static class Program
                             new Vector3(0f, 2f, 6f), new Vector3(0f, 0.3f, 2f),
                             new MandelbulbParams(), r,
                             (rr, p, c, s) => rr.RunTelemetryPass(p, c, s), settingsStd);
-                        SynthAndReport(fr, controlHz, "mandelbulb", Path.Combine(outDir, "m9c_mandelbulb_direct.wav"));
+                        SynthAndReport(fr, controlHz, "mandelbulb", Path.Combine(outDir, "m9c_mandelbulb_direct.wav"), FractalVoice.Mandelbulb);
                     }
                 }
 
@@ -4721,7 +4721,7 @@ public static class Program
                             new Vector3(0f, 0.5f, 4f), new Vector3(0f, 0.1f, 1.2f),
                             new KleinianParams(), r,
                             (rr, p, c, s) => rr.RunTelemetryPass(p, c, s), settingsStd);
-                        SynthAndReport(fr, controlHz, "kleinian", Path.Combine(outDir, "m9c_kleinian_direct.wav"));
+                        SynthAndReport(fr, controlHz, "kleinian", Path.Combine(outDir, "m9c_kleinian_direct.wav"), FractalVoice.Kleinian);
                     }
                 }
 
@@ -4736,7 +4736,7 @@ public static class Program
                             new Vector3(0f, 2f, 6f), new Vector3(0f, 0.5f, 2f),
                             new BurningShipParams(), r,
                             (rr, p, c, s) => rr.RunTelemetryPass(p, c, s), settingsStd);
-                        SynthAndReport(fr, controlHz, "burningship", Path.Combine(outDir, "m9c_burningship_direct.wav"));
+                        SynthAndReport(fr, controlHz, "burningship", Path.Combine(outDir, "m9c_burningship_direct.wav"), FractalVoice.BurningShip);
                     }
                 }
 
@@ -4958,7 +4958,7 @@ public static class Program
                 }
 
                 Console.Write("\n  DirectOrbit export... ");
-                var pcm = DirectOrbitSynth.Synthesize(frames, controlRateHz: ctlHz);
+                var pcm = DirectOrbitSynth.Synthesize(frames, controlRateHz: ctlHz, voice: FractalVoice.BurningShip);
                 string wav = Path.Combine(outDir, "m9d_burningship_animated_direct.wav");
                 WavEncoder.Write(wav, pcm, DirectOrbitSynth.DefaultSampleRate, channels: 2);
                 float pk = pcm.Max(s => MathF.Abs(s)) / 32767f;

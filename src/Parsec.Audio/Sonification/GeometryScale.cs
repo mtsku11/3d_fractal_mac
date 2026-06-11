@@ -41,14 +41,7 @@ public static class GeometryScale
     /// </summary>
     public static float[] Kleinian(float rootHz, float fixedRadius, float minRadius, float scale)
     {
-        float r = scale * (1f + fixedRadius / MathF.Max(minRadius, 0.01f)) * 0.5f;
-        if (!float.IsFinite(r) || r <= 0f) r = 1.5f;  // guard: octave-reduction loops never terminate for r <= 0
-        // Reduce to (1, 2) — the octave window
-        while (r >= 2f) r /= 2f;
-        while (r <= 1f) r *= 2f;
-        // Guard degenerate cases (r ≈ 1 = unison loop, r ≈ 2 = octave stack)
-        if (r < 1.03f || r > 1.97f) r = 1.5f;
-
+        float r = KleinianLatticeRatio(fixedRadius, minRadius, scale);
         float rootOctave = rootHz * 2f;
         var pitches = new float[6];
         float p = rootHz;
@@ -61,5 +54,35 @@ public static class GeometryScale
         }
         Array.Sort(pitches);
         return pitches;
+    }
+
+    /// <summary>
+    /// The octave-reduced Kleinian eigenvalue ratio r = scale*(1+fixed/min)/2 — the
+    /// generator interval of the group's natural scale (default params → 3/2).
+    /// Used directly as the DirectOrbit lattice generator so parameter morphs retune
+    /// the whole 4×4 grid live.
+    /// </summary>
+    public static float KleinianLatticeRatio(float fixedRadius, float minRadius, float scale)
+    {
+        float r = scale * (1f + fixedRadius / MathF.Max(minRadius, 0.01f)) * 0.5f;
+        if (!float.IsFinite(r) || r <= 0f) r = 1.5f;  // guard: octave-reduction loops never terminate for r <= 0
+        // Reduce to (1, 2) — the octave window
+        while (r >= 2f) r /= 2f;
+        while (r <= 1f) r *= 2f;
+        // Guard degenerate cases (r ≈ 1 = unison loop, r ≈ 2 = octave stack)
+        if (r < 1.03f || r > 1.97f) r = 1.5f;
+        return r;
+    }
+
+    /// <summary>
+    /// Mandelbulb lattice generator from the bulb power: the superparticular ratio
+    /// (p+1)/p — power 8 → 9/8 (whole-tone cluster lattice), power 2 → 3/2 (fifths).
+    /// Morphing Power slides the grid through the just-intonation interval series.
+    /// </summary>
+    public static float MandelbulbLatticeRatio(float power)
+    {
+        if (!float.IsFinite(power) || power < 1.05f) return 1.5f;
+        float r = (power + 1f) / power;
+        return Math.Clamp(r, 1.03f, 1.97f);
     }
 }

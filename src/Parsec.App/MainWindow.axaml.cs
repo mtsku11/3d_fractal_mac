@@ -679,7 +679,8 @@ public partial class MainWindow : Window
                             if (exportBlend >= 0.99f && canDirect)
                             {
                                 pcm = DirectOrbitSynth.Synthesize(sonicFrames,
-                                    controlRateHz: RenderFps);
+                                    controlRateHz: RenderFps,
+                                    voice: exportVoice);
                             }
                             else if (exportBlend <= 0.01f || !canDirect)
                             {
@@ -696,7 +697,8 @@ public partial class MainWindow : Window
                                     controlRateHz: RenderFps,
                                     voice: exportVoice);
                                 var pcmD = DirectOrbitSynth.Synthesize(sonicFrames,
-                                    controlRateHz: RenderFps);
+                                    controlRateHz: RenderFps,
+                                    voice: exportVoice);
                                 float hybGain = 1f - exportBlend;
                                 pcm = new short[Math.Max(pcmH.Length, pcmD.Length)];
                                 for (int i = 0; i < pcm.Length; i++)

@@ -440,7 +440,7 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
         Parsec.Rendering.Metal.FractalGeometryStats? telemetry = null;
         try { telemetry = RunActiveTelemetryPass(camera, PreviewSettings()); }
         catch { /* telemetry is best-effort; frame falls back to camera-only fields */ }
-        return controller.Update(t, _cam.Position, _cam.Forward, _cam.UpLocal, telemetry, ComputeGeometryPitches());
+        return controller.Update(t, _cam.Position, _cam.Forward, _cam.UpLocal, telemetry, ComputeGeometryPitches(), ComputeLatticeRatio());
     }
 
     // M7g: compute geometry-native pitch set for the current fractal type.
@@ -450,6 +450,15 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
         FractalType.Apollonian => Audio.Sonification.GeometryScale.Apollonian(110f),
         FractalType.Kleinian   => Audio.Sonification.GeometryScale.Kleinian(55f, Kleinian.FixedRadius, Kleinian.MinRadius, Kleinian.Scale),
         _                      => null,
+    };
+
+    // DirectOrbit profiles: geometry-derived lattice generator (0 = use voice default).
+    // Live parameter changes retune the 4×4 grid through these mappings.
+    private float ComputeLatticeRatio() => ActiveType switch
+    {
+        FractalType.Kleinian   => Audio.Sonification.GeometryScale.KleinianLatticeRatio(Kleinian.FixedRadius, Kleinian.MinRadius, Kleinian.Scale),
+        FractalType.Mandelbulb => Audio.Sonification.GeometryScale.MandelbulbLatticeRatio(Mandelbulb.Power),
+        _                      => 0f,
     };
 
     private static string SonicDebugSuffix(Audio.Sonification.FractalSonicFrame? frame)
@@ -954,7 +963,7 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
                     catch { _lastTelemetry = null; }
                 }
 
-                var sonicFrame = Sonification?.Update(_sonicClock.Elapsed.TotalSeconds, _cam.Position, _cam.Forward, _cam.UpLocal, _lastTelemetry, ComputeGeometryPitches());
+                var sonicFrame = Sonification?.Update(_sonicClock.Elapsed.TotalSeconds, _cam.Position, _cam.Forward, _cam.UpLocal, _lastTelemetry, ComputeGeometryPitches(), ComputeLatticeRatio());
                 Status($"Metal {ActiveType} · {rw}x{rh} · compute {_metalComputeMs} ms · readback {_metalReadbackMs} ms · total {_totalFrameMs} ms  ·  WASD+QE move · drag to look{SonicDebugSuffix(sonicFrame)}");
             }
         }
@@ -1162,7 +1171,7 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
             bool atMaxDepth = ActiveType == FractalType.DeepZoom
                 && _deepView.Radius <= DeepZoomView.MinRadius * 1.05;
             {
-                var sonicFrame = Sonification?.Update(_sonicClock.Elapsed.TotalSeconds, _cam.Position, _cam.Forward, _cam.UpLocal, _lastTelemetry, ComputeGeometryPitches());
+                var sonicFrame = Sonification?.Update(_sonicClock.Elapsed.TotalSeconds, _cam.Position, _cam.Forward, _cam.UpLocal, _lastTelemetry, ComputeGeometryPitches(), ComputeLatticeRatio());
                 string sonicSuffix = SonicDebugSuffix(sonicFrame);
                 Status(ActiveType == FractalType.DeepZoom
                     ? $"Deep Zoom 2D · {(_deepView.Formula switch { 1 => "Prospector", 2 => "Julia", 3 => "Burning Ship", _ => "Mandelbrot" })} · radius {_deepView.Radius:e2}{(atMaxDepth ? " · max depth" : "")} · {rw}x{rh} · drag pan · scroll zoom"

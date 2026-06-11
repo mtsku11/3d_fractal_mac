@@ -38,7 +38,8 @@ public sealed class SonificationController
     public FractalSonicFrame Update(double nowSeconds, Vector3 cameraPos,
         Vector3 cameraForward, Vector3 cameraUp,
         FractalGeometryStats? telemetry = null,
-        float[]? geometryPitches = null)
+        float[]? geometryPitches = null,
+        float latticeRatio = 0f)
     {
         var (camSpeed, zoomVelocity) = ComputeCameraMotion(nowSeconds, cameraPos, cameraForward);
         float paramVelocity = ComputeParamVelocity(nowSeconds);
@@ -66,7 +67,8 @@ public sealed class SonificationController
             FieldScanWaveformTL: telemetry?.FieldScanWaveformTL,
             FieldScanWaveformTR: telemetry?.FieldScanWaveformTR,
             FieldScanWaveformBL: telemetry?.FieldScanWaveformBL,
-            FieldScanWaveformBR: telemetry?.FieldScanWaveformBR);
+            FieldScanWaveformBR: telemetry?.FieldScanWaveformBR,
+            LatticeRatio:        latticeRatio);
 
         Volatile.Write(ref _latestFrame, frame);
         return frame;
