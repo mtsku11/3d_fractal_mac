@@ -19,4 +19,20 @@ public sealed record class FractalSonicFrame(
     Vector3  CameraPosition  = default,
     Vector3  CameraForward   = default,
     Vector3  CameraUp        = default,
-    FractalSonicCell[]? Cells = null);
+    FractalSonicCell[]? Cells = null,
+    // M7f: signed zoom velocity — positive = diving into fractal; drives Shepard–Risset glide rate
+    float    ZoomVelocity    = 0f,
+    // M7g: geometry-native pitch set — intervals derived from fractal parameters (Apollonian/Kleinian).
+    // Null for fractals with no geometry-derived scale; non-null bypasses JiQuantizer snap.
+    float[]? GeometryPitches  = null,
+    // M7h: 64-sample DE cross-section strip normalised to [-1,1].
+    // Captured along camera-right from the telemetry pass; used as a waveshaping transfer curve.
+    // Null when no telemetry pass ran (Apollonian, other non-telemetry fractals).
+    float[]? WaveshaperCurve  = null,
+    // M8-spatial: 4-corner 64-sample field-scan waveforms, AC-coupled and normalised [-1,1].
+    // TL/TR are above centre (positive camUp, spectrally bright); BL/BR below centre (dark).
+    // TL+BL -> left drone; TR+BR -> right drone.  Null when no field-scan pass ran.
+    float[]? FieldScanWaveformTL = null,
+    float[]? FieldScanWaveformTR = null,
+    float[]? FieldScanWaveformBL = null,
+    float[]? FieldScanWaveformBR = null);

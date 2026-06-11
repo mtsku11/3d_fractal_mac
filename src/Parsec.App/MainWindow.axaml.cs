@@ -24,6 +24,8 @@ public partial class MainWindow : Window
 
     private FractalDroneStream? _droneStream;
     private bool _sonifyActive;
+    private SonificationMode _sonifyMode  = SonificationMode.Hybrid;
+    private float            _sonifyBlend = 0f;   // 0 = Hybrid, 1 = DirectOrbit
 
     // Animation timeline state.
     private KeyframeBank? _bank;
@@ -107,6 +109,26 @@ public partial class MainWindow : Window
         if (sonifyButton != null)
             sonifyButton.Click += OnSonifyClick;
 
+        var sonifyBlendSlider = this.FindControl<Slider>("SonifyBlendSlider");
+        if (sonifyBlendSlider != null)
+            sonifyBlendSlider.PropertyChanged += (_, e) =>
+            {
+                if (e.Property.Name != nameof(Slider.Value)) return;
+                _sonifyBlend = (float)sonifyBlendSlider.Value;
+                _sonifyMode  = _sonifyBlend >= 0.5f
+                    ? SonificationMode.DirectOrbit : SonificationMode.Hybrid;
+                if (_droneStream != null)
+                    _droneStream.BlendAmount = _sonifyBlend;
+            };
+
+        var temperamentSlider = this.FindControl<Slider>("TemperamentCeilingSlider");
+        if (temperamentSlider != null)
+            temperamentSlider.PropertyChanged += (_, e) =>
+            {
+                if (e.Property.Name == nameof(Slider.Value) && _droneStream != null)
+                    _droneStream.TemperamentCeiling = (float)(double)e.NewValue!;
+            };
+
         if (_view != null && status != null)
         {
             _view.HeroRenderComplete += text => status.Text = text;
@@ -179,7 +201,12 @@ public partial class MainWindow : Window
             // Mutual exclusion: pause reactive modulation while sonifying
             _modTimer?.Stop();
 
-            _droneStream = new FractalDroneStream(() => _sonification.LatestFrame);
+            var voice = ActiveTypeToVoice(_view?.ActiveType ?? FractalType.Mandelbox);
+            _droneStream = new FractalDroneStream(() => _sonification.LatestFrame, voice, _sonifyMode);
+            _droneStream.BlendAmount = _sonifyBlend;
+            var ceilSlider = this.FindControl<Slider>("TemperamentCeilingSlider");
+            if (ceilSlider != null)
+                _droneStream.TemperamentCeiling = (float)ceilSlider.Value;
             bool ok = _droneStream.Start();
 
             if (!ok)
@@ -192,7 +219,7 @@ public partial class MainWindow : Window
 
             _sonifyActive = true;
             if (sender is Button btn) btn.Content = "Live Sonify: ON";
-            SetStatus("Live sonification started. Fly around Mandelbox to hear geometry.");
+            SetStatus($"Live sonification started ({voice} voice). Fly around to hear geometry.");
         }
     }
 
@@ -208,6 +235,9 @@ public partial class MainWindow : Window
             3 => (12288, 9216), // 12k
             _ => (4096, 3072),
         };
+
+    private bool TransparentBackgroundEnabled =>
+        this.FindControl<CheckBox>("TransparentBackgroundCheckBox")?.IsChecked == true;
 
     private void OnHeroClick(object? sender, RoutedEventArgs e)
     {
@@ -243,8 +273,9 @@ public partial class MainWindow : Window
         string path = System.IO.Path.Combine(dir, $"parsec_{fractal}_{stamp}.png");
 
         var (w, h) = HeroResolution();
-        SetStatus($"Rendering {w}x{h}... (window may pause)");
-        _view.RequestHeroRender(path, w, h);
+        bool transparent = TransparentBackgroundEnabled;
+        SetStatus($"Rendering {w}x{h}{(transparent ? " transparent" : "")}... (window may pause)");
+        _view.RequestHeroRender(path, w, h, transparent);
     }
 
     private void OnGenerateClick(object? sender, RoutedEventArgs e)
@@ -286,6 +317,7 @@ public partial class MainWindow : Window
             _ => FractalType.Kifs,
         };
         _view.SetActiveType(type);
+        _droneStream?.SetVoice(ActiveTypeToVoice(type));
         if (_generateButton != null)
             _generateButton.IsVisible = type == FractalType.Attractor;
 
@@ -302,6 +334,15 @@ public partial class MainWindow : Window
 
         RebuildForActiveFractal();   // keyframes are per-fractal; reset on switch
     }
+
+    private static FractalVoice ActiveTypeToVoice(FractalType type) => type switch
+    {
+        FractalType.Mandelbulb  => FractalVoice.Mandelbulb,
+        FractalType.Kleinian    => FractalVoice.Kleinian,
+        FractalType.BurningShip => FractalVoice.BurningShip,
+        FractalType.Apollonian  => FractalVoice.Apollonian,
+        _                       => FractalVoice.Mandelbox,
+    };
 
     private void RebuildPanel()
     {
@@ -486,8 +527,9 @@ public partial class MainWindow : Window
         string stamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
         string dir = System.IO.Path.Combine(AnimDir(), $"render_{stamp}");
         var timeline = _timeline;
+        bool transparent = TransparentBackgroundEnabled;
 
-        SetStatus($"Rendering ~{(int)(duration * RenderFps)} frames at {TestWidth}x{TestHeight}... (window will pause)");
+        SetStatus($"Rendering ~{(int)(duration * RenderFps)} frames at {TestWidth}x{TestHeight}{(transparent ? " transparent" : "")}... (window will pause)");
 
         // Capture locals for the apply-callback (runs on the GL thread per frame).
         var audioMod = _audioMod;
@@ -496,7 +538,8 @@ public partial class MainWindow : Window
             {
                 timeline.ApplyAtTime(0, t);
                 audioMod?.ApplyAtTime(TimeSpan.FromSeconds(t));
-            });
+            },
+            transparent);
 
         // Stitch hint: include audio track in ffmpeg command if one is loaded.
         string mp4 = System.IO.Path.Combine(dir, "out.mp4");
@@ -504,9 +547,13 @@ public partial class MainWindow : Window
         bool hasAudio = audioMod?.TrackSource?.IsFile == true;
         string audioInput = hasAudio ? $" -i \"{audioMod!.TrackSource!.LocalPath}\"" : string.Empty;
         string audioCodec = hasAudio ? " -c:a aac -shortest" : string.Empty;
+        string videoArgs = transparent
+            ? " -c:v prores_ks -profile:v 4 -pix_fmt yuva444p10le"
+            : " -c:v libx264 -pix_fmt yuv420p";
+        string output = transparent ? System.IO.Path.Combine(dir, "out_alpha.mov") : mp4;
         Console.WriteLine(
             $"To stitch: ffmpeg -framerate {RenderFps} -i \"{frames}\"{audioInput}" +
-            $" -c:v libx264 -pix_fmt yuv420p{audioCodec} \"{mp4}\"");
+            $"{videoArgs}{audioCodec} \"{output}\"");
     }
 
     private void OnSaveAnimClick(object? sender, RoutedEventArgs e)
@@ -579,16 +626,35 @@ public partial class MainWindow : Window
 
         string stamp    = DateTime.Now.ToString("yyyyMMdd_HHmmss");
         string framesDir = System.IO.Path.Combine(VideoDir(), $"frames_{stamp}");
-        string outputMp4 = System.IO.Path.Combine(VideoDir(), $"render_{stamp}.mp4");
+        bool transparent = TransparentBackgroundEnabled;
+        string outputVideo = System.IO.Path.Combine(VideoDir(), transparent ? $"render_{stamp}_alpha.mov" : $"render_{stamp}.mp4");
         System.IO.Directory.CreateDirectory(VideoDir());
 
-        bool hasAudio  = _audioMod?.TrackSource?.IsFile == true;
+        // Sonification export: when live sonify is on, capture a sonic frame per export
+        // frame and synthesize the soundtrack offline. Mutually exclusive with the
+        // audio-reactive WAV (reactive modulation is suppressed while sonifying).
+        bool sonify = _sonifyActive;
+        bool hasAudio  = !sonify && _audioMod?.TrackSource?.IsFile == true;
         string? audioPath = hasAudio ? _audioMod!.TrackSource!.LocalPath : null;
 
         var timeline = _timeline;
         var audioMod = _audioMod;
+        var view = _view;
 
-        SetStatus($"Rendering ~{(int)(duration * RenderFps)} frames at {TestWidth}x{TestHeight}...");
+        List<FractalSonicFrame>? sonicFrames = null;
+        SonificationController? exportSon = null;
+        FractalVoice exportVoice = ActiveTypeToVoice(_view.ActiveType);
+        SonificationMode exportSonifyMode = _sonifyMode;
+        float exportBlend   = _sonifyBlend;
+        float exportCeiling = (float)(this.FindControl<Slider>("TemperamentCeilingSlider")?.Value ?? 0.9);
+        if (sonify)
+        {
+            sonicFrames = new List<FractalSonicFrame>();
+            exportSon = new SonificationController();
+            if (_activeSchema != null) exportSon.SetDescriptors(_activeSchema.Parameters);
+        }
+
+        SetStatus($"Rendering ~{(int)(duration * RenderFps)} frames at {TestWidth}x{TestHeight}{(transparent ? " transparent" : "")}...");
 
         // One-shot subscription: fires ffmpeg after frames are written.
         Action<string>? handler = null;
@@ -598,7 +664,65 @@ public partial class MainWindow : Window
             if (msg.StartsWith("Rendered"))
             {
                 Dispatcher.UIThread.Post(() => SetStatus("Stitching video..."));
-                _ = Task.Run(async () => await RunFfmpegAsync(framesDir, outputMp4, hasAudio, audioPath));
+                _ = Task.Run(async () =>
+                {
+                    bool mux = hasAudio;
+                    string? muxPath = audioPath;
+                    if (sonify && sonicFrames!.Count > 0)
+                    {
+                        try
+                        {
+                            short[] pcm;
+                            int exportSr = HybridSynth.DefaultSampleRate; // both synths use 44100
+                            bool canDirect = exportVoice != FractalVoice.Apollonian;
+
+                            if (exportBlend >= 0.99f && canDirect)
+                            {
+                                pcm = DirectOrbitSynth.Synthesize(sonicFrames,
+                                    controlRateHz: RenderFps);
+                            }
+                            else if (exportBlend <= 0.01f || !canDirect)
+                            {
+                                pcm = HybridSynth.Synthesize(sonicFrames,
+                                    temperamentCeiling: exportCeiling,
+                                    controlRateHz: RenderFps,
+                                    voice: exportVoice);
+                            }
+                            else
+                            {
+                                // Blend: synthesize both and lerp sample-by-sample
+                                var pcmH = HybridSynth.Synthesize(sonicFrames,
+                                    temperamentCeiling: exportCeiling,
+                                    controlRateHz: RenderFps,
+                                    voice: exportVoice);
+                                var pcmD = DirectOrbitSynth.Synthesize(sonicFrames,
+                                    controlRateHz: RenderFps);
+                                float hybGain = 1f - exportBlend;
+                                pcm = new short[Math.Max(pcmH.Length, pcmD.Length)];
+                                for (int i = 0; i < pcm.Length; i++)
+                                {
+                                    float h = i < pcmH.Length ? pcmH[i] : 0f;
+                                    float d = i < pcmD.Length ? pcmD[i] : 0f;
+                                    pcm[i] = (short)Math.Clamp(
+                                        (int)(hybGain * h + exportBlend * d),
+                                        short.MinValue, short.MaxValue);
+                                }
+                            }
+                            string wavPath = System.IO.Path.Combine(VideoDir(), $"sonify_{stamp}.wav");
+                            WavEncoder.Write(wavPath, pcm, exportSr, channels: 2);
+                            mux = true;
+                            muxPath = wavPath;
+                        }
+                        catch (Exception ex)
+                        {
+                            Dispatcher.UIThread.Post(() =>
+                                SetStatus($"Sonification synth failed ({ex.Message}) — stitching silent video..."));
+                            mux = false;
+                            muxPath = null;
+                        }
+                    }
+                    await RunFfmpegAsync(framesDir, outputVideo, mux, muxPath, transparent);
+                });
             }
             else
             {
@@ -611,17 +735,24 @@ public partial class MainWindow : Window
             t =>
             {
                 timeline.ApplyAtTime(0, t);
-                audioMod?.ApplyAtTime(TimeSpan.FromSeconds(t));
-            });
+                if (sonify)
+                    sonicFrames!.Add(view.CaptureSonicFrame(t, exportSon!));
+                else
+                    audioMod?.ApplyAtTime(TimeSpan.FromSeconds(t));
+            },
+            transparent);
     }
 
-    private async Task RunFfmpegAsync(string framesDir, string outputMp4, bool hasAudio, string? audioPath)
+    private async Task RunFfmpegAsync(string framesDir, string outputVideo, bool hasAudio, string? audioPath, bool transparent)
     {
         string frames     = System.IO.Path.Combine(framesDir, "frame_%05d.png");
         string audioInput = hasAudio && audioPath != null ? $" -i \"{audioPath}\"" : string.Empty;
         string audioCodec = hasAudio && audioPath != null ? " -c:a aac -shortest" : string.Empty;
+        string videoCodec = transparent
+            ? " -c:v prores_ks -profile:v 4 -pix_fmt yuva444p10le"
+            : " -c:v libx264 -crf 18 -pix_fmt yuv420p";
         string args       = $"-framerate {RenderFps} -i \"{frames}\"{audioInput}" +
-                            $" -c:v libx264 -crf 18 -pix_fmt yuv420p{audioCodec} \"{outputMp4}\"";
+                            $"{videoCodec}{audioCodec} \"{outputVideo}\"";
 
         string ffmpeg = FindFfmpeg();
         var psi = new System.Diagnostics.ProcessStartInfo(ffmpeg, args)
@@ -651,7 +782,7 @@ public partial class MainWindow : Window
         if (proc.ExitCode == 0)
         {
             try { System.IO.Directory.Delete(framesDir, recursive: true); } catch { }
-            Dispatcher.UIThread.Post(() => SetStatus($"Video saved to {outputMp4}"));
+            Dispatcher.UIThread.Post(() => SetStatus($"Video saved to {outputVideo}"));
         }
         else
         {

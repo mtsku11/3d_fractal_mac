@@ -56,11 +56,11 @@ A perturbation-theory escape-time explorer with four formulas — **Mandelbrot, 
 - **HDR post-processing** (macOS Metal): brightness, contrast, tanh tone-mapping, Rec.601 luma saturation, and gamma — all adjustable as real-time sliders without re-running the fractal.
 - **Hero stills** with up to 16× SSAA at resolutions up to 12K.
 - **Keyframe timeline** with playback (Space to play/pause) and per-fractal animation save/load.
-- **Render to Video** — exports an animation frame sequence and stitches it to MP4 via ffmpeg, with optional audio sync if a WAV file is loaded.
+- **Render to Video** — exports an animation frame sequence and stitches it to MP4 via ffmpeg, with optional audio sync if a WAV file is loaded. Enable **Transparent BG** to key the render background out of saved PNG frames; video export switches to an alpha-capable MOV/ProRes 4444 file.
 
 ### Audio
 
-Load a WAV file via the audio transport bar. The engine performs offline multi-band analysis (RMS, bass, mid, treble, onset, spectral centroid) that drives fractal, camera, and palette parameters — both in CLI audio-reactive renders and in the app via the mapping panel (feature source → parameter, with depth and smoothing). Render to Video samples features deterministically at export timestamps and muxes the audio into the MP4.
+Load a WAV file via the audio transport bar. The engine performs offline multi-band analysis (RMS, bass, mid, treble, onset, spectral centroid) that drives fractal, camera, and palette parameters — both in CLI audio-reactive renders and in the app via the mapping panel (feature source → parameter, with depth and smoothing). Render to Video samples features deterministically at export timestamps and muxes the audio into the exported video: MP4 normally, MOV/ProRes 4444 when **Transparent BG** is enabled.
 
 ---
 
@@ -70,7 +70,7 @@ Load a WAV file via the audio transport bar. The engine performs offline multi-b
 2. **3D:** fly with the mouse + keyboard, or tune the Camera parameter group (azimuth, elevation, distance, target, FoV). **2D deep zoom:** drag to pan, scroll to zoom.
 3. Tune parameters in the side panel.
 4. Set keyframes in the timeline; hit **Space** to preview the animation.
-5. **Save Hero Render** for a high-res still, or **Render to Video** to export an MP4.
+5. **Save Hero Render** for a high-res still, or **Render to Video** to export MP4. Enable **Transparent BG** for transparent PNG stills/frames and MOV/ProRes 4444 video with alpha.
 
 ---
 

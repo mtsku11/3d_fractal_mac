@@ -98,6 +98,7 @@ Audio-reactive feature — audio → visuals (new work, not in upstream `zoomacr
 - **Audio Phase 1–2 (done):** `Parsec.Audio` project + UI wiring (WAV playback, offline RMS/FFT analysis, `AudioTransportPanel`, `MainWindow` wiring).
 - **Audio Phase 3–4 (done):** `AudioModulationController` maps feature values to live fractal/camera/palette params; `AudioMappingPanel` is the in-app mapping editor, wired via `AudioMappingHost`.
 - **Audio Phase 5 (done):** deterministic export via `ApplyAtTime(t)` + ffmpeg audio mux on Render-to-Video.
+- **Transparent export (done):** render panel `Transparent BG` keys the dark render background out of hero PNGs and animation PNG frames via `ImageOutput.SavePng(..., transparentBackground: true)`. Render-to-Video outputs MP4/H.264 normally, but transparent mode outputs MOV/ProRes 4444 (`prores_ks`, `yuva444p10le`). This is export-time matte keying, not native shader alpha.
 
 Fractal sonification — geometry → audio (NEW, requested 2026-06-09): the inverse pipeline. Metal telemetry pass → `FractalSonicFrame` → C# DSP synth → OpenAL/AVAudioEngine spatialization. Milestones M0–M6 in `docs/fractal-sonification-plan.md`. Build only what is explicitly requested; keep it mutually exclusive with the reactive modulation above to avoid a fractal→sound→params→fractal feedback loop.
 - **M0 (done):** `src/Parsec.Audio/Sonification/FractalSonicFrame.cs` — immutable `record class` with all telemetry fields. Builds cleanly; zero impact on existing code.

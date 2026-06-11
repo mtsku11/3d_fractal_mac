@@ -1,11 +1,10 @@
 namespace Parsec.Audio.Sonification;
 
-/// <summary>Writes mono 16-bit PCM samples to a standard WAV file.</summary>
+/// <summary>Writes 16-bit PCM samples to a WAV file (mono or stereo interleaved).</summary>
 public static class WavEncoder
 {
-    public static void Write(string path, short[] samples, int sampleRate)
+    public static void Write(string path, short[] samples, int sampleRate, int channels = 1)
     {
-        const int channels      = 1;
         const int bitsPerSample = 16;
         int byteRate   = sampleRate * channels * (bitsPerSample / 8);
         int blockAlign = channels * (bitsPerSample / 8);

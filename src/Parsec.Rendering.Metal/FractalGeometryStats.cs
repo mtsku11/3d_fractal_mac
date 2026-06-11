@@ -18,4 +18,14 @@ public readonly record struct FractalGeometryStats(
     float NormalVariance,
     Vector4 TrapMean,
     Vector4 TrapVariance,
-    MetalSpatialCell[]? Cells = null);
+    MetalSpatialCell[]? Cells = null,
+    // M7h: 64-sample DE cross-section strip — values normalised [-1,1].
+    // Null if the telemetry PSO failed or the fractal has no telemetry pass.
+    float[]? WaveshaperCurve = null,
+    // M8-spatial: 4-corner 64-sample field-scan waveforms, AC-coupled and normalised [-1,1].
+    // TL/TR are above centre (positive camUp, spectrally bright); BL/BR below centre (dark).
+    // TL+BL -> left drone; TR+BR -> right drone.  Null if field-scan PSO failed.
+    float[]? FieldScanWaveformTL = null,
+    float[]? FieldScanWaveformTR = null,
+    float[]? FieldScanWaveformBL = null,
+    float[]? FieldScanWaveformBR = null);

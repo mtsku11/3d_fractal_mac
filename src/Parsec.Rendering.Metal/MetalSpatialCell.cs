@@ -8,10 +8,13 @@ namespace Parsec.Rendering.Metal;
 /// OpenAL emitters via <see cref="Parsec.Audio.Sonification.FractalSonicCell"/>.
 /// </summary>
 public readonly record struct MetalSpatialCell(
-    Vector3 WorldPosition,
-    float   HitRatio,
-    float   MeanDepth,
-    float   StepComplexity,
-    Vector3 NormalMean,
-    Vector4 TrapMean,
-    float   Energy);
+    Vector3  WorldPosition,
+    float    HitRatio,
+    float    MeanDepth,
+    float    StepComplexity,
+    Vector3  NormalMean,
+    Vector4  TrapMean,
+    float    Energy,
+    float[]? RayWavetable    = null,   // M7b: 64-sample ray DE-step wavetable, normalised [-1,1]
+    float[]? OrbitWavetable  = null,   // M7b: 64-sample inner-iteration orbit magnitude wavetable
+    Vector4[]? OrbitTrajectory = null); // M9a: 128-point orbit trajectory (xyz=point clamped [-4,4], w=1 bounded/0 escaped)

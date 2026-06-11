@@ -138,17 +138,32 @@ public sealed class MetalMandelboxRenderer : IThreeDimensionalRenderBackend
         int cellCount = gridW * gridH;
         int cellSize = Marshal.SizeOf<MandelboxTelemetryCell>();
 
-        using var foldBuf   = UploadStruct(_device, BuildFoldParams(fractal));
-        using var telBuf    = UploadStruct(_device, BuildTelemetryParams(camera, gridW, gridH, settings));
-        using var outputBuf = _device.NewBuffer((ulong)(cellCount * cellSize),
-                                               MTLResourceOptions.ResourceStorageModeShared);
+        // M7b: 4×4 spatial tiles × 2 wavetables × 64 samples × 4 bytes = 8 KB
+        const int WavetableTiles   = 16;
+        const int WavetableBytes   = WavetableTiles * 64 * 2 * 4;
+        const int WaveshaperBytes  = 64 * 4;   // M7h: 64 floats
+        const int OrbitTrajBytes   = WavetableTiles * 128 * 16; // M9a: 16 tiles × 128 float4 = 32 KB
+
+        using var foldBuf        = UploadStruct(_device, BuildFoldParams(fractal));
+        using var telBuf         = UploadStruct(_device, BuildTelemetryParams(camera, gridW, gridH, settings));
+        using var outputBuf      = _device.NewBuffer((ulong)(cellCount * cellSize),
+                                                     MTLResourceOptions.ResourceStorageModeShared);
+        using var wavetableBuf   = _device.NewBuffer((ulong)WavetableBytes,
+                                                     MTLResourceOptions.ResourceStorageModeShared);
+        using var waveshaperBuf  = _device.NewBuffer((ulong)WaveshaperBytes,
+                                                     MTLResourceOptions.ResourceStorageModeShared);
+        using var orbitTrajBuf   = _device.NewBuffer((ulong)OrbitTrajBytes,
+                                                     MTLResourceOptions.ResourceStorageModeShared);
 
         var cmd = _queue.CommandBuffer();
         var enc = cmd.ComputeCommandEncoder();
         enc.SetComputePipelineState(_telemetryPso);
-        enc.SetBuffer(foldBuf,   0, 0);
-        enc.SetBuffer(telBuf,    0, 1);
-        enc.SetBuffer(outputBuf, 0, 2);
+        enc.SetBuffer(foldBuf,       0, 0);
+        enc.SetBuffer(telBuf,        0, 1);
+        enc.SetBuffer(outputBuf,     0, 2);
+        enc.SetBuffer(wavetableBuf,  0, 3);
+        enc.SetBuffer(waveshaperBuf, 0, 4);
+        enc.SetBuffer(orbitTrajBuf,  0, 5);
         enc.DispatchThreadgroups(
             new MTLSize { width = (ulong)((gridW + 7) / 8), height = (ulong)((gridH + 7) / 8), depth = 1 },
             new MTLSize { width = 8, height = 8, depth = 1 });
@@ -162,9 +177,26 @@ public sealed class MetalMandelboxRenderer : IThreeDimensionalRenderBackend
         float tanY = MathF.Tan(camera.VerticalFovRadians * 0.5f);
         float tanX = tanY * camera.AspectRatio;
 
-        var cells = ReadTelemetryCells(outputBuf, cellCount);
-        return ReduceTelemetry(cells, gridW, gridH,
+        var cells      = ReadTelemetryCells(outputBuf, cellCount);
+        var stats      = ReduceTelemetry(cells, gridW, gridH,
             camera.Position, fwd, right, up, tanX, tanY, settings.MaxDistance);
+        var waveshaper = TelemetryReduction.ReadWaveshaperCurve(waveshaperBuf);
+
+        // Enrich each spatial cell with wavetable (M7b) and orbit trajectory (M9a) data.
+        if (stats.Cells is { Length: > 0 })
+        {
+            var wavetables   = ReadWavetableCells(wavetableBuf, WavetableTiles);
+            var trajectories = TelemetryReduction.ReadOrbitTrajectories(orbitTrajBuf, WavetableTiles);
+            var enriched     = new MetalSpatialCell[stats.Cells.Length];
+            for (int ti = 0; ti < stats.Cells.Length; ti++)
+                enriched[ti] = stats.Cells[ti] with {
+                    RayWavetable    = wavetables[ti].ray,
+                    OrbitWavetable  = wavetables[ti].orbit,
+                    OrbitTrajectory = trajectories[ti]
+                };
+            return stats with { Cells = enriched, WaveshaperCurve = waveshaper };
+        }
+        return stats with { WaveshaperCurve = waveshaper };
     }
 
     public void Dispose()
@@ -175,9 +207,69 @@ public sealed class MetalMandelboxRenderer : IThreeDimensionalRenderBackend
         {
             _pso.Dispose();
             if (_telemetryPsoAvailable) _telemetryPso.Dispose();
+            if (_fieldScanPsoAvailable) _fieldScanPso.Dispose();
             _queue.Dispose();
             _device.Dispose();
         }
+    }
+
+    // -------------------------------------------------------------------------
+    // M8: Field-scan pass — Lissajous 3:2:1 DE field scan for synthesis
+    // -------------------------------------------------------------------------
+
+    private MTLComputePipelineState _fieldScanPso;
+    private bool _fieldScanPsoReady;
+    private bool _fieldScanPsoAvailable;
+
+    /// <summary>
+    /// Dispatches a 64-thread 1-D kernel that samples the Mandelbox DE field along
+    /// a 3:2:1 Lissajous orbit centred on the camera.  Returns a 64-sample waveform
+    /// (AC-coupled, normalised [-1,1]) for use as a drone wavetable in M8 synthesis.
+    /// Returns null if the field-scan PSO failed to compile.
+    /// </summary>
+    public (float[]? tl, float[]? tr, float[]? bl, float[]? br) RunFieldScanPass(MandelboxParams fractal, Camera3D camera, RaymarchSettings settings)
+    {
+        if (!_isAvailable) return (null, null, null, null);
+        ThrowIfDisposed();
+        if (!EnsureFieldScanPso()) return (null, null, null, null);
+
+        const int N = 64;
+        using var foldBuf = UploadStruct(_device, BuildFoldParams(fractal));
+        using var telBuf  = UploadStruct(_device, BuildTelemetryParams(camera, 64, 36, settings));
+        using var outBuf  = _device.NewBuffer((ulong)(4 * N * 4), MTLResourceOptions.ResourceStorageModeShared);
+
+        var cmd = _queue.CommandBuffer();
+        var enc = cmd.ComputeCommandEncoder();
+        enc.SetComputePipelineState(_fieldScanPso);
+        enc.SetBuffer(foldBuf, 0, 0);
+        enc.SetBuffer(telBuf,  0, 1);
+        enc.SetBuffer(outBuf,  0, 2);
+        enc.DispatchThreadgroups(
+            new MTLSize { width = 1, height = 1, depth = 1 },
+            new MTLSize { width = 256, height = 1, depth = 1 });
+        enc.EndEncoding();
+        cmd.Commit();
+        cmd.WaitUntilCompleted();
+
+        return TelemetryReduction.ReadFieldScanWaveform(outBuf);
+    }
+
+    private bool EnsureFieldScanPso()
+    {
+        if (_fieldScanPsoReady) return _fieldScanPsoAvailable;
+        _fieldScanPsoReady = true;
+        try
+        {
+            var src = LoadEmbeddedMsl("mandelbox_telemetry.metal");
+            NSError libErr = default;
+            var library  = _device.NewLibrary(NSString.String(src), new MTLCompileOptions(), ref libErr);
+            var function = library.NewFunction(NSString.String("mandelbox_fieldscan"));
+            NSError psoErr = default;
+            _fieldScanPso = _device.NewComputePipelineState(function, ref psoErr);
+            _fieldScanPsoAvailable = true;
+        }
+        catch { /* leave _fieldScanPsoAvailable = false */ }
+        return _fieldScanPsoAvailable;
     }
 
     // -------------------------------------------------------------------------
@@ -332,6 +424,44 @@ public sealed class MetalMandelboxRenderer : IThreeDimensionalRenderBackend
             MaxSteps   = s.MaxSteps,
             Pad2 = 0, Pad3 = 0, Pad4 = 0,
         };
+    }
+
+    // M7b: read 16-tile wavetable buffer and normalise each 64-sample array to [-1, 1].
+    private static unsafe (float[] ray, float[] orbit)[] ReadWavetableCells(MTLBuffer buf, int tileCount)
+    {
+        const int N = 64;
+        const int BytesPerArray = N * 4;   // 256 bytes (64 floats × 4 bytes)
+        const int BytesPerCell  = BytesPerArray * 2; // 512 bytes
+        var result = new (float[], float[])[tileCount];
+        var src = (byte*)buf.Contents;
+        for (int i = 0; i < tileCount; i++)
+        {
+            var ray   = new float[N];
+            var orbit = new float[N];
+            fixed (float* dstR = ray)
+                Buffer.MemoryCopy(src + i * BytesPerCell, dstR, BytesPerArray, BytesPerArray);
+            fixed (float* dstO = orbit)
+                Buffer.MemoryCopy(src + i * BytesPerCell + BytesPerArray, dstO, BytesPerArray, BytesPerArray);
+            NormalizeWavetable(ray);
+            NormalizeWavetable(orbit);
+            result[i] = (ray, orbit);
+        }
+        return result;
+    }
+
+    private static void NormalizeWavetable(float[] data)
+    {
+        // Percentile clamp: use 5th/95th percentile as lo/hi so a single outlier
+        // (e.g. one escape sample in an orbit sequence) doesn't flatten the rest.
+        var sorted = (float[])data.Clone();
+        Array.Sort(sorted);
+        int n = sorted.Length;
+        float lo = sorted[Math.Max(0, (int)(n * 0.05f))];
+        float hi = sorted[Math.Min(n - 1, (int)(n * 0.95f))];
+        float range = hi - lo;
+        if (range < 1e-6f) { Array.Clear(data); return; }
+        for (int i = 0; i < n; i++)
+            data[i] = Math.Clamp((data[i] - lo) / range * 2f - 1f, -1f, 1f);
     }
 
     private static unsafe MandelboxTelemetryCell[] ReadTelemetryCells(MTLBuffer buf, int count)

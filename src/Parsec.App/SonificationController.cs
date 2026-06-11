@@ -37,9 +37,10 @@ public sealed class SonificationController
 
     public FractalSonicFrame Update(double nowSeconds, Vector3 cameraPos,
         Vector3 cameraForward, Vector3 cameraUp,
-        FractalGeometryStats? telemetry = null)
+        FractalGeometryStats? telemetry = null,
+        float[]? geometryPitches = null)
     {
-        float camSpeed = ComputeCameraSpeed(nowSeconds, cameraPos);
+        var (camSpeed, zoomVelocity) = ComputeCameraMotion(nowSeconds, cameraPos, cameraForward);
         float paramVelocity = ComputeParamVelocity(nowSeconds);
 
         var frame = new FractalSonicFrame(
@@ -58,24 +59,37 @@ public sealed class SonificationController
             CameraPosition:    cameraPos,
             CameraForward:     cameraForward,
             CameraUp:          cameraUp,
-            Cells:             ConvertCells(telemetry?.Cells));
+            Cells:             ConvertCells(telemetry?.Cells),
+            ZoomVelocity:      zoomVelocity,
+            GeometryPitches:   geometryPitches,
+            WaveshaperCurve:    telemetry?.WaveshaperCurve,
+            FieldScanWaveformTL: telemetry?.FieldScanWaveformTL,
+            FieldScanWaveformTR: telemetry?.FieldScanWaveformTR,
+            FieldScanWaveformBL: telemetry?.FieldScanWaveformBL,
+            FieldScanWaveformBR: telemetry?.FieldScanWaveformBR);
 
         Volatile.Write(ref _latestFrame, frame);
         return frame;
     }
 
-    private float ComputeCameraSpeed(double nowSeconds, Vector3 cameraPos)
+    // Returns (totalSpeed, forwardProjectedSpeed).  Positive zoomVelocity = camera moving forward.
+    private (float speed, float zoomVel) ComputeCameraMotion(double nowSeconds, Vector3 cameraPos, Vector3 cameraForward)
     {
-        float speed = 0f;
+        float speed = 0f, zoomVel = 0f;
         if (_prevCamTime >= 0)
         {
             double dt = nowSeconds - _prevCamTime;
             if (dt > 0)
-                speed = (cameraPos - _prevCamPos).Length() / (float)dt;
+            {
+                var disp = cameraPos - _prevCamPos;
+                float invDt = 1f / (float)dt;
+                speed   = disp.Length() * invDt;
+                zoomVel = Vector3.Dot(disp, cameraForward) * invDt;
+            }
         }
-        _prevCamPos = cameraPos;
+        _prevCamPos  = cameraPos;
         _prevCamTime = nowSeconds;
-        return speed;
+        return (speed, zoomVel);
     }
 
     private float ComputeParamVelocity(double nowSeconds)
@@ -113,7 +127,8 @@ public sealed class SonificationController
             ref readonly var c = ref src[i];
             result[i] = new FractalSonicCell(
                 c.WorldPosition, c.HitRatio, c.MeanDepth,
-                c.StepComplexity, c.NormalMean, c.TrapMean, c.Energy);
+                c.StepComplexity, c.NormalMean, c.TrapMean, c.Energy,
+                c.RayWavetable, c.OrbitWavetable, c.OrbitTrajectory);
         }
         return result;
     }

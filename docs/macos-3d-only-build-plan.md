@@ -43,6 +43,12 @@ Current output contract:
 
 - Interactive preview path: `RenderToBuffer(...)` returns packed RGBA8 as `uint[]`.
 - Hero/export path: `Render(...)` wraps packed RGBA8 into `SKBitmap`, then `ImageOutput.SavePng(...)` writes PNGs.
+- Transparent export option: the live preview still renders against the normal dark background, but
+  `Transparent BG` on the render panel passes `transparentBackground: true` to hero and animation
+  PNG export. `ImageOutput.SavePng(..., transparentBackground: true)` estimates the matte from the
+  image corners and keys matching background pixels to alpha. Render-to-Video uses MOV/ProRes 4444
+  (`prores_ks`, `yuva444p10le`) in transparent mode; normal mode remains MP4/H.264. This is an
+  export-time matte key, not native hit-mask alpha from every shader.
 
 That packed RGBA8 output is the lowest-risk first backend seam.
 

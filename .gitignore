@@ -30,5 +30,10 @@ msbuild.log
 msbuild.err
 msbuild.wrn
 
+# Local render/export artifacts
+/artifacts/
+/Parsec.app/
+/*.wav
+
 # Visual Studio 2015
 .vs/

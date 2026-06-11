@@ -278,12 +278,14 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
     private bool _heroPending;
     private string? _heroPath;
     private int _heroWidth, _heroHeight;
+    private bool _heroTransparentBackground;
 
     // --- Animation batch render ---
     private bool _animPending;
     private string? _animDir;
     private int _animWidth, _animHeight, _animFrameCount;
     private double _animFps;
+    private bool _animTransparentBackground;
     private Action<double>? _animApplyAtTime;   // applies interpolated state at time t (seconds)
 
     /// <summary>Fired (on UI thread) when an animation batch render finishes.</summary>
@@ -300,13 +302,15 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
     /// (camera animation is a later phase).
     /// </summary>
     public void RequestAnimationRender(string dir, int width, int height,
-        double fps, double durationSeconds, Action<double> applyAtTime)
+        double fps, double durationSeconds, Action<double> applyAtTime,
+        bool transparentBackground = false)
     {
         _animDir = dir;
         _animWidth = width;
         _animHeight = height;
         _animFps = fps;
         _animFrameCount = Math.Max(1, (int)Math.Round(durationSeconds * fps));
+        _animTransparentBackground = transparentBackground;
         _animApplyAtTime = applyAtTime;
         _animPending = true;
         if (_softwareMode) SoftInvalidate(); else RequestNextFrameRendering();
@@ -320,11 +324,12 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
     /// a PNG at <paramref name="path"/>. The render runs on the next GL frame
     /// (the only time the context is current) via the TDR-safe tiled path.
     /// </summary>
-    public void RequestHeroRender(string path, int width, int height)
+    public void RequestHeroRender(string path, int width, int height, bool transparentBackground = false)
     {
         _heroPath = path;
         _heroWidth = width;
         _heroHeight = height;
+        _heroTransparentBackground = transparentBackground;
         _heroPending = true;
         if (_softwareMode) SoftInvalidate(); else RequestNextFrameRendering();
     }
@@ -406,6 +411,46 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
     public event Action<string>? StatusChanged;
     private void Status(string text) =>
         Dispatcher.UIThread.Post(() => StatusChanged?.Invoke(text));
+
+    // Runs the active fractal's low-res telemetry pass (null for fractals without one).
+    private Parsec.Rendering.Metal.FractalGeometryStats? RunActiveTelemetryPass(
+        Camera3D camera, RaymarchSettings settings) => ActiveType switch
+    {
+        FractalType.Mandelbox  when _metalRenderer?.IsAvailable == true
+            => _metalRenderer.RunTelemetryPass(Mandelbox.ToParams(), camera, settings),
+        FractalType.Mandelbulb when _metalMandelbulbRenderer?.IsAvailable == true
+            => _metalMandelbulbRenderer.RunTelemetryPass(Mandelbulb.ToParams(), camera, settings),
+        FractalType.Kleinian   when _metalKleinianRenderer?.IsAvailable == true
+            => _metalKleinianRenderer.RunTelemetryPass(Kleinian.ToParams(), camera, settings),
+        FractalType.BurningShip when _metalBurningShipRenderer?.IsAvailable == true
+            => _metalBurningShipRenderer.RunTelemetryPass(BurningShip.ToParams(), camera, settings),
+        _ => null,
+    };
+
+    /// <summary>
+    /// Capture one deterministic sonic frame for offline export: runs the active
+    /// fractal's telemetry pass with the current (already-applied) params and camera,
+    /// then folds it through <paramref name="controller"/> at timeline time <paramref name="t"/>.
+    /// Call from inside a RequestAnimationRender applyAtTime callback, after the
+    /// timeline state has been applied for this frame.
+    /// </summary>
+    public Audio.Sonification.FractalSonicFrame CaptureSonicFrame(double t, SonificationController controller)
+    {
+        var camera = _cam.ToCamera(PreviewWidth, PreviewHeight);
+        Parsec.Rendering.Metal.FractalGeometryStats? telemetry = null;
+        try { telemetry = RunActiveTelemetryPass(camera, PreviewSettings()); }
+        catch { /* telemetry is best-effort; frame falls back to camera-only fields */ }
+        return controller.Update(t, _cam.Position, _cam.Forward, _cam.UpLocal, telemetry, ComputeGeometryPitches());
+    }
+
+    // M7g: compute geometry-native pitch set for the current fractal type.
+    // Returns null for fractals without a geometry-derived scale.
+    private float[]? ComputeGeometryPitches() => ActiveType switch
+    {
+        FractalType.Apollonian => Audio.Sonification.GeometryScale.Apollonian(110f),
+        FractalType.Kleinian   => Audio.Sonification.GeometryScale.Kleinian(55f, Kleinian.FixedRadius, Kleinian.MinRadius, Kleinian.Scale),
+        _                      => null,
+    };
 
     private static string SonicDebugSuffix(Audio.Sonification.FractalSonicFrame? frame)
     {
@@ -793,7 +838,7 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
             try
             {
                 var bmp = RenderActiveTo(_heroWidth, _heroHeight);
-                Parsec.Rendering.Output.ImageOutput.SavePng(bmp, _heroPath);
+                Parsec.Rendering.Output.ImageOutput.SavePng(bmp, _heroPath, _heroTransparentBackground);
                 bmp.Dispose();
                 string savedTo = _heroPath;
                 Dispatcher.UIThread.Post(() =>
@@ -805,7 +850,7 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
                 Dispatcher.UIThread.Post(() =>
                     HeroRenderComplete?.Invoke($"Hero render failed: {msg}"));
             }
-            finally { _heroPending = false; _heroPath = null; _dirty = true; }
+            finally { _heroPending = false; _heroPath = null; _heroTransparentBackground = false; _dirty = true; }
         }
 
         // Animation batch render in software mode.
@@ -822,7 +867,7 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
                     _animApplyAtTime(t);
                     using var bmp = RenderActiveTo(_animWidth, _animHeight);
                     string path = System.IO.Path.Combine(dir, $"frame_{frame:D5}.png");
-                    Parsec.Rendering.Output.ImageOutput.SavePng(bmp, path);
+                    Parsec.Rendering.Output.ImageOutput.SavePng(bmp, path, _animTransparentBackground);
                     int done = frame + 1;
                     if (done == total || done % 5 == 0)
                         Dispatcher.UIThread.Post(() => AnimationProgress?.Invoke(done, total));
@@ -836,7 +881,7 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
                 Dispatcher.UIThread.Post(() =>
                     AnimationRenderComplete?.Invoke($"Animation render failed: {msg}"));
             }
-            finally { _animPending = false; _animDir = null; _animApplyAtTime = null; _dirty = true; }
+            finally { _animPending = false; _animDir = null; _animApplyAtTime = null; _animTransparentBackground = false; _dirty = true; }
         }
 
         if (_dirty)
@@ -900,21 +945,16 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
 
             if (renderedPreview)
             {
-                // Run telemetry pass for Mandelbox (~30 Hz, best-effort)
-                if (Sonification != null && ActiveType == FractalType.Mandelbox
-                    && _metalRenderer?.IsAvailable == true
-                    && _telemetryThrottle.ElapsedMilliseconds >= 33)
+                // Run telemetry pass for supported fractals (~30 Hz, best-effort)
+                if (Sonification != null && _telemetryThrottle.ElapsedMilliseconds >= 33)
                 {
                     _telemetryThrottle.Restart();
-                    try { _lastTelemetry = _metalRenderer.RunTelemetryPass(Mandelbox.ToParams(), camera, PreviewSettings()); }
+                    var settings = PreviewSettings();
+                    try { _lastTelemetry = RunActiveTelemetryPass(camera, settings); }
                     catch { _lastTelemetry = null; }
                 }
-                else if (ActiveType != FractalType.Mandelbox || _metalRenderer?.IsAvailable != true)
-                {
-                    _lastTelemetry = null;
-                }
 
-                var sonicFrame = Sonification?.Update(_sonicClock.Elapsed.TotalSeconds, _cam.Position, _cam.Forward, _cam.UpLocal, _lastTelemetry);
+                var sonicFrame = Sonification?.Update(_sonicClock.Elapsed.TotalSeconds, _cam.Position, _cam.Forward, _cam.UpLocal, _lastTelemetry, ComputeGeometryPitches());
                 Status($"Metal {ActiveType} · {rw}x{rh} · compute {_metalComputeMs} ms · readback {_metalReadbackMs} ms · total {_totalFrameMs} ms  ·  WASD+QE move · drag to look{SonicDebugSuffix(sonicFrame)}");
             }
         }
@@ -967,7 +1007,7 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
             try
             {
                 SkiaSharp.SKBitmap bmp = RenderActiveTo(_heroWidth, _heroHeight);
-                Parsec.Rendering.Output.ImageOutput.SavePng(bmp, _heroPath);
+                Parsec.Rendering.Output.ImageOutput.SavePng(bmp, _heroPath, _heroTransparentBackground);
                 bmp.Dispose();
 
                 string savedTo = _heroPath;
@@ -984,6 +1024,7 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
             {
                 _heroPending = false;
                 _heroPath = null;
+                _heroTransparentBackground = false;
                 _dirty = true;   // restore the preview-size view next
             }
         }
@@ -1003,7 +1044,7 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
                     _animApplyAtTime(t);                       // set live params for this time
                     using var bmp = RenderActiveTo(_animWidth, _animHeight);
                     string path = System.IO.Path.Combine(dir, $"frame_{frame:D5}.png");
-                    Parsec.Rendering.Output.ImageOutput.SavePng(bmp, path);
+                    Parsec.Rendering.Output.ImageOutput.SavePng(bmp, path, _animTransparentBackground);
 
                     int done = frame + 1;
                     if (done == total || done % 5 == 0)
@@ -1023,6 +1064,7 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
                 _animPending = false;
                 _animDir = null;
                 _animApplyAtTime = null;
+                _animTransparentBackground = false;
                 _dirty = true;
             }
         }
@@ -1120,7 +1162,7 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
             bool atMaxDepth = ActiveType == FractalType.DeepZoom
                 && _deepView.Radius <= DeepZoomView.MinRadius * 1.05;
             {
-                var sonicFrame = Sonification?.Update(_sonicClock.Elapsed.TotalSeconds, _cam.Position, _cam.Forward, _cam.UpLocal, _lastTelemetry);
+                var sonicFrame = Sonification?.Update(_sonicClock.Elapsed.TotalSeconds, _cam.Position, _cam.Forward, _cam.UpLocal, _lastTelemetry, ComputeGeometryPitches());
                 string sonicSuffix = SonicDebugSuffix(sonicFrame);
                 Status(ActiveType == FractalType.DeepZoom
                     ? $"Deep Zoom 2D · {(_deepView.Formula switch { 1 => "Prospector", 2 => "Julia", 3 => "Burning Ship", _ => "Mandelbrot" })} · radius {_deepView.Radius:e2}{(atMaxDepth ? " · max depth" : "")} · {rw}x{rh} · drag pan · scroll zoom"
