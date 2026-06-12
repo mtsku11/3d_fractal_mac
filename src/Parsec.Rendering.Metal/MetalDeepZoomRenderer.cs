@@ -149,24 +149,20 @@ public sealed class MetalDeepZoomRenderer : IDisposable
         // Upload reference orbit as float4 per point (re_hi, re_lo, im_hi, im_lo).
         int refCount = _ref!.Count;
         int refWords = refCount * 4;
-        using var refBuf = _device.NewBuffer(
-            (ulong)(refWords * sizeof(float)),
-            MTLResourceOptions.ResourceStorageModeShared);
-        var refSpan = new Span<float>((float*)refBuf.Contents, refWords);
+        var refData = new float[refWords];
         for (int i = 0; i < refCount; i++)
         {
             (float reHi, float reLo) = SplitToFF(_ref.Re[i]);
             (float imHi, float imLo) = SplitToFF(_ref.Im[i]);
-            refSpan[i * 4 + 0] = reHi;
-            refSpan[i * 4 + 1] = reLo;
-            refSpan[i * 4 + 2] = imHi;
-            refSpan[i * 4 + 3] = imLo;
+            refData[i * 4 + 0] = reHi;
+            refData[i * 4 + 1] = reLo;
+            refData[i * 4 + 2] = imHi;
+            refData[i * 4 + 3] = imLo;
         }
+        using var refBuf = MetalBufferIO.UploadFloats(_device, refData);
 
         // Upload output buffer.
-        using var outBuf = _device.NewBuffer(
-            (ulong)(pixelCount * sizeof(uint)),
-            MTLResourceOptions.ResourceStorageModeShared);
+        using var outBuf = MetalBufferIO.CreateSharedBuffer(_device, (ulong)(pixelCount * sizeof(uint)));
 
         // Upload params.
         var p = BuildParams(view, width, height, 0, height, refCount, maxIter,
@@ -198,9 +194,7 @@ public sealed class MetalDeepZoomRenderer : IDisposable
         LastComputeMs = computeSw.ElapsedMilliseconds;
 
         var readSw = System.Diagnostics.Stopwatch.StartNew();
-        var result = new uint[pixelCount];
-        var src = new ReadOnlySpan<uint>((uint*)outBuf.Contents, pixelCount);
-        src.CopyTo(result);
+        var result = MetalBufferIO.ReadUIntBuffer(outBuf, pixelCount);
         readSw.Stop();
         LastReadbackMs = readSw.ElapsedMilliseconds;
 
@@ -333,14 +327,9 @@ public sealed class MetalDeepZoomRenderer : IDisposable
         }
     }
 
-    private static unsafe MTLBuffer UploadStruct<T>(MTLDevice device, T value)
+    private static MTLBuffer UploadStruct<T>(MTLDevice device, T value)
         where T : unmanaged
-    {
-        var buf = device.NewBuffer(
-            (ulong)sizeof(T), MTLResourceOptions.ResourceStorageModeShared);
-        *(T*)buf.Contents = value;
-        return buf;
-    }
+        => MetalBufferIO.UploadStruct(device, value);
 
     private static string LoadEmbeddedMsl(string name)
     {

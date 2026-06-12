@@ -2,11 +2,11 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:app="using:Parsec.App"
         x:Class="Parsec.App.MainWindow"
-        Width="1280" Height="820"
+        Width="1360" Height="820"
         MinWidth="960" MinHeight="640"
         Title="Parsec — Fractal Explorer"
         Background="#15151a">
-  <Grid ColumnDefinitions="*,280">
+  <Grid ColumnDefinitions="*,380">
     <Grid Grid.Column="0" RowDefinitions="*,Auto">
       <Grid Grid.Row="0">
         <app:FractalView Name="FractalView" />
@@ -19,87 +19,89 @@
       <Border Name="BankHost" Grid.Row="1" />
     </Grid>
     <Grid Grid.Column="1" RowDefinitions="Auto,*" Background="#222226">
-      <StackPanel Grid.Row="0" Margin="12,12,12,0" Spacing="4">
-        <TextBlock Text="FRACTAL" Foreground="#9a9ab0" FontSize="11" FontWeight="SemiBold" />
-        <ComboBox Name="FractalSelector" HorizontalAlignment="Stretch">
-          <ComboBoxItem>Amazing IFS (KIFS)</ComboBoxItem>
-          <ComboBoxItem>AmazingBox</ComboBoxItem>
-          <ComboBoxItem>Mandelbox</ComboBoxItem>
-          <ComboBoxItem>Pseudo-Kleinian</ComboBoxItem>
-          <ComboBoxItem>Pseudo-Kleinian 4D</ComboBoxItem>
-          <ComboBoxItem>Thomas Attractor</ComboBoxItem>
-          <ComboBoxItem>Mandelbulb</ComboBoxItem>
-          <ComboBoxItem>Quaternion Julia</ComboBoxItem>
-          <ComboBoxItem>Rotated Mandelbox</ComboBoxItem>
-          <ComboBoxItem>Hybrid (box+bulb)</ComboBoxItem>
-          <ComboBoxItem>QJulia × Box (half-cut)</ComboBoxItem>
-          <ComboBoxItem>Folded Menger</ComboBoxItem>
-          <ComboBoxItem>Bicomplex Julia</ComboBoxItem>
-          <ComboBoxItem>Apollonian Gasket</ComboBoxItem>
-          <ComboBoxItem>Phoenix</ComboBoxItem>
-          <ComboBoxItem>Biomorph</ComboBoxItem>
-          <ComboBoxItem>Mosely Snowflake</ComboBoxItem>
-          <ComboBoxItem>Riemann Sphere</ComboBoxItem>
-          <ComboBoxItem>Mandalay Fold</ComboBoxItem>
-          <ComboBoxItem>Anisotropic Fold</ComboBoxItem>
-          <ComboBoxItem>Orbit Hybrid (KIFS+Mbox)</ComboBoxItem>
-          <ComboBoxItem>3D Burning Ship</ComboBoxItem>
-          <ComboBoxItem>Deep Zoom 2D</ComboBoxItem>
-        </ComboBox>
-        <TextBlock Name="FormulaLabel" Text="FORMULA" Foreground="#9a9ab0" FontSize="11"
-                   FontWeight="SemiBold" Margin="0,8,0,0" IsVisible="False" />
-        <ComboBox Name="FormulaSelector" HorizontalAlignment="Stretch"
-                  SelectedIndex="0" IsVisible="False">
-          <ComboBoxItem>Mandelbrot</ComboBoxItem>
-          <ComboBoxItem>Prospector</ComboBoxItem>
-          <ComboBoxItem>Julia</ComboBoxItem>
-          <ComboBoxItem>Burning Ship</ComboBoxItem>
-        </ComboBox>
-        <Button Name="GenerateButton" HorizontalAlignment="Stretch"
-                HorizontalContentAlignment="Center" Margin="0,8,0,0"
-                Content="Generate Attractor" IsVisible="False" />
-        <TextBlock Text="HERO AA" Foreground="#9a9ab0" FontSize="11"
-                   FontWeight="SemiBold" Margin="0,8,0,0" />
-        <ComboBox Name="HeroSamplesSelector" HorizontalAlignment="Stretch"
-                  SelectedIndex="0">
-          <ComboBoxItem>1× (no AA)</ComboBoxItem>
-          <ComboBoxItem>4× SSAA</ComboBoxItem>
-          <ComboBoxItem>9× SSAA</ComboBoxItem>
-          <ComboBoxItem>16× SSAA</ComboBoxItem>
-        </ComboBox>
-        <TextBlock Text="RESOLUTION" Foreground="#9a9ab0" FontSize="11"
-                   FontWeight="SemiBold" Margin="0,8,0,0" />
-        <ComboBox Name="ResolutionSelector" HorizontalAlignment="Stretch"
-                  SelectedIndex="1">
-          <ComboBoxItem>2K (2048×1536)</ComboBoxItem>
-          <ComboBoxItem>4K (4096×3072)</ComboBoxItem>
-          <ComboBoxItem>8K (8192×6144)</ComboBoxItem>
-		  <ComboBoxItem>12K (12288×9216)</ComboBoxItem>
-        </ComboBox>
-        <Button Name="HeroButton" HorizontalAlignment="Stretch"
-                HorizontalContentAlignment="Center" Margin="0,8,0,0"
-                Content="Save Hero Render" />
-        <Button Name="TestRenderButton" HorizontalAlignment="Stretch"
-                HorizontalContentAlignment="Center" Margin="0,8,0,0"
-                Content="Test Render (720p video)" />
-        <Button Name="RenderToVideoButton" HorizontalAlignment="Stretch"
-                HorizontalContentAlignment="Center" Margin="0,4,0,0"
-                Content="Render to Video" />
-        <CheckBox Name="TransparentBackgroundCheckBox" Margin="0,6,0,0"
-                  Content="Transparent BG" />
-        <Grid ColumnDefinitions="*,*" Margin="0,8,0,0">
-          <Button Name="SaveAnimButton" Grid.Column="0" HorizontalAlignment="Stretch"
-                  HorizontalContentAlignment="Center" Margin="0,0,2,0" Content="Save Anim" />
-          <Button Name="LoadAnimButton" Grid.Column="1" HorizontalAlignment="Stretch"
-                  HorizontalContentAlignment="Center" Margin="2,0,0,0" Content="Load Anim" />
-        </Grid>
-        <ContentControl Name="AudioHost" Margin="0,12,0,0" />
-        <ContentControl Name="AudioMappingHost" Margin="0,8,0,0" />
-        <Button Name="SonifyButton" HorizontalAlignment="Stretch"
-                HorizontalContentAlignment="Center" Margin="0,8,0,0"
-                Content="Live Sonify: OFF" />
-        <StackPanel Margin="0,4,0,0">
-          <Grid ColumnDefinitions="Auto,*,Auto">
+      <Grid Grid.Row="0" ColumnDefinitions="*,*" Margin="12,12,12,0">
+        <StackPanel Grid.Column="0" Spacing="4">
+          <TextBlock Text="FRACTAL" Foreground="#9a9ab0" FontSize="11" FontWeight="SemiBold" />
+          <ComboBox Name="FractalSelector" HorizontalAlignment="Stretch">
+            <ComboBoxItem>Amazing IFS (KIFS)</ComboBoxItem>
+            <ComboBoxItem>AmazingBox</ComboBoxItem>
+            <ComboBoxItem>Mandelbox</ComboBoxItem>
+            <ComboBoxItem>Pseudo-Kleinian</ComboBoxItem>
+            <ComboBoxItem>Pseudo-Kleinian 4D</ComboBoxItem>
+            <ComboBoxItem>Thomas Attractor</ComboBoxItem>
+            <ComboBoxItem>Mandelbulb</ComboBoxItem>
+            <ComboBoxItem>Quaternion Julia</ComboBoxItem>
+            <ComboBoxItem>Rotated Mandelbox</ComboBoxItem>
+            <ComboBoxItem>Hybrid (box+bulb)</ComboBoxItem>
+            <ComboBoxItem>QJulia × Box (half-cut)</ComboBoxItem>
+            <ComboBoxItem>Folded Menger</ComboBoxItem>
+            <ComboBoxItem>Bicomplex Julia</ComboBoxItem>
+            <ComboBoxItem>Apollonian Gasket</ComboBoxItem>
+            <ComboBoxItem>Phoenix</ComboBoxItem>
+            <ComboBoxItem>Biomorph</ComboBoxItem>
+            <ComboBoxItem>Mosely Snowflake</ComboBoxItem>
+            <ComboBoxItem>Riemann Sphere</ComboBoxItem>
+            <ComboBoxItem>Mandalay Fold</ComboBoxItem>
+            <ComboBoxItem>Anisotropic Fold</ComboBoxItem>
+            <ComboBoxItem>Orbit Hybrid (KIFS+Mbox)</ComboBoxItem>
+            <ComboBoxItem>3D Burning Ship</ComboBoxItem>
+            <ComboBoxItem>Deep Zoom 2D</ComboBoxItem>
+          </ComboBox>
+          <TextBlock Name="FormulaLabel" Text="FORMULA" Foreground="#9a9ab0" FontSize="11"
+                     FontWeight="SemiBold" Margin="0,8,0,0" IsVisible="False" />
+          <ComboBox Name="FormulaSelector" HorizontalAlignment="Stretch"
+                    SelectedIndex="0" IsVisible="False">
+            <ComboBoxItem>Mandelbrot</ComboBoxItem>
+            <ComboBoxItem>Prospector</ComboBoxItem>
+            <ComboBoxItem>Julia</ComboBoxItem>
+            <ComboBoxItem>Burning Ship</ComboBoxItem>
+          </ComboBox>
+          <Button Name="GenerateButton" HorizontalAlignment="Stretch"
+                  HorizontalContentAlignment="Center" Margin="0,8,0,0"
+                  Content="Generate Attractor" IsVisible="False" />
+          <TextBlock Text="HERO AA" Foreground="#9a9ab0" FontSize="11"
+                     FontWeight="SemiBold" Margin="0,8,0,0" />
+          <ComboBox Name="HeroSamplesSelector" HorizontalAlignment="Stretch"
+                    SelectedIndex="0">
+            <ComboBoxItem>1× (no AA)</ComboBoxItem>
+            <ComboBoxItem>4× SSAA</ComboBoxItem>
+            <ComboBoxItem>9× SSAA</ComboBoxItem>
+            <ComboBoxItem>16× SSAA</ComboBoxItem>
+          </ComboBox>
+          <TextBlock Text="RESOLUTION" Foreground="#9a9ab0" FontSize="11"
+                     FontWeight="SemiBold" Margin="0,8,0,0" />
+          <ComboBox Name="ResolutionSelector" HorizontalAlignment="Stretch"
+                    SelectedIndex="1">
+            <ComboBoxItem>2K (2048×1536)</ComboBoxItem>
+            <ComboBoxItem>4K (4096×3072)</ComboBoxItem>
+            <ComboBoxItem>8K (8192×6144)</ComboBoxItem>
+		    <ComboBoxItem>12K (12288×9216)</ComboBoxItem>
+          </ComboBox>
+          <Button Name="HeroButton" HorizontalAlignment="Stretch"
+                  HorizontalContentAlignment="Center" Margin="0,8,0,0"
+                  Content="Save Hero Render" />
+          <Button Name="TestRenderButton" HorizontalAlignment="Stretch"
+                  HorizontalContentAlignment="Center" Margin="0,8,0,0"
+                  Content="Test Render (720p video)" />
+          <Button Name="RenderToVideoButton" HorizontalAlignment="Stretch"
+                  HorizontalContentAlignment="Center" Margin="0,4,0,0"
+                  Content="Render to Video" />
+          <CheckBox Name="TransparentBackgroundCheckBox" Margin="0,6,0,0"
+                    Content="Transparent BG" />
+          <Grid ColumnDefinitions="*,*" Margin="0,8,0,0">
+            <Button Name="SaveAnimButton" Grid.Column="0" HorizontalAlignment="Stretch"
+                    HorizontalContentAlignment="Center" Margin="0,0,2,0" Content="Save Anim" />
+            <Button Name="LoadAnimButton" Grid.Column="1" HorizontalAlignment="Stretch"
+                    HorizontalContentAlignment="Center" Margin="2,0,0,0" Content="Load Anim" />
+          </Grid>
+        </StackPanel>
+        <StackPanel Grid.Column="1" Spacing="4" Margin="12,0,0,0">
+          <ContentControl Name="AudioHost" />
+          <ContentControl Name="AudioMappingHost" Margin="0,8,0,0" />
+          <Button Name="SonifyButton" HorizontalAlignment="Stretch"
+                  HorizontalContentAlignment="Center" Margin="0,8,0,0"
+                  Content="Live Sonify: OFF" />
+          <Grid ColumnDefinitions="Auto,*,Auto" Margin="0,4,0,0">
             <TextBlock Text="Hybrid" FontSize="11" VerticalAlignment="Center" />
             <Slider Name="SonifyBlendSlider" Grid.Column="1"
                     Minimum="0" Maximum="1" Value="0"
@@ -112,17 +114,41 @@
             <Slider Name="DirectOrbitModalBlendSlider" Grid.Column="1"
                     Minimum="0" Maximum="1" Value="1"
                     TickFrequency="0.01" IsSnapToTickEnabled="False" Margin="4,0"
-                    ToolTip.Tip="DirectOrbit only. 0 = raw orbit texture, 1 = modal body. Enabled for modal voices such as Menger and Apollonian." />
+                    ToolTip.Tip="DirectOrbit only. 0 = raw orbit texture, 1 = modal body. Menger and Apollonian currently have active modal profiles." />
             <TextBlock Grid.Column="2" Text="Modal Body" FontSize="11" VerticalAlignment="Center" />
           </Grid>
+          <StackPanel Margin="0,8,0,0">
+            <TextBlock Text="Temperament Ceiling" FontSize="11" />
+            <Slider Name="TemperamentCeilingSlider" Minimum="0" Maximum="1" Value="0.9"
+                    TickFrequency="0.01" IsSnapToTickEnabled="False" />
+          </StackPanel>
+          <StackPanel Margin="0,10,0,0" Spacing="4">
+            <TextBlock Text="SURFACE TEXTURE" Foreground="#9a9ab0" FontSize="11" FontWeight="SemiBold" />
+            <CheckBox Name="SurfaceTextureEnableCheckBox" Content="Enable Image Projection" />
+            <Grid ColumnDefinitions="*,*" Margin="0,2,0,0">
+              <Button Name="SurfaceTextureLoadButton" Grid.Column="0"
+                      HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
+                      Margin="0,0,2,0" Content="Load Image" />
+              <Button Name="SurfaceTextureClearButton" Grid.Column="1"
+                      HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
+                      Margin="2,0,0,0" Content="Clear" />
+            </Grid>
+            <TextBlock Name="SurfaceTexturePathText" Text="No image selected"
+                       Foreground="#bfc0cf" FontSize="11" TextTrimming="CharacterEllipsis" />
+            <TextBlock Text="Blend" FontSize="11" />
+            <Slider Name="SurfaceTextureBlendSlider" Minimum="0" Maximum="1" Value="0.7"
+                    TickFrequency="0.01" IsSnapToTickEnabled="False" />
+            <TextBlock Text="Scale" FontSize="11" />
+            <Slider Name="SurfaceTextureScaleSlider" Minimum="0.1" Maximum="8" Value="1.25"
+                    TickFrequency="0.05" IsSnapToTickEnabled="False" />
+            <TextBlock Text="Projection" FontSize="11" />
+            <ComboBox Name="SurfaceTextureProjectionSelector" SelectedIndex="0">
+              <ComboBoxItem>Triplanar</ComboBoxItem>
+            </ComboBox>
+          </StackPanel>
         </StackPanel>
-        <StackPanel Margin="0,8,0,0">
-          <TextBlock Text="Temperament Ceiling" FontSize="11" />
-          <Slider Name="TemperamentCeilingSlider" Minimum="0" Maximum="1" Value="0.9"
-                  TickFrequency="0.01" IsSnapToTickEnabled="False" />
-        </StackPanel>
-      </StackPanel>
-      <Border Name="PanelHost" Grid.Row="1" />
+      </Grid>
+      <Border Name="PanelHost" Grid.Row="1" Margin="12,8,12,12" />
     </Grid>
   </Grid>
 </Window>

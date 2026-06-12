@@ -52,6 +52,49 @@ Current output contract:
 
 That packed RGBA8 output is the lowest-risk first backend seam.
 
+## Render Feature: Surface Texture Projection
+
+The feature is implemented across both render backends used by the desktop app: Metal-backed 3D fractals on macOS and the shared OpenGL 3D path on Windows/Linux. A user-supplied bitmap can tint and texture the fractal surface through the existing preview, hero-still, and video-export paths.
+
+**Status (2026-06-12): the Metal path is verified rendering.** `metal-surface-texture-smoke` produces baseline + textured Mandelbox PNGs on Apple M4 Pro — 12,958/76,800 px changed at blend 0.85, the test pattern visibly triplanar-projected; all 20 main shaders inject + compile (verified via a standalone `/tmp/metalprobe` sweep). Getting there required fixing two bugs in `MetalSurfaceTextureShaderInjector` (see "Bugs fixed" below). The OpenGL `gpu-surface-texture-smoke` is still unverified on this host (headless GL context stalls in launch services). Full handoff: `docs/surface-texture-handoff.md`; Metal gotchas: `skills.md`.
+
+Why this shape:
+
+- Most of the 3D fractals here do not have meaningful UVs, so classic mesh texturing does not apply.
+- The lowest-risk path is to sample a 2D bitmap directly in the raymarch shading stage.
+- The first useful mapping is **triplanar projection** in object/world space, because it survives arbitrary fractal geometry better than planar UV guesses.
+
+Implemented in the first pass:
+
+1. Added a compact render-state/UI block in `MainWindow` / `FractalView` with `Enable`, `Image`, `Blend`, `Scale`, and `Projection Mode`.
+2. Added retained texture paths for both render backends: the selected image is decoded once on CPU, packed to tight RGBA, cached per Metal device in `MetalSurfaceTextureManager`, and bound into the shared OpenGL compute path via `GpuSurfaceTextureManager`.
+3. Extended both shared raymarch shading tails with stable object-space **triplanar projection** and albedo blending.
+4. Kept the feature inside the existing 3D render paths so interactive preview, hero stills, and animation export all use the same textured shading without changing the transparent-export matte path.
+5. Added deterministic CLI A/B verification commands in `Parsec.Cli`: `metal-surface-texture-smoke` and `gpu-surface-texture-smoke`. They render baseline vs textured Mandelbox frames from the same image input, save PNGs, and print changed-pixel stats.
+6. Added `MetalBufferIO` as a shared Metal seam for struct upload, float/uint uploads, shared-buffer allocation, and explicit readback diagnostics. Main render/postprocess/deep-zoom paths now fail with a precise “no CPU-accessible contents” error instead of null pointer crashes when the host cannot map `MTLBuffer.Contents`.
+
+Bugs fixed (2026-06-12) — both in `MetalSurfaceTextureShaderInjector.Inject()`, together they aborted *all* Metal rendering at pipeline creation (every renderer ctor compiles its main shader), which masqueraded as a host outage and as a (false) "non-mappable `MTLBuffer.Contents` readback seam":
+
+1. The signature `Replace` anchored on `"…FoldParams& fp, constant RenderParams& rp)"` matched both `traceRay` *and* `shadeDirect`, appending the texture param to both but patching only `traceRay`'s call site → `shadeDirect` 6-arg called with 5 → `no matching function`. Fix: anchor on `traceRay`'s unique `int maxSteps,` line.
+2. `menger_raymarch.metal` calls `traceRay` with inline `rp.marchA.*`/`rp.marchI0` args (not the `hitEps/...` locals), so the call-site patch missed it. Fix: a Menger-specific call-site replacement.
+
+Diagnosed with a standalone SharpMetal probe (`/tmp/metalprobe`) that compiled a trivial kernel (host fine) then the real injected shaders (printed the actual `program_source` compile error). `MTLBuffer.Contents` is mappable here — the smoke reads back its `uint[]` fine.
+
+Still pending:
+
+1. Capture the Metal smoke output as a golden regression frame (it now renders deterministically).
+2. Eyeball the in-app preview on a real Mac (Load image → Enable; confirm triplanar is stable under camera motion) and tune Blend/Scale defaults.
+3. Finish the `MetalBufferIO.RequireContents` rollout anywhere Metal still reads `buf.Contents` directly, especially telemetry-only readback helpers.
+4. Wire the `Projection` ComboBox to real modes (axis-locked planar, normal-weighted) or hide it — the shaders are triplanar-only today.
+5. Resolve the headless OpenGL context startup stall for `gpu-surface-texture-smoke` only if OpenGL CI verification is wanted.
+
+First-pass constraints:
+
+- No per-fractal UV authoring or unwrapping.
+- No texture-driven displacement or geometry modification.
+- No camera-space projection; the mapping must stay stable as the camera moves.
+- Keep the existing lighting, HDR post-process, and transparent-export behaviour intact; the texture is an optional colour/detail layer, not a replacement shading model.
+
 ## Backend Abstraction Seam
 
 Do not start with `IGpuBuffer`, `IComputePipeline`, and a full cross-API renderer model. The existing code is not structured that way, and forcing it now would touch too much.

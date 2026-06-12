@@ -1,4 +1,5 @@
 using System.Numerics;
+using System.Runtime.InteropServices;
 using Avalonia;
 using Avalonia.Input;
 using Avalonia.Media.Imaging;
@@ -145,10 +146,114 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
     /// the UI; preview always renders at 1x regardless of this value.</summary>
     public int HeroSampleCount { get; set; } = 1;
 
+    private bool _surfaceTextureEnabled;
+    private float _surfaceTextureBlend = 0.7f;
+    private float _surfaceTextureScale = 1.25f;
+    private string? _surfaceTexturePath;
+
+    public bool SurfaceTextureEnabled
+    {
+        get => _surfaceTextureEnabled;
+        set
+        {
+            _surfaceTextureEnabled = value;
+            SyncSurfaceTextureState();
+            MarkDirty();
+        }
+    }
+
+    public float SurfaceTextureBlend
+    {
+        get => _surfaceTextureBlend;
+        set
+        {
+            _surfaceTextureBlend = Math.Clamp(value, 0f, 1f);
+            SyncSurfaceTextureState();
+            MarkDirty();
+        }
+    }
+
+    public float SurfaceTextureScale
+    {
+        get => _surfaceTextureScale;
+        set
+        {
+            _surfaceTextureScale = Math.Clamp(value, 0.05f, 16f);
+            SyncSurfaceTextureState();
+            MarkDirty();
+        }
+    }
+
+    public bool SupportsSurfaceTexture => ActiveType != FractalType.DeepZoom && ActiveType != FractalType.Attractor;
+
+    public string SurfaceTextureLabel => _surfaceTexturePath is { Length: > 0 }
+        ? Path.GetFileName(_surfaceTexturePath)
+        : "No image selected";
+
+    public bool HasSurfaceTextureImage => !string.IsNullOrWhiteSpace(_surfaceTexturePath);
+
     public void SetActiveType(FractalType type)
     {
         ActiveType = type;
+        SyncSurfaceTextureState();
         MarkDirty();
+    }
+
+    public string? SetSurfaceTextureImage(string path)
+    {
+        using var codec = SkiaSharp.SKCodec.Create(path);
+        if (codec == null)
+            return "Failed to decode image file.";
+
+        var info = new SkiaSharp.SKImageInfo(codec.Info.Width, codec.Info.Height, SkiaSharp.SKColorType.Rgba8888, SkiaSharp.SKAlphaType.Unpremul);
+        using var bitmap = new SkiaSharp.SKBitmap(info);
+        var result = codec.GetPixels(info, bitmap.GetPixels());
+        if (result != SkiaSharp.SKCodecResult.Success && result != SkiaSharp.SKCodecResult.IncompleteInput)
+            return $"Image decode failed ({result}).";
+
+        int sourceByteCount = checked(bitmap.RowBytes * bitmap.Height);
+        var sourceBytes = new byte[sourceByteCount];
+        Marshal.Copy(bitmap.GetPixels(), sourceBytes, 0, sourceByteCount);
+
+        int packedRowBytes = checked(bitmap.Width * 4);
+        var bytes = new byte[checked(packedRowBytes * bitmap.Height)];
+        if (bitmap.RowBytes == packedRowBytes)
+        {
+            Buffer.BlockCopy(sourceBytes, 0, bytes, 0, bytes.Length);
+        }
+        else
+        {
+            for (int y = 0; y < bitmap.Height; y++)
+                Buffer.BlockCopy(sourceBytes, y * bitmap.RowBytes, bytes, y * packedRowBytes, packedRowBytes);
+        }
+
+        _surfaceTexturePath = path;
+        MetalSurfaceTextureManager.SetImage(bytes, bitmap.Width, bitmap.Height, packedRowBytes);
+        GpuSurfaceTextureManager.SetImage(bytes, bitmap.Width, bitmap.Height, packedRowBytes);
+        SyncSurfaceTextureState();
+        MarkDirty();
+        return null;
+    }
+
+    public void ClearSurfaceTextureImage()
+    {
+        _surfaceTexturePath = null;
+        MetalSurfaceTextureManager.ClearImage();
+        GpuSurfaceTextureManager.ClearImage();
+        SyncSurfaceTextureState();
+        MarkDirty();
+    }
+
+    private void SyncSurfaceTextureState()
+    {
+        MetalSurfaceTextureManager.SetControls(
+            enabled: SupportsSurfaceTexture && _surfaceTextureEnabled && HasSurfaceTextureImage,
+            blend: _surfaceTextureBlend,
+            scale: _surfaceTextureScale);
+        GpuSurfaceTextureManager.SetControls(
+            enabled: ActiveType != FractalType.DeepZoom && ActiveType != FractalType.Attractor && _surfaceTextureEnabled && HasSurfaceTextureImage,
+            blend: _surfaceTextureBlend,
+            scale: _surfaceTextureScale);
     }
 
     /// <summary>

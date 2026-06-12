@@ -62,21 +62,10 @@ internal static class MetalPostProcess
 
         int pixelCount = width * height;
 
-        using var hdrBuf = device.NewBuffer(
-            (ulong)(hdrPixels.Length * sizeof(float)),
-            MTLResourceOptions.ResourceStorageModeShared);
-        unsafe
-        {
-            fixed (float* src = hdrPixels)
-                Buffer.MemoryCopy(src, (void*)hdrBuf.Contents,
-                    (long)hdrPixels.Length * sizeof(float),
-                    (long)hdrPixels.Length * sizeof(float));
-        }
+        using var hdrBuf = MetalBufferIO.UploadFloats(device, hdrPixels);
 
         using var ppBuf  = UploadStruct(device, gpuParams);
-        using var outBuf = device.NewBuffer(
-            (ulong)(pixelCount * sizeof(uint)),
-            MTLResourceOptions.ResourceStorageModeShared);
+        using var outBuf = MetalBufferIO.CreateSharedBuffer(device, (ulong)(pixelCount * sizeof(uint)));
 
         var cmd = queue.CommandBuffer();
         var enc = cmd.ComputeCommandEncoder();
@@ -95,21 +84,10 @@ internal static class MetalPostProcess
     }
 
     private static MTLBuffer UploadStruct<T>(MTLDevice device, T value) where T : struct
-    {
-        int size = Marshal.SizeOf<T>();
-        var buf = device.NewBuffer((ulong)size, MTLResourceOptions.ResourceStorageModeShared);
-        Marshal.StructureToPtr(value, buf.Contents, false);
-        return buf;
-    }
+        => MetalBufferIO.UploadStruct(device, value);
 
-    private static unsafe uint[] ReadUintBuffer(MTLBuffer buf, int count)
-    {
-        var result = new uint[count];
-        fixed (uint* dst = result)
-            Buffer.MemoryCopy((void*)buf.Contents, dst,
-                (long)count * sizeof(uint), (long)count * sizeof(uint));
-        return result;
-    }
+    private static uint[] ReadUintBuffer(MTLBuffer buf, int count)
+        => MetalBufferIO.ReadUIntBuffer(buf, count);
 
     private static string LoadEmbeddedMsl(string filename)
     {

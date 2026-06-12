@@ -52,6 +52,7 @@ public static class GlConst
     public const uint TextureWrapT = 0x2803;
     public const uint Nearest = 0x2600;
     public const uint Linear = 0x2601;
+    public const uint Repeat = 0x2901;
     public const uint ClampToEdge = 0x812F;
 
     // Framebuffer / drawing

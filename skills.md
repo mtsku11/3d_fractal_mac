@@ -945,3 +945,56 @@ Done 2026-06-12 for Menger/Apollonian/KIFS/QJBox (`metal-d-telemetry` / `metal-d
 6. Validate: `metal-d-telemetry` (16/16 orbs, ws=64) + `metal-d-direct` (ZCR/peak per voice),
    then regressions `metal-m9b-direct` (default duration — the −6 dBFS gate is
    duration-sensitive; 6 s reads −5.8 even pre-change) and `metal-m9d-check`.
+
+## `computeFunction must not be nil` = a shader that failed to compile (2026-06-12)
+
+The crash `-[MTLComputePipelineDescriptorInternal setComputeFunction:withType:] failed
+assertion 'computeFunction must not be nil'` does **not** mean a GPU/host problem. It means
+`library.NewFunction(name)` returned nil, almost always because `dev.NewLibrary(src, …, ref
+err)` failed to **compile** and the code ignored `err`, then passed the nil function to
+`NewComputePipelineState`. It is a **native ObjC assertion → process abort**, so a C#
+`try/catch` around the renderer ctor does **not** catch it. Every `Metal*Renderer` ctor
+compiles its main shader, so one bad shader takes down *all* Metal rendering (telemetry
+smokes included), which reads exactly like an environment outage but isn't.
+
+**Diagnose with a standalone probe, not the app.** A throwaway console project referencing
+`SharpMetal 1.1.0` (kept in `/tmp/metalprobe`, no repo files touched) that:
+(a) compiles a trivial `kernel void probe(...)` — if that works, the host Metal runtime is
+fine (rules out "wedged compiler service" / reboot theories); (b) reads an actual
+`*.metal` from disk, optionally applies the injector's string replacements, compiles, and
+**prints `err.LocalizedDescription`** — which gives the real `program_source:LINE:COL: error`.
+This is the fast path to the true cause; do this before blaming the host.
+
+## Shader-injection (surface texture) string-replace gotchas (2026-06-12)
+
+`MetalSurfaceTextureShaderInjector.Inject()` rewrites each `*_raymarch.metal` source by literal
+`string.Replace` to thread a `texture2d<float> surfaceTexture` param into `traceRay`. Two bugs
+found and fixed (root cause of a whole-session "Metal won't render" red herring):
+
+1. **Over-broad signature anchor.** Replacing the suffix `"…constant FoldParams& fp, constant
+   RenderParams& rp)"` matched **two** function defs — `traceRay` *and* `shadeDirect` — appending
+   the texture param to both, but only `traceRay`'s call site was patched → `shadeDirect` became
+   6-arg called with 5 → `no matching function for call to 'shadeDirect'`. **Fix:** anchor on
+   `traceRay`'s unique `int maxSteps,` line. Lesson: a `Replace` anchor must be unique to the one
+   function you mean; verify by `grep -c "<suffix>"` across all 20 `*_raymarch.metal`.
+2. **`menger_raymarch.metal` calls `traceRay` non-standardly** — `traceRay(ro, rd, rp.marchA.x,
+   rp.marchA.y, rp.marchA.z, rp.marchI0, fp, rp)` (inline RenderParams fields, not the
+   `hitEps/maxDist/normalEps/maxSteps` locals every other shader uses), so the standard call-site
+   patch missed it → its def got the param but the call didn't. **Fix:** a Menger-specific
+   call-site replacement. Lesson: call-site patches keyed on argument *names* break on any shader
+   that passes different expressions; sweep all 20 through the probe after any injector change.
+
+**Verification harness:** `metal-surface-texture-smoke <image> [w] [h] [outDir]` renders
+baseline vs textured Mandelbox, writes PNGs, prints changed-pixel stats. Verified working on
+Apple M4 Pro (12,958/76,800 px changed at blend 0.85). **`MTLBuffer.Contents` *is* mappable on
+this host** — the smoke reads back its `uint[]` fine; an earlier "non-mappable Contents / readback
+seam" theory was wrong, masked by the injector crash that aborted before readback was ever reached.
+
+## Stale-DLL trap with two agents in one working tree (2026-06-12)
+
+When a second agent (Codex) is building in the same checkout, `dotnet build Parsec.sln` can
+**incrementally no-op** and leave a renderer DLL older than your just-edited source, so
+`dotnet run --no-build` silently runs the **old** code (here: the smoke kept crashing after the
+injector was already fixed). Always confirm the fix landed: `stat -f "%Sm %N" <edited>.cs
+<bin>/<proj>.dll` — if the DLL is older, force `dotnet build <csproj> --no-incremental` and
+re-check the mtime before trusting a run.

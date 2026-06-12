@@ -4,6 +4,7 @@ using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Markup.Xaml;
+using Avalonia.Platform.Storage;
 using Avalonia.Threading;
 using Parsec.Audio;
 using Parsec.Audio.Sonification;
@@ -140,6 +141,38 @@ public partial class MainWindow : Window
                     _droneStream.TemperamentCeiling = (float)(double)e.NewValue!;
             };
 
+        var surfaceTextureEnableCheckBox = this.FindControl<CheckBox>("SurfaceTextureEnableCheckBox");
+        if (surfaceTextureEnableCheckBox != null)
+            surfaceTextureEnableCheckBox.IsCheckedChanged += (_, _) =>
+            {
+                if (_view != null)
+                    _view.SurfaceTextureEnabled = surfaceTextureEnableCheckBox.IsChecked == true;
+            };
+
+        var surfaceTextureBlendSlider = this.FindControl<Slider>("SurfaceTextureBlendSlider");
+        if (surfaceTextureBlendSlider != null)
+            surfaceTextureBlendSlider.PropertyChanged += (_, e) =>
+            {
+                if (e.Property.Name == nameof(Slider.Value) && _view != null)
+                    _view.SurfaceTextureBlend = (float)surfaceTextureBlendSlider.Value;
+            };
+
+        var surfaceTextureScaleSlider = this.FindControl<Slider>("SurfaceTextureScaleSlider");
+        if (surfaceTextureScaleSlider != null)
+            surfaceTextureScaleSlider.PropertyChanged += (_, e) =>
+            {
+                if (e.Property.Name == nameof(Slider.Value) && _view != null)
+                    _view.SurfaceTextureScale = (float)surfaceTextureScaleSlider.Value;
+            };
+
+        var surfaceTextureLoadButton = this.FindControl<Button>("SurfaceTextureLoadButton");
+        if (surfaceTextureLoadButton != null)
+            surfaceTextureLoadButton.Click += OnSurfaceTextureLoadClick;
+
+        var surfaceTextureClearButton = this.FindControl<Button>("SurfaceTextureClearButton");
+        if (surfaceTextureClearButton != null)
+            surfaceTextureClearButton.Click += OnSurfaceTextureClearClick;
+
         if (_view != null && status != null)
         {
             _view.HeroRenderComplete += text => status.Text = text;
@@ -184,6 +217,8 @@ public partial class MainWindow : Window
 
         RebuildForActiveFractal();
         UpdateDirectOrbitModalBlendUi(_view?.ActiveType ?? FractalType.Kifs);
+        UpdateSurfaceTextureUi(_view?.ActiveType ?? FractalType.Kifs);
+        RefreshSurfaceTexturePathText();
     }
 
     private async void OnWindowClosed(object? sender, EventArgs e)
@@ -332,6 +367,7 @@ public partial class MainWindow : Window
         _view.SetActiveType(type);
         _droneStream?.SetVoice(ActiveTypeToVoice(type));
         UpdateDirectOrbitModalBlendUi(type);
+        UpdateSurfaceTextureUi(type);
         if (_generateButton != null)
             _generateButton.IsVisible = type == FractalType.Attractor;
 
@@ -367,8 +403,76 @@ public partial class MainWindow : Window
         if (slider == null) return;
 
         bool enabled = DirectOrbitProfile.ForVoice(ActiveTypeToVoice(type)).HasModalBody;
-        slider.IsEnabled = enabled;
-        slider.Opacity = enabled ? 1.0 : 0.45;
+        slider.IsEnabled = true;
+        slider.Opacity = 1.0;
+        ToolTip.SetTip(slider, enabled
+            ? "DirectOrbit only. 0 = raw orbit texture, 1 = modal body."
+            : "Current fractal has no modal body profile yet. This control becomes audible on Menger and Apollonian.");
+    }
+
+    private void UpdateSurfaceTextureUi(FractalType type)
+    {
+        var enabledToggle = this.FindControl<CheckBox>("SurfaceTextureEnableCheckBox");
+        var loadButton = this.FindControl<Button>("SurfaceTextureLoadButton");
+        var blendSlider = this.FindControl<Slider>("SurfaceTextureBlendSlider");
+        var scaleSlider = this.FindControl<Slider>("SurfaceTextureScaleSlider");
+        var projectionSelector = this.FindControl<ComboBox>("SurfaceTextureProjectionSelector");
+        if (_view == null) return;
+
+        string tip = _view.SupportsSurfaceTexture
+            ? "3D preview, hero stills, and video export support image-based triplanar surface colour."
+            : "Surface texture projection is unavailable for Deep Zoom and Attractor.";
+
+        if (enabledToggle != null) ToolTip.SetTip(enabledToggle, tip);
+        if (loadButton != null) ToolTip.SetTip(loadButton, tip);
+        if (blendSlider != null) ToolTip.SetTip(blendSlider, "0 = fractal palette only, 1 = image colour only.");
+        if (scaleSlider != null) ToolTip.SetTip(scaleSlider, "Higher values repeat the image more densely across the fractal.");
+        if (projectionSelector != null) ToolTip.SetTip(projectionSelector, "First pass is object-space triplanar projection.");
+    }
+
+    private void RefreshSurfaceTexturePathText()
+    {
+        var text = this.FindControl<TextBlock>("SurfaceTexturePathText");
+        if (text != null)
+            text.Text = _view?.SurfaceTextureLabel ?? "No image selected";
+    }
+
+    private async void OnSurfaceTextureLoadClick(object? sender, RoutedEventArgs e)
+    {
+        if (_view == null) return;
+        var storageProvider = TopLevel.GetTopLevel(this)?.StorageProvider;
+        if (storageProvider == null) return;
+
+        var files = await storageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
+        {
+            Title = "Select surface texture image",
+            AllowMultiple = false,
+            FileTypeFilter =
+            [
+                new FilePickerFileType("Image Files")
+                {
+                    Patterns = ["*.png", "*.jpg", "*.jpeg", "*.webp", "*.bmp", "*.tif", "*.tiff"],
+                    MimeTypes = ["image/png", "image/jpeg", "image/webp", "image/bmp", "image/tiff"],
+                },
+            ],
+        });
+        if (files.Count != 1 || files[0].Path is not { } source) return;
+
+        string path = source.LocalPath;
+        if (string.IsNullOrWhiteSpace(path)) return;
+
+        string? error = _view.SetSurfaceTextureImage(path);
+        RefreshSurfaceTexturePathText();
+        SetStatus(error == null
+            ? $"Loaded surface texture: {System.IO.Path.GetFileName(path)}"
+            : error);
+    }
+
+    private void OnSurfaceTextureClearClick(object? sender, RoutedEventArgs e)
+    {
+        _view?.ClearSurfaceTextureImage();
+        RefreshSurfaceTexturePathText();
+        SetStatus("Surface texture cleared.");
     }
 
     private void RebuildPanel()

@@ -9,6 +9,8 @@
 
 layout(local_size_x = 8, local_size_y = 8) in;
 
+uniform sampler2D uSurfaceTexture;
+
 // -----------------------------------------------------------------------------
 // Render parameters (binding 4)
 // -----------------------------------------------------------------------------
@@ -30,7 +32,7 @@ layout(std430, binding = 4) readonly buffer RenderParams {
     vec4  surface;
 
     vec4  marchA;        // (hitEpsilon, maxDistance, normalEpsilon, shadowSoftness)
-    vec4  marchB;        // (aoStepDistance, aoIntensity, _, _)
+    vec4  marchB;        // (aoStepDistance, aoIntensity, textureScale, textureAspect)
     ivec4 marchI;        // (maxSteps, shadowSteps, aoSamples, flags)
 
     vec4  palBase;
@@ -111,6 +113,35 @@ bool intersectSphereForward(vec3 ro, vec3 rd, vec3 center, float radius, out flo
 
 vec3 cosPalette(float t, vec3 a, vec3 b, vec3 c, vec3 d) {
     return a + b * cos(6.28318530718 * (c * t + d));
+}
+
+vec2 surfaceTextureAspectUv(vec2 uv, float aspect) {
+    if (aspect > 1.0) return vec2(uv.x, uv.y / aspect);
+    if (aspect > 0.0 && aspect < 1.0) return vec2(uv.x * aspect, uv.y);
+    return uv;
+}
+
+vec3 sampleSurfaceTexture(vec3 pos, vec3 normal) {
+    float scale = max(rp.marchB.z, 1e-4);
+    float aspect = max(rp.marchB.w, 1e-4);
+    vec3 weights = pow(abs(normal), vec3(4.0));
+    weights /= max(weights.x + weights.y + weights.z, 1e-5);
+
+    vec2 uvX = surfaceTextureAspectUv(pos.yz * scale, aspect);
+    vec2 uvY = surfaceTextureAspectUv(pos.xz * scale, aspect);
+    vec2 uvZ = surfaceTextureAspectUv(pos.xy * scale, aspect);
+
+    vec3 tx = texture(uSurfaceTexture, fract(uvX)).rgb;
+    vec3 ty = texture(uSurfaceTexture, fract(uvY)).rgb;
+    vec3 tz = texture(uSurfaceTexture, fract(uvZ)).rgb;
+    return tx * weights.x + ty * weights.y + tz * weights.z;
+}
+
+vec3 applySurfaceTexture(vec3 baseAlbedo, vec3 pos, vec3 normal) {
+    if (rp.background.a < 0.5) return baseAlbedo;
+    float blend = clamp(rp.surface.a, 0.0, 1.0);
+    if (blend <= 0.0) return baseAlbedo;
+    return mix(baseAlbedo, sampleSurfaceTexture(pos, normal), blend);
 }
 
 vec3 trapAlbedo(vec4 trap) {
@@ -198,7 +229,6 @@ Hit traceRay(vec3 ro, vec3 rd, float hitEps, float maxDist, float normalEps, int
     // Capture the orbit trap at the hit BEFORE normal estimation (which calls
     // estimate() four times and clobbers gTrap).
     estimate(hitPoint);
-    vec3 albedo = trapAlbedo(gTrap);
     bool degenerate;
     // Match the normal sampling radius to the pixel footprint at the hit, so
     // relief finer than a fixed normalEps isn't averaged away at deep zoom.
@@ -206,6 +236,7 @@ Hit traceRay(vec3 ro, vec3 rd, float hitEps, float maxDist, float normalEps, int
     float pixelWorldHit = (2.0 * rp.tanFov.y / float(rp.imageHeight)) * t;
     float nEps = max(normalEps, 0.5 * pixelWorldHit);
     vec3 normal = estimateNormal(hitPoint, nEps, rd, degenerate);
+    vec3 albedo = applySurfaceTexture(trapAlbedo(gTrap), hitPoint, normal);
 
     h.hit = true; h.pos = hitPoint; h.normal = normal; h.albedo = albedo; h.t = t;
     return h;

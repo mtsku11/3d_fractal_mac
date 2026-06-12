@@ -21,7 +21,7 @@ public sealed class MetalRiemannSphereRenderer : IDisposable
     {
         try {
             var dev = MTLDevice.CreateSystemDefaultDevice();
-            var src = LoadEmbeddedMsl("riemannsphere_raymarch.metal");
+            var src = MetalSurfaceTextureShaderInjector.Inject(LoadEmbeddedMsl("riemannsphere_raymarch.metal"));
             NSError le = default; var lib = dev.NewLibrary(NSString.String(src), new MTLCompileOptions(), ref le);
             var fn = lib.NewFunction(NSString.String("riemannsphere_raymarch"));
             NSError pe = default; _pso = dev.NewComputePipelineState(fn, ref pe);
@@ -40,9 +40,10 @@ public sealed class MetalRiemannSphereRenderer : IDisposable
         {
             using var fb = UploadStruct(_device, BuildFoldParams(rs));
             using var rb = UploadStruct(_device, BuildRenderParams(camera, width, height, lightDirection, background, surface, settings, palette, jitter));
-            using var ob = _device.NewBuffer((ulong)(width * height * 4 * sizeof(float)), MTLResourceOptions.ResourceStorageModeShared);
+            using var ob = MetalBufferIO.CreateSharedBuffer(_device, (ulong)(width * height * 4 * sizeof(float)));
             var cmd = _queue.CommandBuffer(); var enc = cmd.ComputeCommandEncoder();
             enc.SetComputePipelineState(_pso!); enc.SetBuffer(fb,0,0); enc.SetBuffer(rb,0,1); enc.SetBuffer(ob,0,2);
+            enc.SetTexture(MetalSurfaceTextureManager.GetTexture(_device), 0);
             enc.DispatchThreadgroups(new MTLSize{width=(ulong)((width+7)/8),height=(ulong)((height+7)/8),depth=1}, new MTLSize{width=8,height=8,depth=1});
             enc.EndEncoding();
             var sw = System.Diagnostics.Stopwatch.StartNew(); cmd.Commit(); cmd.WaitUntilCompleted(); LastComputeMs = sw.ElapsedMilliseconds;
@@ -71,15 +72,15 @@ public sealed class MetalRiemannSphereRenderer : IDisposable
         return new MetalRenderParams { ImageWidth=width,ImageHeight=height,RowOffset=0,RowCount=height,
             CamPos=new Vector4(camera.Position,0f),CamForward=new Vector4(fwd,0f),CamRight=new Vector4(right,0f),CamUp=new Vector4(up,0f),
             TanFov=new Vector4(tanX,tanY,0f,0f),LightDir=new Vector4(ld,s.LightIntensity),
-            Background=new Vector4(background.R,background.G,background.B,1f),Surface=new Vector4(surface.R,surface.G,surface.B,1f),
-            MarchA=new Vector4(s.HitEpsilon,s.MaxDistance,s.NormalEpsilon,s.ShadowSoftness),MarchB=new Vector4(s.AOStepDistance,s.AOIntensity,0f,0f),
+            Background = MetalSurfaceTextureManager.EncodeBackground(background),Surface = MetalSurfaceTextureManager.EncodeSurface(surface),
+            MarchA=new Vector4(s.HitEpsilon,s.MaxDistance,s.NormalEpsilon,s.ShadowSoftness),MarchB = MetalSurfaceTextureManager.EncodeMarchB(s.AOStepDistance, s.AOIntensity),
             MarchI0=s.MaxSteps,MarchI1=s.ShadowSteps,MarchI2=s.AOSamples,MarchI3=flags,
             PalBase=new Vector4(palette.Base,palette.Frequency),PalAmp=new Vector4(palette.Amp,palette.TrapScale),PalPhase=new Vector4(palette.Phase,palette.ShellMix),TrapMix=new Vector4(palette.TrapMix,0f),
             SubpixelJitter=new Vector4(subpixelJitter.X,subpixelJitter.Y,0f,0f),ReflectParams=new Vector4(s.EnableReflections?1f:0f,s.ReflectionBounces,s.Gloss,s.F0) };
     }
 
-    private static MTLBuffer UploadStruct<T>(MTLDevice device, T value) where T : struct { int size=Marshal.SizeOf<T>(); var buf=device.NewBuffer((ulong)size,MTLResourceOptions.ResourceStorageModeShared); Marshal.StructureToPtr(value,buf.Contents,false); return buf; }
-    private static unsafe float[] ReadFloat4Buffer(MTLBuffer buf, int count) { var r=new float[count*4]; fixed(float*d=r) Buffer.MemoryCopy((void*)buf.Contents,d,(long)r.Length*sizeof(float),(long)r.Length*sizeof(float)); return r; }
+    private static MTLBuffer UploadStruct<T>(MTLDevice device, T value) where T : struct => MetalBufferIO.UploadStruct(device, value);
+    private static float[] ReadFloat4Buffer(MTLBuffer buf, int count) => MetalBufferIO.ReadFloat4Buffer(buf, count);
     private static string LoadEmbeddedMsl(string fn) { var asm=Assembly.GetExecutingAssembly(); using var s=asm.GetManifestResourceStream($"Parsec.Rendering.Metal.Shaders.{fn}")??throw new FileNotFoundException(fn); using var r=new StreamReader(s); return r.ReadToEnd(); }
     private void ThrowIfDisposed() { if(_disposed) throw new ObjectDisposedException(nameof(MetalRiemannSphereRenderer)); }
 

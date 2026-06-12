@@ -39,9 +39,10 @@ internal static class TelemetryReduction
     {
         var result = new TelemetryCell[count];
         int size = Marshal.SizeOf<TelemetryCell>();
+        IntPtr ptr = MetalBufferIO.RequireContents(buf, "telemetry readback");
         fixed (TelemetryCell* dst = result)
         {
-            Buffer.MemoryCopy((void*)buf.Contents, dst,
+            Buffer.MemoryCopy((void*)ptr, dst,
                 (long)count * size, (long)count * size);
         }
         return result;
@@ -201,8 +202,9 @@ internal static class TelemetryReduction
     public static unsafe (float[] tl, float[] tr, float[] bl, float[] br) ReadFieldScanWaveform(MTLBuffer buf, int n = 64)
     {
         var raw = new float[4 * n];
+        IntPtr ptr = MetalBufferIO.RequireContents(buf, "field scan waveform readback");
         fixed (float* dst = raw)
-            Buffer.MemoryCopy((void*)buf.Contents, dst, (long)4 * n * 4, (long)4 * n * 4);
+            Buffer.MemoryCopy((void*)ptr, dst, (long)4 * n * 4, (long)4 * n * 4);
         var tl = new float[n]; var tr = new float[n];
         var bl = new float[n]; var br = new float[n];
         Array.Copy(raw, 0 * n, tl, 0, n);
@@ -227,8 +229,9 @@ internal static class TelemetryReduction
     public static unsafe float[] ReadWaveshaperCurve(MTLBuffer buf, int n = 64)
     {
         var result = new float[n];
+        IntPtr ptr = MetalBufferIO.RequireContents(buf, "waveshaper readback");
         fixed (float* dst = result)
-            Buffer.MemoryCopy((void*)buf.Contents, dst, (long)n * 4, (long)n * 4);
+            Buffer.MemoryCopy((void*)ptr, dst, (long)n * 4, (long)n * 4);
         NormalizeWavetable(result);
         return result;
     }
@@ -242,7 +245,7 @@ internal static class TelemetryReduction
         const int BytesPerArray = N * 4;
         const int BytesPerCell  = BytesPerArray * 2;
         var result = new float[tileCount][];
-        var src = (byte*)buf.Contents;
+        var src = (byte*)MetalBufferIO.RequireContents(buf, "orbit wavetable readback");
         for (int i = 0; i < tileCount; i++)
         {
             var orbit = new float[N];
@@ -263,7 +266,7 @@ internal static class TelemetryReduction
         const int N = 128;               // ORBTRAJ
         const int BytesPerTile = N * 16; // float4 = 16 bytes each
         var result = new Vector4[tileCount][];
-        var src = (byte*)buf.Contents;
+        var src = (byte*)MetalBufferIO.RequireContents(buf, "orbit trajectory readback");
         for (int i = 0; i < tileCount; i++)
         {
             var traj = new Vector4[N];

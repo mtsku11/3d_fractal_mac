@@ -44,7 +44,10 @@ struct RenderParams {
 // 3D Burning Ship distance estimator
 // ============================================================================
 
-float estimateFull(float3 p, constant FoldParams& fp, thread float4& outTrap) {
+// outTrapUv: z.xy at the minimum-distance orbit step, normalised to [0,1] by bailout.
+// Used by the orbit-trap image-projection mode; ignored when using triplanar.
+float estimateFull(float3 p, constant FoldParams& fp,
+                   thread float4& outTrap, thread float2& outTrapUv) {
     float power   = fp.boxParams.x;
     float bailout = fp.boxParams.y;
 
@@ -52,6 +55,9 @@ float estimateFull(float3 p, constant FoldParams& fp, thread float4& outTrap) {
     float ldr = 0.0f;
     float r = 0.0f;
     outTrap = float4(1e20f);
+
+    float minOrbitDist = 1e20f;
+    float2 minOrbitPoint = float2(0.5f);
 
     for (int i = 0; i < fp.iterations; i++) {
         r = length(z);
@@ -72,18 +78,22 @@ float estimateFull(float3 p, constant FoldParams& fp, thread float4& outTrap) {
                         sin(theta) * cos(zangle)) + p;
         z = abs(z);
 
+        float od = length(z);
+        if (od < minOrbitDist) { minOrbitDist = od; minOrbitPoint = z.xy; }
+
         outTrap.x = min(outTrap.x, length(z));
         outTrap.y = min(outTrap.y, abs(z.x));
         outTrap.z = min(outTrap.z, length(z.xy));
         outTrap.w = min(outTrap.w, abs(length(z) - 1.0f));
     }
 
+    outTrapUv = minOrbitPoint / max(bailout, 1e-4f);
     return 0.5f * log(max(r, 1e-12f)) * r * exp(-ldr);
 }
 
 float estimate(float3 p, constant FoldParams& fp) {
-    float4 dummy;
-    return estimateFull(p, fp, dummy);
+    float4 dummy; float2 dummyUv;
+    return estimateFull(p, fp, dummy, dummyUv);
 }
 
 // ============================================================================

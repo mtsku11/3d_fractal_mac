@@ -46,6 +46,8 @@ public sealed class RaymarchPipeline : IDisposable
     private readonly StorageBuffer<AAParamsGpu> _aaParamsBuffer;
     private readonly ComputeShader _clearShader;
     private readonly ComputeShader _finalizeShader;
+    private uint _surfaceTexture;
+    private int _surfaceTextureVersion = -1;
     private bool _disposed;
 
     public RaymarchPipeline(Gl gl)
@@ -116,6 +118,7 @@ public sealed class RaymarchPipeline : IDisposable
         _renderBuffer.BindBase(4);
         _accumBuffer.BindBase(5);
         fractalShader.Use();
+        EnsureSurfaceTextureBound(fractalShader);
 
         for (int sample = 0; sample < samples; sample++)
         {
@@ -170,10 +173,10 @@ public sealed class RaymarchPipeline : IDisposable
             CamUp = new Vector4(frame.Up, 0),
             TanFov = new Vector4(frame.TanFovX, frame.TanFovY, 0, 0),
             LightDir = new Vector4(lightDir, s.LightIntensity),
-            Background = new Vector4(background.R, background.G, background.B, 1),
-            Surface = new Vector4(surface.R, surface.G, surface.B, 1),
+            Background = GpuSurfaceTextureManager.EncodeBackground(background),
+            Surface = GpuSurfaceTextureManager.EncodeSurface(surface),
             MarchA = new Vector4(s.HitEpsilon, s.MaxDistance, s.NormalEpsilon, s.ShadowSoftness),
-            MarchB = new Vector4(s.AOStepDistance, s.AOIntensity, 0, 0),
+            MarchB = GpuSurfaceTextureManager.EncodeMarchB(s.AOStepDistance, s.AOIntensity),
             MarchI0 = s.MaxSteps, MarchI1 = s.ShadowSteps,
             MarchI2 = s.AOSamples, MarchI3 = flags,
             PalBase = new Vector4(palette.Base, palette.Frequency),
@@ -220,6 +223,7 @@ public sealed class RaymarchPipeline : IDisposable
     {
         if (_disposed) return;
         _disposed = true;
+        if (_surfaceTexture != 0) _gl.DeleteTexture(_surfaceTexture);
         _clearShader.Dispose();
         _finalizeShader.Dispose();
         _foldBuffer.Dispose();
@@ -227,6 +231,38 @@ public sealed class RaymarchPipeline : IDisposable
         _accumBuffer.Dispose();
         _imageBuffer.Dispose();
         _aaParamsBuffer.Dispose();
+    }
+
+    private unsafe void EnsureSurfaceTextureBound(ComputeShader fractalShader)
+    {
+        if (_surfaceTexture == 0)
+        {
+            _surfaceTexture = _gl.GenTexture();
+            _gl.ActiveTexture(GlConst.Texture0);
+            _gl.BindTexture(GlConst.Texture2D, _surfaceTexture);
+            _gl.TexParameteri(GlConst.Texture2D, GlConst.TextureMinFilter, (int)GlConst.Linear);
+            _gl.TexParameteri(GlConst.Texture2D, GlConst.TextureMagFilter, (int)GlConst.Linear);
+            _gl.TexParameteri(GlConst.Texture2D, GlConst.TextureWrapS, (int)GlConst.Repeat);
+            _gl.TexParameteri(GlConst.Texture2D, GlConst.TextureWrapT, (int)GlConst.Repeat);
+        }
+
+        var snapshot = GpuSurfaceTextureManager.GetSnapshot();
+        _gl.ActiveTexture(GlConst.Texture0);
+        _gl.BindTexture(GlConst.Texture2D, _surfaceTexture);
+        if (_surfaceTextureVersion != snapshot.Version)
+        {
+            fixed (byte* ptr = snapshot.Bytes)
+            {
+                _gl.TexImage2D(
+                    GlConst.Texture2D, 0, (int)GlConst.Rgba8,
+                    snapshot.Width, snapshot.Height, 0,
+                    GlConst.Rgba, GlConst.UnsignedByte, (IntPtr)ptr);
+            }
+            _surfaceTextureVersion = snapshot.Version;
+        }
+
+        int loc = fractalShader.UniformLocation("uSurfaceTexture");
+        if (loc >= 0) _gl.Uniform1i(loc, 0);
     }
 
     // ------------------------------------------------------------------------

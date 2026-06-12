@@ -32,7 +32,7 @@ public sealed class MetalKleinianRenderer : IDisposable
         try
         {
             var dev = MTLDevice.CreateSystemDefaultDevice();
-            var src = LoadEmbeddedMsl("kleinian_raymarch.metal");
+            var src = MetalSurfaceTextureShaderInjector.Inject(LoadEmbeddedMsl("kleinian_raymarch.metal"));
             NSError libError = default;
             var library = dev.NewLibrary(NSString.String(src), new MTLCompileOptions(), ref libError);
             var function = library.NewFunction(NSString.String("kleinian_raymarch"));
@@ -68,7 +68,7 @@ public sealed class MetalKleinianRenderer : IDisposable
             int pixelCount = width * height;
             using var foldBuf   = UploadStruct(_device, BuildFoldParams(fractal));
             using var renderBuf = UploadStruct(_device, BuildRenderParams(camera, width, height, lightDirection, background, surface, settings, palette, jitter));
-            using var outBuf    = _device.NewBuffer((ulong)(pixelCount * 4 * sizeof(float)), MTLResourceOptions.ResourceStorageModeShared);
+            using var outBuf    = MetalBufferIO.CreateSharedBuffer(_device, (ulong)(pixelCount * 4 * sizeof(float)));
 
             var cmd = _queue.CommandBuffer();
             var enc = cmd.ComputeCommandEncoder();
@@ -77,6 +77,7 @@ public sealed class MetalKleinianRenderer : IDisposable
             enc.SetBuffer(foldBuf,   0, 0);
             enc.SetBuffer(renderBuf, 0, 1);
             enc.SetBuffer(outBuf,    0, 2);
+            enc.SetTexture(MetalSurfaceTextureManager.GetTexture(_device), 0);
 
             enc.DispatchThreadgroups(
                 new MTLSize { width = (ulong)((width + 7) / 8), height = (ulong)((height + 7) / 8), depth = 1 },
@@ -141,6 +142,7 @@ public sealed class MetalKleinianRenderer : IDisposable
         enc.SetBuffer(foldBuf, 0, 0);
         enc.SetBuffer(telBuf,  0, 1);
         enc.SetBuffer(outBuf,  0, 2);
+            enc.SetTexture(MetalSurfaceTextureManager.GetTexture(_device), 0);
         enc.DispatchThreadgroups(
             new MTLSize { width = 1, height = 1, depth = 1 },
             new MTLSize { width = 256, height = 1, depth = 1 });
@@ -212,6 +214,7 @@ public sealed class MetalKleinianRenderer : IDisposable
         enc.SetBuffer(foldBuf,       0, 0);
         enc.SetBuffer(telBuf,        0, 1);
         enc.SetBuffer(outputBuf,     0, 2);
+            enc.SetTexture(MetalSurfaceTextureManager.GetTexture(_device), 0);
         enc.SetBuffer(wavetableBuf,  0, 3);
         enc.SetBuffer(waveshaperBuf, 0, 4);
         enc.SetBuffer(orbitTrajBuf,  0, 5);
@@ -335,10 +338,10 @@ public sealed class MetalKleinianRenderer : IDisposable
             CamUp       = new Vector4(up,    0f),
             TanFov      = new Vector4(tanX, tanY, 0f, 0f),
             LightDir    = new Vector4(lightDir, s.LightIntensity),
-            Background  = new Vector4(background.R, background.G, background.B, 1f),
-            Surface     = new Vector4(surface.R,    surface.G,    surface.B,    1f),
+            Background = MetalSurfaceTextureManager.EncodeBackground(background),
+            Surface = MetalSurfaceTextureManager.EncodeSurface(surface),
             MarchA      = new Vector4(s.HitEpsilon, s.MaxDistance, s.NormalEpsilon, s.ShadowSoftness),
-            MarchB      = new Vector4(s.AOStepDistance, s.AOIntensity, 0f, 0f),
+            MarchB = MetalSurfaceTextureManager.EncodeMarchB(s.AOStepDistance, s.AOIntensity),
             MarchI0     = s.MaxSteps,
             MarchI1     = s.ShadowSteps,
             MarchI2     = s.AOSamples,
@@ -361,23 +364,10 @@ public sealed class MetalKleinianRenderer : IDisposable
     // -------------------------------------------------------------------------
 
     private static MTLBuffer UploadStruct<T>(MTLDevice device, T value) where T : struct
-    {
-        int size = Marshal.SizeOf<T>();
-        var buf = device.NewBuffer((ulong)size, MTLResourceOptions.ResourceStorageModeShared);
-        Marshal.StructureToPtr(value, buf.Contents, false);
-        return buf;
-    }
+        => MetalBufferIO.UploadStruct(device, value);
 
-    private static unsafe float[] ReadFloat4Buffer(MTLBuffer buf, int count)
-    {
-        var result = new float[count * 4];
-        fixed (float* dst = result)
-        {
-            Buffer.MemoryCopy((void*)buf.Contents, dst,
-                (long)result.Length * sizeof(float), (long)result.Length * sizeof(float));
-        }
-        return result;
-    }
+    private static float[] ReadFloat4Buffer(MTLBuffer buf, int count)
+        => MetalBufferIO.ReadFloat4Buffer(buf, count);
 
     private static string LoadEmbeddedMsl(string filename)
     {

@@ -289,6 +289,90 @@ public static class Program
             }
         }
 
+        if (args[0] is "metal-surface-texture-smoke")
+        {
+            if (!OperatingSystem.IsMacOS())
+            {
+                Console.Error.WriteLine("metal-surface-texture-smoke requires macOS.");
+                return 1;
+            }
+            if (args.Length < 2)
+            {
+                Console.Error.WriteLine("Usage: parsec metal-surface-texture-smoke <imagePath> [width] [height] [outDir]");
+                return 2;
+            }
+            try
+            {
+                string imagePath = args[1];
+                int w = args.Length > 2 ? int.Parse(args[2]) : 512;
+                int h = args.Length > 3 ? int.Parse(args[3]) : w;
+                string outDir = args.Length > 4 ? args[4] : Path.Combine(Path.GetDirectoryName(ResolveOutputPath("x"))!, "surface-texture-smoke");
+                Directory.CreateDirectory(outDir);
+
+                if (!TryLoadSurfaceTextureImage(imagePath, out var bytes, out int texW, out int texH, out int rowBytes, out var loadError))
+                {
+                    Console.Error.WriteLine(loadError);
+                    return 1;
+                }
+
+                Console.WriteLine($"Metal surface-texture smoke — Mandelbox at {w}x{h}");
+                Console.WriteLine($"  texture: {Path.GetFileName(imagePath)} ({texW}x{texH})");
+
+                using var renderer = new MetalMandelboxRenderer();
+                Console.WriteLine($"  IsAvailable: {renderer.IsAvailable}");
+                if (!renderer.IsAvailable)
+                {
+                    Console.Error.WriteLine("Metal backend not available.");
+                    return 1;
+                }
+
+                var camera = new Camera3D(
+                    new Vector3(0f, 3f, 12f),
+                    Vector3.Zero,
+                    Vector3.UnitY,
+                    MathF.PI / 4f,
+                    (float)w / h);
+
+                var fractal = new MandelboxParams();
+                var settings = new RaymarchSettings();
+                var palette = PaletteParams.Default;
+                var bg = new Color(0.05f, 0.05f, 0.08f);
+                var sf = new Color(0.6f, 0.6f, 0.6f);
+                var light = Vector3.Normalize(new Vector3(1f, 2f, 1.5f));
+
+                MetalSurfaceTextureManager.ClearImage();
+                MetalSurfaceTextureManager.SetControls(enabled: false, blend: 0f, scale: 1f);
+                uint[] baseline = renderer.RenderMandelbox(fractal, camera, w, h, settings, bg, sf, light, palette);
+
+                MetalSurfaceTextureManager.SetImage(bytes!, texW, texH, rowBytes);
+                MetalSurfaceTextureManager.SetControls(enabled: true, blend: 0.85f, scale: 1.25f);
+                uint[] textured = renderer.RenderMandelbox(fractal, camera, w, h, settings, bg, sf, light, palette);
+
+                string baselinePath = Path.Combine(outDir, "mandelbox_base.png");
+                string texturedPath = Path.Combine(outDir, "mandelbox_textured.png");
+                SaveUintPixels(baseline, w, h, baselinePath);
+                SaveUintPixels(textured, w, h, texturedPath);
+
+                var stats = ComparePixelBuffers(baseline, textured);
+                Console.WriteLine($"  changed pixels: {stats.changedPixels}/{baseline.Length}");
+                Console.WriteLine($"  mean abs channel delta: {stats.meanAbsDelta:F2}");
+                Console.WriteLine($"  -> {baselinePath}");
+                Console.WriteLine($"  -> {texturedPath}");
+                return stats.changedPixels > 0 ? 0 : 1;
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"metal-surface-texture-smoke FAILED: {ex.Message}");
+                if (ex.StackTrace is not null) Console.Error.WriteLine(ex.StackTrace);
+                return 1;
+            }
+            finally
+            {
+                MetalSurfaceTextureManager.ClearImage();
+                MetalSurfaceTextureManager.SetControls(enabled: false, blend: 0f, scale: 1f);
+            }
+        }
+
         if (args[0] is "metal-rotbox-smoke")
         {
             if (!OperatingSystem.IsMacOS())
@@ -1304,6 +1388,82 @@ public static class Program
                 Console.Error.WriteLine($"GPU render FAILED: {ex.Message}");
                 if (ex.StackTrace is not null) Console.Error.WriteLine(ex.StackTrace);
                 return 1;
+            }
+        }
+
+        if (args[0] is "gpu-surface-texture-smoke")
+        {
+            if (args.Length < 2)
+            {
+                Console.Error.WriteLine("Usage: parsec gpu-surface-texture-smoke <imagePath> [width] [height] [outDir]");
+                return 2;
+            }
+            try
+            {
+                string imagePath = args[1];
+                int w = args.Length > 2 ? int.Parse(args[2]) : 512;
+                int h = args.Length > 3 ? int.Parse(args[3]) : w;
+                string outDir = args.Length > 4 ? args[4] : Path.Combine(Path.GetDirectoryName(ResolveOutputPath("x"))!, "gpu-surface-texture-smoke");
+                Directory.CreateDirectory(outDir);
+
+                if (!TryLoadSurfaceTextureImage(imagePath, out var bytes, out int texW, out int texH, out int rowBytes, out var loadError))
+                {
+                    Console.Error.WriteLine(loadError);
+                    return 1;
+                }
+
+                using var ctx = new HeadlessGLContext();
+                using var pipeline = new RaymarchPipeline(ctx.Gl);
+                using var renderer = new GpuMandelboxRenderer(ctx.Gl, pipeline);
+
+                Console.WriteLine($"GPU surface-texture smoke — Mandelbox at {w}x{h}");
+                Console.WriteLine(ctx.Info());
+                Console.WriteLine($"  texture: {Path.GetFileName(imagePath)} ({texW}x{texH})");
+
+                var camera = new Camera3D(
+                    new Vector3(0f, 3f, 12f),
+                    Vector3.Zero,
+                    Vector3.UnitY,
+                    MathF.PI / 4f,
+                    (float)w / h);
+
+                var fractal = new MandelboxParams();
+                var settings = new RaymarchSettings();
+                var palette = PaletteParams.Default;
+                var bg = new Color(0.05f, 0.05f, 0.08f);
+                var sf = new Color(0.6f, 0.6f, 0.6f);
+                var light = Vector3.Normalize(new Vector3(1f, 2f, 1.5f));
+
+                GpuSurfaceTextureManager.ClearImage();
+                GpuSurfaceTextureManager.SetControls(enabled: false, blend: 0f, scale: 1f);
+                uint[] baseline = renderer.RenderToBuffer(fractal, camera, w, h, settings, bg, sf, light, palette);
+
+                GpuSurfaceTextureManager.SetImage(bytes!, texW, texH, rowBytes);
+                GpuSurfaceTextureManager.SetControls(enabled: true, blend: 0.85f, scale: 1.25f);
+                uint[] textured = renderer.RenderToBuffer(fractal, camera, w, h, settings, bg, sf, light, palette);
+
+                string baselinePath = Path.Combine(outDir, "mandelbox_base.png");
+                string texturedPath = Path.Combine(outDir, "mandelbox_textured.png");
+                SaveUintPixels(baseline, w, h, baselinePath);
+                SaveUintPixels(textured, w, h, texturedPath);
+
+                var stats = ComparePixelBuffers(baseline, textured);
+                Console.WriteLine($"  changed pixels: {stats.changedPixels}/{baseline.Length}");
+                Console.WriteLine($"  mean abs channel delta: {stats.meanAbsDelta:F2}");
+                Console.WriteLine($"  -> {baselinePath}");
+                Console.WriteLine($"  -> {texturedPath}");
+                return stats.changedPixels > 0 ? 0 : 1;
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"gpu-surface-texture-smoke FAILED: {ex.Message}");
+                if (ex.StackTrace is not null) Console.Error.WriteLine(ex.StackTrace);
+                return 1;
+            }
+            finally
+            {
+                GpuSurfaceTextureManager.ClearImage();
+                GpuSurfaceTextureManager.SetControls(enabled: false, blend: 0f, scale: 1f);
             }
         }
 
@@ -5349,6 +5509,259 @@ public static class Program
             catch (Exception ex) { Console.Error.WriteLine($"metal-m9d-animated-burning FAILED: {ex.Message}\n{ex.StackTrace}"); return 1; }
         }
 
+        // metal-burning-texture-mp4 [imagePath] [duration] [outFile]
+        // BurningShip helical fly-in with surface texture + Power animation (1.8→2.8 sweep).
+        if (args[0] == "metal-burning-texture-mp4")
+        {
+            if (!OperatingSystem.IsMacOS()) { Console.Error.WriteLine("metal-burning-texture-mp4 requires macOS."); return 1; }
+            try
+            {
+                string imagePath = args.Length >= 2 ? args[1] : "/tmp/tex-test/testpattern.png";
+                double duration  = args.Length >= 3 && double.TryParse(args[2], out var dbt) ? dbt : 10.0;
+                string outFile   = args.Length >= 4 ? args[3] : ResolveOutputPath("burning_texture.mp4");
+                Directory.CreateDirectory(Path.GetDirectoryName(outFile)!);
+
+                const int   fps    = 24;
+                const int   w      = 320;
+                const int   h      = 180;
+                const float fov    = MathF.PI / 4f;
+                const float aspect = 16f / 9f;
+                int totalFrames = (int)Math.Ceiling(duration * fps);
+
+                if (!TryLoadSurfaceTextureImage(imagePath, out var texBytes, out int texW, out int texH, out int texRowBytes, out var loadError))
+                { Console.Error.WriteLine(loadError); return 1; }
+
+                Console.WriteLine($"metal-burning-texture-mp4 — BurningShip surface texture + Power morph, {duration:F1}s @ {fps} fps ({totalFrames} frames, {w}×{h})");
+                Console.WriteLine($"  texture: {Path.GetFileName(imagePath)} ({texW}×{texH})  Power: 1.8→2.8 (1.5 cycles)");
+
+                using var renderer = new MetalBurningShipRenderer();
+                if (!renderer.IsAvailable) { Console.Error.WriteLine("Metal unavailable."); return 1; }
+
+                var settings = new RaymarchSettings(
+                    MaxSteps: 96, HitEpsilon: 1.5e-3f, MaxDistance: 25f, NormalEpsilon: 2e-3f,
+                    EnableSoftShadows: true, ShadowSteps: 32, ShadowSoftness: 10f,
+                    EnableAmbientOcclusion: true, AOSamples: 4, AOStepDistance: 0.05f, AOIntensity: 0.9f,
+                    HeroSamples: 1, EnableReflections: false, ReflectionBounces: 0, Gloss: 0f, F0: 0f, LightIntensity: 1.2f);
+                var bg      = new Color(0.05f, 0.05f, 0.08f);
+                var surface = new Color(0.70f, 0.45f, 0.25f);
+                var light   = Vector3.Normalize(new Vector3(1.5f, 2.0f, 1.0f));
+                var palette = PaletteParams.Default;
+                var post    = new PostProcessParams { Brightness = 1.05f, Contrast = 1.1f, Saturation = 1.2f, Gamma = 2.2f };
+
+                const float radiusStart = 6.0f;
+                const float radiusEnd   = 2.5f;
+                const float elevStart   = 2.0f;
+                const float elevEnd     = 0.5f;
+                const float turns       = 1.5f;
+
+                MetalSurfaceTextureManager.SetImage(texBytes!, texW, texH, texRowBytes);
+                MetalSurfaceTextureManager.SetControls(enabled: true, blend: 0.80f, scale: 1.0f, mode: 1);
+
+                var frameDir = Path.Combine(Path.GetTempPath(), $"parsec-btex-{Guid.NewGuid():N}");
+                Directory.CreateDirectory(frameDir);
+
+                try
+                {
+                    for (int fi = 0; fi < totalFrames; fi++)
+                    {
+                        float t      = totalFrames > 1 ? fi / (float)(totalFrames - 1) : 0f;
+                        float smooth = t * t * (3f - 2f * t);
+                        float r      = radiusStart + (radiusEnd - radiusStart) * smooth;
+                        float elev   = elevStart   + (elevEnd   - elevStart)   * smooth;
+                        float theta  = 2f * MathF.PI * turns * t;
+                        var   pos    = new Vector3(MathF.Cos(theta) * r, elev, MathF.Sin(theta) * r);
+                        var   cam    = new Camera3D(pos, Vector3.Zero, Vector3.UnitY, fov, aspect);
+
+                        // Animate Power 1.8→2.8 with 1.5 sinusoidal cycles so the geometry deforms
+                        // visibly while the texture stays locked to the surface.
+                        float power  = 2.3f + 0.5f * MathF.Sin(2f * MathF.PI * 1.5f * t);
+                        var   fractal = new BurningShipParams { Power = power };
+
+                        uint[] pixels = renderer.RenderBurningShip(fractal, cam, w, h, settings, bg, surface, light, palette, post);
+
+                        var bmpInfo = new SKImageInfo(w, h, SKColorType.Rgba8888, SKAlphaType.Premul);
+                        var bmp     = new SKBitmap(bmpInfo);
+                        var bmpBytes = new byte[pixels.Length * 4];
+                        Buffer.BlockCopy(pixels, 0, bmpBytes, 0, bmpBytes.Length);
+                        Marshal.Copy(bmpBytes, 0, bmp.GetPixels(), bmpBytes.Length);
+                        ImageOutput.SavePng(bmp, Path.Combine(frameDir, $"frame_{fi:D4}.png"));
+                        bmp.Dispose();
+
+                        if (fi % fps == 0 || fi == totalFrames - 1)
+                            Console.WriteLine($"  frame {fi + 1,4}/{totalFrames}  r={r:F2}  power={power:F2}");
+                        else
+                            Console.Write($"\r  frame {fi + 1}/{totalFrames}");
+                    }
+
+                    string ffArgs = $"-y -framerate {fps} -i \"{Path.Combine(frameDir, "frame_%04d.png")}\" " +
+                                    $"-c:v libx264 -crf 18 -preset fast -pix_fmt yuv420p \"{outFile}\"";
+                    Console.Write("\n  ffmpeg...");
+                    var proc = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("ffmpeg", ffArgs)
+                        { RedirectStandardError = true, UseShellExecute = false })!;
+                    proc.StandardError.ReadToEnd();
+                    proc.WaitForExit();
+                    if (proc.ExitCode != 0) { Console.Error.WriteLine(" ffmpeg failed."); return 1; }
+                    Console.WriteLine($" OK → {outFile}");
+                }
+                finally
+                {
+                    Directory.Delete(frameDir, recursive: true);
+                    MetalSurfaceTextureManager.ClearImage();
+                    MetalSurfaceTextureManager.SetControls(enabled: false, blend: 0f, scale: 1f, mode: 0);
+                }
+
+                return 0;
+            }
+            catch (Exception ex) { Console.Error.WriteLine($"metal-burning-texture-mp4 FAILED: {ex.Message}\n{ex.StackTrace}"); return 1; }
+        }
+
+        // metal-burning-video-texture [videoPath] [duration] [outFile]
+        // BurningShip orbit-trap fly-in with a video as the surface texture.
+        // If videoPath is omitted, generates a colorful animated test pattern via ffmpeg.
+        // Uses UpdateImage (ReplaceRegion) to update texture in-place each frame — no per-frame realloc.
+        if (args[0] == "metal-burning-video-texture")
+        {
+            if (!OperatingSystem.IsMacOS()) { Console.Error.WriteLine("metal-burning-video-texture requires macOS."); return 1; }
+            try
+            {
+                string videoPath = args.Length >= 2 ? args[1] : "";
+                double duration  = args.Length >= 3 && double.TryParse(args[2], out var dvt) ? dvt : 10.0;
+                string outFile   = args.Length >= 4 ? args[3] : ResolveOutputPath("burning_video_texture.mp4");
+                Directory.CreateDirectory(Path.GetDirectoryName(outFile)!);
+
+                const int   fps    = 24;
+                const int   w      = 320;
+                const int   h      = 180;
+                const float fov    = MathF.PI / 4f;
+                const float aspect = 16f / 9f;
+                int totalFrames = (int)Math.Ceiling(duration * fps);
+
+                // Auto-generate a colorful animated test source if no video supplied.
+                if (string.IsNullOrEmpty(videoPath))
+                {
+                    videoPath = Path.Combine(Path.GetTempPath(), "parsec-vtex-testsrc.mp4");
+                    Console.Write("  No video supplied — generating animated test-pattern texture...");
+                    var gen = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("ffmpeg",
+                        $"-y -f lavfi -i \"testsrc2=size=320x180:rate=24\" -t 5 " +
+                        $"-c:v libx264 -crf 18 -preset fast -pix_fmt yuv420p \"{videoPath}\"")
+                        { RedirectStandardError = true, UseShellExecute = false })!;
+                    gen.StandardError.ReadToEnd();
+                    gen.WaitForExit();
+                    if (gen.ExitCode != 0) { Console.Error.WriteLine(" ffmpeg failed."); return 1; }
+                    Console.WriteLine(" done.");
+                }
+
+                // Extract video frames as PNGs at render fps, cap texture width at 512 px.
+                var texDir = Path.Combine(Path.GetTempPath(), $"parsec-vtex-{Guid.NewGuid():N}");
+                Directory.CreateDirectory(texDir);
+                Console.Write("  Extracting texture frames... ");
+                var extract = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("ffmpeg",
+                    $"-y -i \"{videoPath}\" -vf \"fps={fps},scale='min(512,iw)':-2\" " +
+                    $"\"{Path.Combine(texDir, "frame_%06d.png")}\"")
+                    { RedirectStandardError = true, UseShellExecute = false })!;
+                extract.StandardError.ReadToEnd();
+                extract.WaitForExit();
+
+                var texPaths = Directory.GetFiles(texDir, "frame_*.png").OrderBy(f => f).ToArray();
+                Console.WriteLine($"{texPaths.Length} frames");
+                if (texPaths.Length == 0) { Console.Error.WriteLine("No frames extracted from video."); return 1; }
+
+                // Load all texture frames into memory.
+                Console.Write("  Loading texture frames... ");
+                var texFrames = new List<(byte[] Bytes, int W, int H, int RowBytes)>(texPaths.Length);
+                foreach (var p in texPaths)
+                    if (TryLoadSurfaceTextureImage(p, out var fb, out int fw, out int fh, out int frb, out _))
+                        texFrames.Add((fb!, fw, fh, frb));
+                Directory.Delete(texDir, recursive: true);
+                Console.WriteLine($"{texFrames.Count} × {texFrames[0].W}×{texFrames[0].H}");
+                if (texFrames.Count == 0) { Console.Error.WriteLine("Failed to load texture frames."); return 1; }
+
+                Console.WriteLine($"metal-burning-video-texture — {duration:F1}s @ {fps}fps ({totalFrames} frames, {w}×{h})");
+                Console.WriteLine($"  source: {Path.GetFileName(videoPath)}, {texFrames.Count} tex frames, orbit-trap mode, loops={totalFrames / texFrames.Count + 1}×");
+
+                using var renderer = new MetalBurningShipRenderer();
+                if (!renderer.IsAvailable) { Console.Error.WriteLine("Metal unavailable."); return 1; }
+
+                var settings = new RaymarchSettings(
+                    MaxSteps: 96, HitEpsilon: 1.5e-3f, MaxDistance: 25f, NormalEpsilon: 2e-3f,
+                    EnableSoftShadows: true, ShadowSteps: 32, ShadowSoftness: 10f,
+                    EnableAmbientOcclusion: true, AOSamples: 4, AOStepDistance: 0.05f, AOIntensity: 0.9f,
+                    HeroSamples: 1, EnableReflections: false, ReflectionBounces: 0, Gloss: 0f, F0: 0f, LightIntensity: 1.2f);
+                var bg      = new Color(0.05f, 0.05f, 0.08f);
+                var surface = new Color(0.70f, 0.45f, 0.25f);
+                var light   = Vector3.Normalize(new Vector3(1.5f, 2.0f, 1.0f));
+                var palette = PaletteParams.Default;
+                var post    = new PostProcessParams { Brightness = 1.05f, Contrast = 1.1f, Saturation = 1.2f, Gamma = 2.2f };
+
+                const float radiusStart = 6.0f, radiusEnd = 2.5f;
+                const float elevStart   = 2.0f, elevEnd   = 0.5f;
+                const float turns       = 1.5f;
+
+                var frameDir = Path.Combine(Path.GetTempPath(), $"parsec-bvtex-{Guid.NewGuid():N}");
+                Directory.CreateDirectory(frameDir);
+
+                try
+                {
+                    // Prime the texture cache with the first frame; subsequent frames use UpdateImage.
+                    var (f0b, f0w, f0h, f0r) = texFrames[0];
+                    MetalSurfaceTextureManager.SetImage(f0b, f0w, f0h, f0r);
+                    MetalSurfaceTextureManager.SetControls(enabled: true, blend: 0.85f, scale: 1.0f, mode: 1);
+
+                    for (int fi = 0; fi < totalFrames; fi++)
+                    {
+                        float t      = totalFrames > 1 ? fi / (float)(totalFrames - 1) : 0f;
+                        float smooth = t * t * (3f - 2f * t);
+                        float r      = radiusStart + (radiusEnd - radiusStart) * smooth;
+                        float elev   = elevStart   + (elevEnd   - elevStart)   * smooth;
+                        float theta  = 2f * MathF.PI * turns * t;
+                        var   pos    = new Vector3(MathF.Cos(theta) * r, elev, MathF.Sin(theta) * r);
+                        var   cam    = new Camera3D(pos, Vector3.Zero, Vector3.UnitY, fov, aspect);
+                        float power  = 2.3f + 0.5f * MathF.Sin(2f * MathF.PI * 1.5f * t);
+                        var   fractal = new BurningShipParams { Power = power };
+
+                        // Advance video texture — UpdateImage replaces pixels in the cached MTLTexture
+                        // without reallocation; first frame already set above.
+                        var (fb, fw, fh, frb) = texFrames[fi % texFrames.Count];
+                        if (fi > 0) MetalSurfaceTextureManager.UpdateImage(fb, fw, fh, frb);
+
+                        uint[] pixels = renderer.RenderBurningShip(fractal, cam, w, h, settings, bg, surface, light, palette, post);
+
+                        var bmpInfo  = new SKImageInfo(w, h, SKColorType.Rgba8888, SKAlphaType.Premul);
+                        var bmp      = new SKBitmap(bmpInfo);
+                        var bmpBytes = new byte[pixels.Length * 4];
+                        Buffer.BlockCopy(pixels, 0, bmpBytes, 0, bmpBytes.Length);
+                        Marshal.Copy(bmpBytes, 0, bmp.GetPixels(), bmpBytes.Length);
+                        ImageOutput.SavePng(bmp, Path.Combine(frameDir, $"frame_{fi:D4}.png"));
+                        bmp.Dispose();
+
+                        if (fi % fps == 0 || fi == totalFrames - 1)
+                            Console.WriteLine($"  frame {fi + 1,4}/{totalFrames}  r={r:F2}  power={power:F2}  tex={fi % texFrames.Count}");
+                        else
+                            Console.Write($"\r  frame {fi + 1}/{totalFrames}");
+                    }
+
+                    string ffArgs = $"-y -framerate {fps} -i \"{Path.Combine(frameDir, "frame_%04d.png")}\" " +
+                                    $"-c:v libx264 -crf 18 -preset fast -pix_fmt yuv420p \"{outFile}\"";
+                    Console.Write("\n  ffmpeg...");
+                    var proc = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("ffmpeg", ffArgs)
+                        { RedirectStandardError = true, UseShellExecute = false })!;
+                    proc.StandardError.ReadToEnd();
+                    proc.WaitForExit();
+                    if (proc.ExitCode != 0) { Console.Error.WriteLine(" ffmpeg failed."); return 1; }
+                    Console.WriteLine($" OK → {outFile}");
+                }
+                finally
+                {
+                    Directory.Delete(frameDir, recursive: true);
+                    MetalSurfaceTextureManager.ClearImage();
+                    MetalSurfaceTextureManager.SetControls(enabled: false, blend: 0f, scale: 1f, mode: 0);
+                }
+
+                return 0;
+            }
+            catch (Exception ex) { Console.Error.WriteLine($"metal-burning-video-texture FAILED: {ex.Message}\n{ex.StackTrace}"); return 1; }
+        }
+
         // metal-m9d-check [duration] [outDir]
         // M9d smoke test: verifies SonificationMode enum and DirectOrbit export routing.
         // Renders Mandelbox frames, synthesises via DirectOrbitSynth (same code as
@@ -5496,6 +5909,79 @@ public static class Program
         ImageOutput.SavePng(bmp, path);
     }
 
+    private static (int changedPixels, float meanAbsDelta) ComparePixelBuffers(uint[] a, uint[] b)
+    {
+        if (a.Length != b.Length)
+            throw new ArgumentException("Pixel buffers must have the same length.");
+
+        long totalAbsDelta = 0;
+        int changedPixels = 0;
+        for (int i = 0; i < a.Length; i++)
+        {
+            if (a[i] == b[i])
+                continue;
+
+            changedPixels++;
+            totalAbsDelta += Math.Abs((int)(a[i] & 0xFF) - (int)(b[i] & 0xFF));
+            totalAbsDelta += Math.Abs((int)((a[i] >> 8) & 0xFF) - (int)((b[i] >> 8) & 0xFF));
+            totalAbsDelta += Math.Abs((int)((a[i] >> 16) & 0xFF) - (int)((b[i] >> 16) & 0xFF));
+        }
+
+        float meanAbsDelta = a.Length == 0 ? 0f : totalAbsDelta / (a.Length * 3f);
+        return (changedPixels, meanAbsDelta);
+    }
+
+    private static bool TryLoadSurfaceTextureImage(
+        string path,
+        out byte[]? bytes,
+        out int width,
+        out int height,
+        out int rowBytes,
+        out string? error)
+    {
+        bytes = null;
+        width = 0;
+        height = 0;
+        rowBytes = 0;
+        error = null;
+
+        using var codec = SKCodec.Create(path);
+        if (codec is null)
+        {
+            error = "Failed to decode image file.";
+            return false;
+        }
+
+        var info = new SKImageInfo(codec.Info.Width, codec.Info.Height, SKColorType.Rgba8888, SKAlphaType.Unpremul);
+        using var bitmap = new SKBitmap(info);
+        var result = codec.GetPixels(info, bitmap.GetPixels());
+        if (result != SKCodecResult.Success && result != SKCodecResult.IncompleteInput)
+        {
+            error = $"Image decode failed ({result}).";
+            return false;
+        }
+
+        int sourceByteCount = checked(bitmap.RowBytes * bitmap.Height);
+        var sourceBytes = new byte[sourceByteCount];
+        Marshal.Copy(bitmap.GetPixels(), sourceBytes, 0, sourceByteCount);
+
+        rowBytes = checked(bitmap.Width * 4);
+        bytes = new byte[checked(rowBytes * bitmap.Height)];
+        if (bitmap.RowBytes == rowBytes)
+        {
+            Buffer.BlockCopy(sourceBytes, 0, bytes, 0, bytes.Length);
+        }
+        else
+        {
+            for (int y = 0; y < bitmap.Height; y++)
+                Buffer.BlockCopy(sourceBytes, y * bitmap.RowBytes, bytes, y * rowBytes, rowBytes);
+        }
+
+        width = bitmap.Width;
+        height = bitmap.Height;
+        return true;
+    }
+
     /// <summary>
     /// Output PNGs land next to the CLI executable, in an <c>outputs/</c> subdirectory.
     /// </summary>
@@ -5517,7 +6003,11 @@ public static class Program
         Console.WriteLine("  parsec gpu-smoke      Phase-1 GPU plumbing test");
         Console.WriteLine("  parsec gpu-de-validate  Phase-2a GPU DE validation");
         Console.WriteLine("  parsec gpu-render <name> [w] [h]   GPU raymarch render");
+        Console.WriteLine("  parsec gpu-surface-texture-smoke <image> [w] [h] [outDir]  OpenGL texture projection A/B render");
         Console.WriteLine("  parsec metal-smoke [w] [h]            Metal Mandelbox spike test (macOS only)");
+        Console.WriteLine("  parsec metal-surface-texture-smoke <image> [w] [h] [outDir]  Metal texture projection A/B render");
+        Console.WriteLine("  parsec metal-burning-texture-mp4 [image] [duration] [out.mp4]  BurningShip surface texture fly-in (macOS)");
+        Console.WriteLine("  parsec metal-burning-video-texture [video] [duration] [out.mp4]  BurningShip orbit-trap video texture fly-in (macOS)");
         Console.WriteLine("  parsec metal-bulb-smoke [w] [h]      Metal Mandelbulb smoke test (macOS only)");
         Console.WriteLine("  parsec metal-rotbox-smoke [w] [h]    Metal RotBox smoke test (macOS only)");
         Console.WriteLine("  parsec metal-kifs-smoke [w] [h]      Metal KIFS smoke test (macOS only)");
