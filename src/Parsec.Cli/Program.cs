@@ -5762,6 +5762,114 @@ public static class Program
             catch (Exception ex) { Console.Error.WriteLine($"metal-burning-video-texture FAILED: {ex.Message}\n{ex.StackTrace}"); return 1; }
         }
 
+        // metal-fractal-feedback [duration] [out.mp4]
+        // Feedback loop: each rendered frame is fed back as the surface texture for the next frame.
+        // The fractal surface becomes a recursive mirror of itself, building up ghostly depth.
+        // Mandelbox, triplanar mode, slow camera orbit so the pattern evolves rather than fixing.
+        // Blend ramps 0→0.45 over first 3 s, then holds. Scale slowly zooms the texture 0.8→1.6
+        // so the feedback spiral tightens. Frame 0 bootstraps with no texture; frame 1+ uses
+        // the previous output as the texture input.
+        if (args[0] == "metal-fractal-feedback")
+        {
+            if (!OperatingSystem.IsMacOS()) { Console.Error.WriteLine("metal-fractal-feedback requires macOS."); return 1; }
+            try
+            {
+                double duration   = args.Length >= 2 && double.TryParse(args[1], out var dfd) ? dfd : 12.0;
+                string outFile    = args.Length >= 3 ? args[2] : ResolveOutputPath("fractal_feedback.mp4");
+                Directory.CreateDirectory(Path.GetDirectoryName(outFile)!);
+
+                const int   fps    = 24;
+                const int   w      = 320;
+                const int   h      = 180;
+                const float fov    = MathF.PI / 4f;
+                const float aspect = 16f / 9f;
+                int totalFrames    = (int)Math.Ceiling(duration * fps);
+
+                Console.WriteLine($"metal-fractal-feedback — Mandelbox recursive self-texture, {duration:F1}s @ {fps}fps ({totalFrames} frames, {w}×{h})");
+
+                using var renderer = new MetalMandelboxRenderer();
+                if (!renderer.IsAvailable) { Console.Error.WriteLine("Metal unavailable."); return 1; }
+
+                var fractal  = new MandelboxParams();
+                var settings = new RaymarchSettings(
+                    MaxSteps: 80, HitEpsilon: 1.5e-3f, MaxDistance: 25f, NormalEpsilon: 2e-3f,
+                    EnableSoftShadows: true, ShadowSteps: 24, ShadowSoftness: 8f,
+                    EnableAmbientOcclusion: true, AOSamples: 3, AOStepDistance: 0.06f, AOIntensity: 0.8f,
+                    HeroSamples: 1, EnableReflections: false, ReflectionBounces: 0, Gloss: 0f, F0: 0f, LightIntensity: 1.1f);
+                var bg      = new Color(0.04f, 0.04f, 0.07f);
+                var surface = new Color(0.6f, 0.55f, 0.5f);
+                var light   = Vector3.Normalize(new Vector3(1.2f, 2f, 1f));
+                var palette = PaletteParams.Default;
+
+                string frameDir = Path.Combine(Path.GetDirectoryName(outFile)!, "feedback-frames");
+                Directory.CreateDirectory(frameDir);
+
+                MetalSurfaceTextureManager.ClearImage();
+                MetalSurfaceTextureManager.SetControls(enabled: false, blend: 0f, scale: 1f, mode: 0);
+
+                byte[]? feedbackBytes = null;
+                int rowBytes = w * 4;
+
+                for (int i = 0; i < totalFrames; i++)
+                {
+                    float t      = (float)i / fps;
+                    float tNorm  = (float)i / totalFrames;
+
+                    // Slow full orbit so feedback evolves continuously
+                    float angle = tNorm * 2f * MathF.PI;
+                    float camR  = 9.5f;
+                    float camX  = camR * MathF.Sin(angle);
+                    float camZ  = camR * MathF.Cos(angle);
+                    float camY  = 1.8f + MathF.Sin(angle * 0.7f) * 1.8f;
+                    var camera = new Camera3D(
+                        new Vector3(camX, camY, camZ),
+                        Vector3.Zero,
+                        Vector3.UnitY,
+                        fov, aspect);
+
+                    // Blend ramps 0→0.45 in first 3 s, texture scale spirals inward 0.8→1.6
+                    float blend = Math.Min(t / 3.0f, 1.0f) * 0.45f;
+                    float scale = 0.8f + tNorm * 0.8f;
+
+                    if (feedbackBytes is not null)
+                        MetalSurfaceTextureManager.UpdateImage(feedbackBytes, w, h, rowBytes);
+
+                    MetalSurfaceTextureManager.SetControls(enabled: feedbackBytes is not null, blend: blend, scale: scale, mode: 0);
+
+                    uint[] pixels = renderer.RenderMandelbox(fractal, camera, w, h, settings, bg, surface, light, palette);
+
+                    // Convert RGBA8 uint[] → byte[] for next frame's texture and PNG save
+                    feedbackBytes ??= new byte[pixels.Length * 4];
+                    Buffer.BlockCopy(pixels, 0, feedbackBytes, 0, feedbackBytes.Length);
+                    if (i == 0)
+                        MetalSurfaceTextureManager.SetImage(feedbackBytes, w, h, rowBytes);
+
+                    // Write PNG frame
+                    string framePath = Path.Combine(frameDir, $"frame_{i:D5}.png");
+                    var info = new SKImageInfo(w, h, SKColorType.Rgba8888, SKAlphaType.Premul);
+                    using var bmp = new SKBitmap(info);
+                    Marshal.Copy(feedbackBytes, 0, bmp.GetPixels(), feedbackBytes.Length);
+                    ImageOutput.SavePng(bmp, framePath);
+
+                    if (i % 24 == 0 || i == totalFrames - 1)
+                        Console.WriteLine($"  frame {i + 1}/{totalFrames}  blend={blend:F3}  scale={scale:F2}  t={t:F1}s");
+                }
+
+                Console.WriteLine($"  muxing to {outFile} ...");
+                var ffArgs = $"-y -framerate {fps} -i \"{frameDir}/frame_%05d.png\" -c:v libx264 -preset fast -crf 18 -pix_fmt yuv420p \"{outFile}\"";
+                var proc = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("ffmpeg", ffArgs)
+                    { RedirectStandardError = true, UseShellExecute = false })!;
+                proc.WaitForExit();
+                if (proc.ExitCode != 0) { Console.Error.WriteLine("ffmpeg failed"); return 1; }
+                Directory.Delete(frameDir, recursive: true);
+                MetalSurfaceTextureManager.ClearImage();
+                MetalSurfaceTextureManager.SetControls(enabled: false, blend: 0f, scale: 1f, mode: 0);
+                Console.WriteLine($"  done → {outFile}");
+                return 0;
+            }
+            catch (Exception ex) { Console.Error.WriteLine($"metal-fractal-feedback FAILED: {ex.Message}\n{ex.StackTrace}"); return 1; }
+        }
+
         // metal-m9d-check [duration] [outDir]
         // M9d smoke test: verifies SonificationMode enum and DirectOrbit export routing.
         // Renders Mandelbox frames, synthesises via DirectOrbitSynth (same code as
@@ -6008,6 +6116,7 @@ public static class Program
         Console.WriteLine("  parsec metal-surface-texture-smoke <image> [w] [h] [outDir]  Metal texture projection A/B render");
         Console.WriteLine("  parsec metal-burning-texture-mp4 [image] [duration] [out.mp4]  BurningShip surface texture fly-in (macOS)");
         Console.WriteLine("  parsec metal-burning-video-texture [video] [duration] [out.mp4]  BurningShip orbit-trap video texture fly-in (macOS)");
+        Console.WriteLine("  parsec metal-fractal-feedback [duration] [out.mp4]  Mandelbox recursive self-texture feedback loop (macOS)");;
         Console.WriteLine("  parsec metal-bulb-smoke [w] [h]      Metal Mandelbulb smoke test (macOS only)");
         Console.WriteLine("  parsec metal-rotbox-smoke [w] [h]    Metal RotBox smoke test (macOS only)");
         Console.WriteLine("  parsec metal-kifs-smoke [w] [h]      Metal KIFS smoke test (macOS only)");
