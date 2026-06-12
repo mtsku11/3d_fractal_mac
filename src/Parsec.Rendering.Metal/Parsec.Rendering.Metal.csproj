@@ -17,6 +17,10 @@
     <EmbeddedResource Include="Shaders\mandelbulb_telemetry.metal" />
     <EmbeddedResource Include="Shaders\kleinian_telemetry.metal" />
     <EmbeddedResource Include="Shaders\burningship_telemetry.metal" />
+    <EmbeddedResource Include="Shaders\menger_telemetry.metal" />
+    <EmbeddedResource Include="Shaders\apollonian_telemetry.metal" />
+    <EmbeddedResource Include="Shaders\kifs_telemetry.metal" />
+    <EmbeddedResource Include="Shaders\qjbox_telemetry.metal" />
     <EmbeddedResource Include="Shaders\mandelbulb_raymarch.metal" />
     <EmbeddedResource Include="Shaders\rotbox_raymarch.metal" />
     <EmbeddedResource Include="Shaders\kifs_raymarch.metal" />
