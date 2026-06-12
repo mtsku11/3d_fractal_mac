@@ -341,6 +341,9 @@ public partial class MainWindow : Window
         FractalType.Kleinian    => FractalVoice.Kleinian,
         FractalType.BurningShip => FractalVoice.BurningShip,
         FractalType.Apollonian  => FractalVoice.Apollonian,
+        FractalType.Menger      => FractalVoice.Menger,
+        FractalType.Kifs        => FractalVoice.Kifs,
+        FractalType.QJBox       => FractalVoice.QJBox,
         _                       => FractalVoice.Mandelbox,
     };
 

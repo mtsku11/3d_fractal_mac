@@ -424,6 +424,14 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
             => _metalKleinianRenderer.RunTelemetryPass(Kleinian.ToParams(), camera, settings),
         FractalType.BurningShip when _metalBurningShipRenderer?.IsAvailable == true
             => _metalBurningShipRenderer.RunTelemetryPass(BurningShip.ToParams(), camera, settings),
+        FractalType.Menger     when _metalMengerRenderer?.IsAvailable == true
+            => _metalMengerRenderer.RunTelemetryPass(Menger.ToParams(), camera, settings),
+        FractalType.Apollonian when _metalApollonianRenderer?.IsAvailable == true
+            => _metalApollonianRenderer.RunTelemetryPass(Apollonian.ToParams(), camera, settings),
+        FractalType.Kifs       when _metalKifsRenderer?.IsAvailable == true
+            => _metalKifsRenderer.RunTelemetryPass(Kifs.ToParams(), camera, settings),
+        FractalType.QJBox      when _metalQJBoxRenderer?.IsAvailable == true
+            => _metalQJBoxRenderer.RunTelemetryPass(QJBox.ToParams(), camera, settings),
         _ => null,
     };
 
@@ -458,6 +466,9 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
     {
         FractalType.Kleinian   => Audio.Sonification.GeometryScale.KleinianLatticeRatio(Kleinian.FixedRadius, Kleinian.MinRadius, Kleinian.Scale),
         FractalType.Mandelbulb => Audio.Sonification.GeometryScale.MandelbulbLatticeRatio(Mandelbulb.Power),
+        FractalType.Menger     => Audio.Sonification.GeometryScale.FoldScaleLatticeRatio(Menger.Scale),
+        FractalType.Kifs       => Audio.Sonification.GeometryScale.FoldScaleLatticeRatio(Kifs.Scale),
+        FractalType.QJBox      => Audio.Sonification.GeometryScale.FoldScaleLatticeRatio(QJBox.Scale),
         _                      => 0f,
     };
 
