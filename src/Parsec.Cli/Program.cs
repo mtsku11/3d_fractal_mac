@@ -5762,13 +5762,144 @@ public static class Program
             catch (Exception ex) { Console.Error.WriteLine($"metal-burning-video-texture FAILED: {ex.Message}\n{ex.StackTrace}"); return 1; }
         }
 
+        // metal-cross-fractal-texture [duration] [out.mp4]
+        // Cross-fractal texture: render a Mandelbrot deep-zoom frame each tick, project it onto
+        // the Mandelbox surface via triplanar mapping. Two renders per frame (2D tex + 3D scene).
+        // Zoom path: Seahorse Valley, radius 1.5→1e-8. Texture res 256×256; scene 320×180.
+        if (args[0] == "metal-cross-fractal-texture")
+        {
+            if (!OperatingSystem.IsMacOS()) { Console.Error.WriteLine("metal-cross-fractal-texture requires macOS."); return 1; }
+            try
+            {
+                double duration = args.Length >= 2 && double.TryParse(args[1], out var dcf) ? dcf : 10.0;
+                string outFile  = args.Length >= 3 ? args[2] : ResolveOutputPath("cross_fractal_texture.mp4");
+                Directory.CreateDirectory(Path.GetDirectoryName(outFile)!);
+
+                const int fps      = 24;
+                const int sceneW   = 320, sceneH = 180;
+                const int texW     = 256, texH   = 256;
+                int totalFrames    = (int)Math.Ceiling(duration * fps);
+
+                // Seahorse Valley — 8 orders of magnitude over the full clip
+                const string centerRe  = "-0.743643887037158704752191506114774";
+                const string centerIm  =  "0.131825904205311970493132056385139";
+                const double startRadius = 1.5;
+                const double endRadius   = 1e-8;
+                double logStart = Math.Log(startRadius);
+                double logEnd   = Math.Log(endRadius);
+
+                Console.WriteLine($"metal-cross-fractal-texture — Mandelbrot→Mandelbox, {duration:F1}s @ {fps}fps ({totalFrames} frames)");
+                Console.WriteLine($"  2D texture: {texW}×{texH}  3D scene: {sceneW}×{sceneH}  zoom radius {startRadius}→{endRadius:e1}");
+
+                using var deepRenderer = new MetalDeepZoomRenderer();
+                if (!deepRenderer.IsAvailable) { Console.Error.WriteLine("Metal deep-zoom backend not available."); return 1; }
+
+                using var sceneRenderer = new MetalMandelboxRenderer();
+                if (!sceneRenderer.IsAvailable) { Console.Error.WriteLine("Metal scene backend not available."); return 1; }
+
+                // Vibrant rainbow cosine palette for the 2D Mandelbrot texture
+                var texPalette = new PaletteParams
+                {
+                    Base      = new Vector3(0.5f, 0.5f, 0.5f),
+                    Amp       = new Vector3(0.5f, 0.5f, 0.5f),
+                    Frequency = 1.2f,
+                    Phase     = new Vector3(0.0f, 0.33f, 0.67f),
+                    TrapScale = 1.0f,
+                    ShellMix  = 0f,
+                };
+                var texBg       = new Color(0.01f, 0.01f, 0.03f);
+                var texSettings = new RaymarchSettings(
+                    MaxSteps: 0, HitEpsilon: 0, MaxDistance: 0, NormalEpsilon: 0,
+                    EnableSoftShadows: false, ShadowSteps: 0, ShadowSoftness: 0,
+                    EnableAmbientOcclusion: false, AOSamples: 0, AOStepDistance: 0, AOIntensity: 0,
+                    HeroSamples: 1,
+                    EnableReflections: false, ReflectionBounces: 0, Gloss: 0, F0: 0, LightIntensity: 0);
+
+                var sceneFractal  = new MandelboxParams();
+                var sceneSettings = new RaymarchSettings(
+                    MaxSteps: 80, HitEpsilon: 1.5e-3f, MaxDistance: 25f, NormalEpsilon: 2e-3f,
+                    EnableSoftShadows: true, ShadowSteps: 24, ShadowSoftness: 8f,
+                    EnableAmbientOcclusion: true, AOSamples: 3, AOStepDistance: 0.06f, AOIntensity: 0.8f,
+                    HeroSamples: 1, EnableReflections: false, ReflectionBounces: 0, Gloss: 0f, F0: 0f, LightIntensity: 1.1f);
+                var sceneBg      = new Color(0.04f, 0.04f, 0.07f);
+                var sceneSurface = new Color(0.6f, 0.55f, 0.5f);
+                var sceneLight   = Vector3.Normalize(new Vector3(1.2f, 2f, 1f));
+                var scenePalette = PaletteParams.Default;
+                var sceneCamera  = new Camera3D(
+                    new Vector3(0f, 2f, 10f), Vector3.Zero, Vector3.UnitY,
+                    MathF.PI / 4f, (float)sceneW / sceneH);
+
+                // Texture blend ramps to 0.75 over first 2 s then holds
+                // Scale 1.0 — one full Mandelbrot tile across each triplanar face
+                MetalSurfaceTextureManager.ClearImage();
+                MetalSurfaceTextureManager.SetControls(enabled: false, blend: 0f, scale: 1f, mode: 0);
+
+                string frameDir = Path.Combine(Path.GetDirectoryName(outFile)!, "cross-fractal-frames");
+                Directory.CreateDirectory(frameDir);
+
+                var texBytes = new byte[texW * texH * 4];
+
+                for (int i = 0; i < totalFrames; i++)
+                {
+                    float t     = (float)i / fps;
+                    double tN   = (double)i / totalFrames;
+                    double radius = Math.Exp(logStart + tN * (logEnd - logStart));
+                    float blend   = Math.Min(t / 2.0f, 1.0f) * 0.75f;
+
+                    // --- Step 1: render 2D Mandelbrot zoom frame as texture ---
+                    var view = new Parsec.Rendering.DeepZoom.DeepZoomView
+                    {
+                        CenterRe = centerRe, CenterIm = centerIm,
+                        Radius   = radius,   Formula  = 0,
+                    };
+                    uint[] texPixels = deepRenderer.Render(view, texW, texH, texPalette, texBg, texSettings);
+                    Buffer.BlockCopy(texPixels, 0, texBytes, 0, texBytes.Length);
+
+                    if (i == 0)
+                        MetalSurfaceTextureManager.SetImage(texBytes, texW, texH, texW * 4);
+                    else
+                        MetalSurfaceTextureManager.UpdateImage(texBytes, texW, texH, texW * 4);
+
+                    MetalSurfaceTextureManager.SetControls(enabled: true, blend: blend, scale: 1.0f, mode: 0);
+
+                    // --- Step 2: render 3D Mandelbox with Mandelbrot texture ---
+                    uint[] scenePixels = sceneRenderer.RenderMandelbox(
+                        sceneFractal, sceneCamera, sceneW, sceneH,
+                        sceneSettings, sceneBg, sceneSurface, sceneLight, scenePalette);
+
+                    // Save scene frame
+                    string framePath = Path.Combine(frameDir, $"frame_{i:D5}.png");
+                    var info = new SKImageInfo(sceneW, sceneH, SKColorType.Rgba8888, SKAlphaType.Premul);
+                    using var bmp = new SKBitmap(info);
+                    var sceneBytes = new byte[scenePixels.Length * 4];
+                    Buffer.BlockCopy(scenePixels, 0, sceneBytes, 0, sceneBytes.Length);
+                    Marshal.Copy(sceneBytes, 0, bmp.GetPixels(), sceneBytes.Length);
+                    ImageOutput.SavePng(bmp, framePath);
+
+                    if (i % 24 == 0 || i == totalFrames - 1)
+                        Console.WriteLine($"  frame {i + 1}/{totalFrames}  radius={radius:e2}  blend={blend:F2}  t={t:F1}s");
+                }
+
+                Console.WriteLine($"  muxing to {outFile} ...");
+                var ffArgs = $"-y -framerate {fps} -i \"{frameDir}/frame_%05d.png\" -c:v libx264 -preset fast -crf 18 -pix_fmt yuv420p \"{outFile}\"";
+                var proc = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("ffmpeg", ffArgs)
+                    { RedirectStandardError = true, UseShellExecute = false })!;
+                proc.WaitForExit();
+                if (proc.ExitCode != 0) { Console.Error.WriteLine("ffmpeg failed"); return 1; }
+                Directory.Delete(frameDir, recursive: true);
+                MetalSurfaceTextureManager.ClearImage();
+                MetalSurfaceTextureManager.SetControls(enabled: false, blend: 0f, scale: 1f, mode: 0);
+                Console.WriteLine($"  done → {outFile}");
+                return 0;
+            }
+            catch (Exception ex) { Console.Error.WriteLine($"metal-cross-fractal-texture FAILED: {ex.Message}\n{ex.StackTrace}"); return 1; }
+        }
+
         // metal-fractal-feedback [duration] [out.mp4]
         // Feedback loop: each rendered frame is fed back as the surface texture for the next frame.
-        // The fractal surface becomes a recursive mirror of itself, building up ghostly depth.
-        // Mandelbox, triplanar mode, slow camera orbit so the pattern evolves rather than fixing.
-        // Blend ramps 0→0.45 over first 3 s, then holds. Scale slowly zooms the texture 0.8→1.6
-        // so the feedback spiral tightens. Frame 0 bootstraps with no texture; frame 1+ uses
-        // the previous output as the texture input.
+        // Fixed camera; Mandelbox Scale morphs 1.7→2.3 so the geometry changes under the texture.
+        // Blend ramps 0→0.50 over first 3 s. Texture scale holds at 1.0 (no zoom crawl).
+        // Frame 0 bootstraps with no texture; frame 1+ uses the previous output as texture input.
         if (args[0] == "metal-fractal-feedback")
         {
             if (!OperatingSystem.IsMacOS()) { Console.Error.WriteLine("metal-fractal-feedback requires macOS."); return 1; }
@@ -5785,12 +5916,11 @@ public static class Program
                 const float aspect = 16f / 9f;
                 int totalFrames    = (int)Math.Ceiling(duration * fps);
 
-                Console.WriteLine($"metal-fractal-feedback — Mandelbox recursive self-texture, {duration:F1}s @ {fps}fps ({totalFrames} frames, {w}×{h})");
+                Console.WriteLine($"metal-fractal-feedback — Mandelbox Scale morph 1.7→2.3, {duration:F1}s @ {fps}fps ({totalFrames} frames, {w}×{h})");
 
                 using var renderer = new MetalMandelboxRenderer();
                 if (!renderer.IsAvailable) { Console.Error.WriteLine("Metal unavailable."); return 1; }
 
-                var fractal  = new MandelboxParams();
                 var settings = new RaymarchSettings(
                     MaxSteps: 80, HitEpsilon: 1.5e-3f, MaxDistance: 25f, NormalEpsilon: 2e-3f,
                     EnableSoftShadows: true, ShadowSteps: 24, ShadowSoftness: 8f,
@@ -5800,6 +5930,13 @@ public static class Program
                 var surface = new Color(0.6f, 0.55f, 0.5f);
                 var light   = Vector3.Normalize(new Vector3(1.2f, 2f, 1f));
                 var palette = PaletteParams.Default;
+
+                // Fixed camera — geometry change drives all the motion
+                var camera = new Camera3D(
+                    new Vector3(0f, 2f, 10f),
+                    Vector3.Zero,
+                    Vector3.UnitY,
+                    fov, aspect);
 
                 string frameDir = Path.Combine(Path.GetDirectoryName(outFile)!, "feedback-frames");
                 Directory.CreateDirectory(frameDir);
@@ -5815,27 +5952,18 @@ public static class Program
                     float t      = (float)i / fps;
                     float tNorm  = (float)i / totalFrames;
 
-                    // Slow full orbit so feedback evolves continuously
-                    float angle = tNorm * 2f * MathF.PI;
-                    float camR  = 9.5f;
-                    float camX  = camR * MathF.Sin(angle);
-                    float camZ  = camR * MathF.Cos(angle);
-                    float camY  = 1.8f + MathF.Sin(angle * 0.7f) * 1.8f;
-                    var camera = new Camera3D(
-                        new Vector3(camX, camY, camZ),
-                        Vector3.Zero,
-                        Vector3.UnitY,
-                        fov, aspect);
+                    // Scale morphs 1.7→2.3 over 1.5 cycles — geometry changes under the texture
+                    float scale_fractal = 2.0f + 0.3f * MathF.Sin(2f * MathF.PI * 1.5f * tNorm);
 
-                    // Blend ramps 0→0.45 in first 3 s, texture scale spirals inward 0.8→1.6
-                    float blend = Math.Min(t / 3.0f, 1.0f) * 0.45f;
-                    float scale = 0.8f + tNorm * 0.8f;
+                    // Blend ramps 0→0.50 in first 3 s then holds; texture scale fixed at 1.0
+                    float blend = Math.Min(t / 3.0f, 1.0f) * 0.50f;
 
                     if (feedbackBytes is not null)
                         MetalSurfaceTextureManager.UpdateImage(feedbackBytes, w, h, rowBytes);
 
-                    MetalSurfaceTextureManager.SetControls(enabled: feedbackBytes is not null, blend: blend, scale: scale, mode: 0);
+                    MetalSurfaceTextureManager.SetControls(enabled: feedbackBytes is not null, blend: blend, scale: 1.0f, mode: 0);
 
+                    var fractal = new MandelboxParams { Scale = scale_fractal };
                     uint[] pixels = renderer.RenderMandelbox(fractal, camera, w, h, settings, bg, surface, light, palette);
 
                     // Convert RGBA8 uint[] → byte[] for next frame's texture and PNG save
@@ -5852,7 +5980,7 @@ public static class Program
                     ImageOutput.SavePng(bmp, framePath);
 
                     if (i % 24 == 0 || i == totalFrames - 1)
-                        Console.WriteLine($"  frame {i + 1}/{totalFrames}  blend={blend:F3}  scale={scale:F2}  t={t:F1}s");
+                        Console.WriteLine($"  frame {i + 1}/{totalFrames}  blend={blend:F3}  foldScale={scale_fractal:F3}  t={t:F1}s");
                 }
 
                 Console.WriteLine($"  muxing to {outFile} ...");
@@ -6116,6 +6244,7 @@ public static class Program
         Console.WriteLine("  parsec metal-surface-texture-smoke <image> [w] [h] [outDir]  Metal texture projection A/B render");
         Console.WriteLine("  parsec metal-burning-texture-mp4 [image] [duration] [out.mp4]  BurningShip surface texture fly-in (macOS)");
         Console.WriteLine("  parsec metal-burning-video-texture [video] [duration] [out.mp4]  BurningShip orbit-trap video texture fly-in (macOS)");
+        Console.WriteLine("  parsec metal-cross-fractal-texture [duration] [out.mp4]  Mandelbrot zoom projected onto Mandelbox surface (macOS)");
         Console.WriteLine("  parsec metal-fractal-feedback [duration] [out.mp4]  Mandelbox recursive self-texture feedback loop (macOS)");;
         Console.WriteLine("  parsec metal-bulb-smoke [w] [h]      Metal Mandelbulb smoke test (macOS only)");
         Console.WriteLine("  parsec metal-rotbox-smoke [w] [h]    Metal RotBox smoke test (macOS only)");
