@@ -737,6 +737,46 @@ DirectOrbit mode it must fall back to its Hybrid timer-bell voice (guard, don't 
     src/Parsec.Cli/Parsec.Cli.csproj -c Release -- <cmd>`) before claiming completion — the
     GUI can't be exercised headlessly, the CLI can.
 
+### Track D — telemetry rollout to Menger/Apollonian/KIFS/QJBox ✓ DONE (2026-06-12)
+
+Brings sonification coverage from 4 to 8 of the 20 selectable 3D fractals, chosen for
+geometric contrast. Scope decision: **DirectOrbit-first** — no custom Hybrid streaming
+voices for the new four; in Hybrid mode they fall through to the generic Mandelbox fill
+(wavetables are still geometry-driven), and all hand-tuned distinctness lives in
+`DirectOrbitProfile` + geometry-derived lattice ratios.
+
+- **Shaders:** `menger_telemetry.metal`, `apollonian_telemetry.metal`, `kifs_telemetry.metal`,
+  `qjbox_telemetry.metal` — same structure as `burningship_telemetry.metal` (buffers 0–5:
+  FoldParams, TelemetryParams, cells, wavetables, waveshaper strip, orbit trajectories).
+  Per-fractal orbit **escape semantics** preserve the DirectOrbit stereo gate (empty space
+  silent): Menger/KIFS `dot(z,z) > 1000`; QJBox `length(z) > 4`; Apollonian treats "settled"
+  (no inversion applies) as escape — holding the settled point would be DC, killed by the
+  centroid subtract, but worse it would defeat the bailout-weighted cell gain.
+- **Renderers:** `RunTelemetryPass` + lazy `EnsureTelemetryPso` added to
+  `MetalMengerRenderer`, `MetalApollonianRenderer`, `MetalKifsRenderer`, `MetalQJBoxRenderer`
+  (verbatim copy of the BurningShip pattern).
+- **Voices:** `FractalVoice.Menger/Kifs/QJBox` appended (Apollonian already existed). All
+  hybrid-path switches fall through to Mandelbox via their existing `default:`/`_` arms.
+- **Apollonian DirectOrbit enabled:** the `canDirect` fallback guards removed
+  (`FractalDroneStream.FillBuffer`, `MainWindow` export path) now that it has a real kernel.
+  Its M7g timer-bell voice remains its Hybrid-mode identity.
+- **Profiles** (register ladder for distinctness): Menger RootDivisor 0.5 (hollow low,
+  short clangy chimes), QJBox 1.5 (warm pad, 5/4 lattice, long harmonic chimes),
+  KIFS 3.0 (crystalline, 4/3 lattice, icy inharmonic chimes), Apollonian 4.0 (glassy,
+  19/16 gasket lattice). Full ladder: Menger 0.5 → Kleinian 0.667 → Mandelbox 1.0 →
+  QJBox 1.5 → BurningShip 2.25 → KIFS 3.0 → Apollonian 4.0 → Mandelbulb 6.0.
+- **Lattice ratios:** `GeometryScale.FoldScaleLatticeRatio(scale)` octave-reduces |scale|
+  into (1, 2); returns **0 on degenerate** (unison/octave, e.g. KIFS scale 2) so the profile
+  default applies — matches `FractalSonicFrame.LatticeRatio` semantics. Menger scale 3 →
+  3/2 fifths (geometry-derived); QJBox |−1.8| → 1.8. Wired in
+  `FractalView.ComputeLatticeRatio()` for Menger/Kifs/QJBox.
+- **Validated:** `metal-d-telemetry` — all 4 kernels PASS (16/16 orbit tiles, 64-pt
+  waveshaper each). `metal-d-direct` — four palettes distinct (ZCR 797 Apollonian-glassy-
+  sparse → 1120 Menger → 2504 KIFS → 2639 QJBox; peaks −10.1 to −25.9 dBFS). Regressions:
+  `metal-m9b-direct` (default duration) and `metal-m9d-check` pass. (Note: the m9b −6 dBFS
+  gate is duration-sensitive — at 6 s it reads −5.8 dBFS on pre-Track-D commits too;
+  validate at the default duration.)
+
 ---
 
 ## 6. Key file pointers (verify before editing)

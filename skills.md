@@ -889,17 +889,47 @@ Without this, the first frames fire a 16-cell chime cascade (broke the m9b −6 
 ## DirectOrbitProfile — per-fractal sonic identity
 
 `src/Parsec.Audio/Sonification/DirectOrbitProfile.cs` — readonly record struct, `ForVoice()`
-factory. One place to tune register (`RootDivisor`: Mandelbox 1.0, Mandelbulb 6.0,
-Kleinian 0.667, BurningShip 2.25), default lattice generator, enclosure reverb endpoints,
-and chime decay/partial.
+factory. One place to tune register, default lattice generator, enclosure reverb endpoints,
+and chime decay/partial. `RootDivisor` ladder (low → high): Menger 0.5, Kleinian 0.667,
+Mandelbox 1.0, QJBox 1.5, BurningShip 2.25, KIFS 3.0, Apollonian 4.0, Mandelbulb 6.0.
 
 - `FractalDroneStream`: set `_doProfile` in **both** the constructor and `SetVoice()` (and
   recompute `_doChimeDecay` in both — it depends on `ChimeDecaySec`).
 - `DirectOrbitSynth.Synthesize` takes `voice:`; all callers (UI export, CLI) must pass it or
   every fractal silently gets the Mandelbox palette.
 - Geometry lattice ratios: `GeometryScale.KleinianLatticeRatio` (eigenvalue, octave-reduced
-  into (1,2), degenerate → 1.5) and `MandelbulbLatticeRatio` (`(power+1)/power`, clamped
-  1.03–1.97). `FractalView.ComputeLatticeRatio()` → `SonificationController.Update(...,
-  latticeRatio:)` → `FractalSonicFrame.LatticeRatio` (0 = use profile default).
+  into (1,2), degenerate → 1.5), `MandelbulbLatticeRatio` (`(power+1)/power`, clamped
+  1.03–1.97), and `FoldScaleLatticeRatio` (generic |scale| octave-reduced; **degenerate → 0**,
+  not 1.5 — 0 means "use profile default" per frame semantics; KIFS scale 2 hits this).
+  `FractalView.ComputeLatticeRatio()` → `SonificationController.Update(..., latticeRatio:)`
+  → `FractalSonicFrame.LatticeRatio` (0 = use profile default).
 - Palette validation without ears: `metal-m9c-direct` then per-second RMS/ZCR — distinct
   voices show ZCR ~800 (Kleinian dark) → ~2100 (Mandelbulb bright) and RMS spread.
+
+## Track D — adding a telemetry kernel to a new fractal (recipe)
+
+Template: `burningship_telemetry.metal` + `MetalBurningShipRenderer.RunTelemetryPass`.
+Done 2026-06-12 for Menger/Apollonian/KIFS/QJBox (`metal-d-telemetry` / `metal-d-direct`).
+
+1. New `<fractal>_telemetry.metal`: copy the template wholesale, swap in the DE + fold loop
+   from `<fractal>_raymarch.metal`. Keep `#define WVTBL 64` / `#define ORBTRAJ 128`
+   (**never** program-scope `const` — silent MSL compile failure). Buffers 0–5 fixed.
+2. **Pick orbit escape semantics deliberately** — the DirectOrbit stereo gate (empty cells
+   silent) depends on post-bailout points being zeroed: polynomial-style → magnitude bailout
+   (`dot(z,z) > 1000` or `length(z) > 4`); inversion-style (Apollonian) → "settled" (no
+   inversion applies) counts as escape; holding the settled point makes DC and defeats the
+   `sqrt(bailout/OrbtLen)` cell weighting.
+3. csproj `<EmbeddedResource>` entry, or the PSO silently never loads (`EnsureTelemetryPso`
+   catch swallows the FileNotFoundException → telemetry just returns null).
+4. Renderer: paste the telemetry block (3 fields + `RunTelemetryPass` + `EnsureTelemetryPso`
+   + static `BuildTelemetryParams`), swap param type + shader/kernel name; add
+   `if (_telemetryPsoAvailable) _telemetryPso.Dispose();` to `Dispose`. Reuses the file's
+   existing `BuildFoldParams`/`UploadStruct`/`LoadEmbeddedMsl`.
+5. Wire: `FractalView.RunActiveTelemetryPass` switch arm; `MainWindow.ActiveTypeToVoice`;
+   new `FractalVoice` member (append — hybrid-path switches all fall through to the Mandelbox
+   fill via `default:`, so a new member is safe with zero extra DSP = the DirectOrbit-first
+   scope); `DirectOrbitProfile.ForVoice` entry; `FractalView.ComputeLatticeRatio` if the
+   fractal has a scale-like parameter.
+6. Validate: `metal-d-telemetry` (16/16 orbs, ws=64) + `metal-d-direct` (ZCR/peak per voice),
+   then regressions `metal-m9b-direct` (default duration — the −6 dBFS gate is
+   duration-sensitive; 6 s reads −5.8 even pre-change) and `metal-m9d-check`.
