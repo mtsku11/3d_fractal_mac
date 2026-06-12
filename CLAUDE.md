@@ -70,7 +70,7 @@ The macOS-native 3D-only build is underway. Milestones 1–10 are complete:
 
 Milestones 1–10 and 12 are complete. All 20 fp32 3D fractals and the 2D deep-zoom pipeline render via Metal on macOS, with HDR grade post-processing.
 
-Fractal sonification M0–M8, M8-spatial, M9a–M9e are complete. The full direct-orbit pipeline is built with per-cell detuning, a continuous Hybrid↔DirectOrbit blend slider, lush Freeverb reverb on the orbit synth, and a hardened audio thread. Full spec + gotchas in `docs/fractal-sonification-plan.md`.
+Fractal sonification M0–M8, M8-spatial, M9a–M9e, and the post-M9 refinements are complete. The full direct-orbit pipeline is built with per-cell detuning, a continuous Hybrid↔DirectOrbit blend slider, lush Freeverb reverb on the orbit synth, a hardened audio thread, proximity/enclosure/morph macros with fold-event chimes, and per-fractal `DirectOrbitProfile`s with geometry-derived lattice ratios. Full spec + gotchas in `docs/fractal-sonification-plan.md`.
 
 **Remaining macOS parity work:**
 - **M11:** Packaging and notarization.
@@ -142,7 +142,7 @@ The audio-reactive in-app UI (mapping panel + timeline/export integration) is no
 
 ## Do Not Do Yet
 
-- Fractal sonification M0–M9e are complete. The full direct-orbit pipeline is built: offline synthesis, live streaming with continuous Hybrid/DirectOrbit blend, per-cell detuning, Freeverb reverb, and hardened audio thread. See plan §M9 for spec and gotchas.
+- Fractal sonification M0–M9e plus the post-M9 refinements are complete. The full direct-orbit pipeline is built: offline synthesis, live streaming with continuous Hybrid/DirectOrbit blend, per-cell detuning, Freeverb reverb, hardened audio thread, proximity/enclosure/morph macros, fold-event chimes, and per-fractal DirectOrbit profiles with geometry-derived lattice ratios. See plan §M9 for spec and gotchas.
 - Do not break or repurpose the existing audio-reactive modulation (`AudioModulationController`/`AudioMappingPanel`); sonification is a separate, mutually-exclusive mode.
 - Do not refactor renderer internals broadly. Prefer the separate low-res telemetry kernel (plan §3 Option B) over modifying the still-stabilizing render kernels.
 - Do not change Windows/Linux OpenGL behavior unless the change is required by a narrow backend seam and can be validated.

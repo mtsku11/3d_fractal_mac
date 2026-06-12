@@ -793,17 +793,24 @@ meaning, not only pan. For a C2 base example:
 - col 2 root D3 = C2 × (3/2)^2
 - col 3 root A3 = C2 × (3/2)^3
 
-The per-cell playback-rate multiplier is:
+The per-cell playback-rate multiplier is (since the per-fractal-profile update, the generator
+`ratio` and a whole-grid `RootDivisor` come from `DirectOrbitProfile.ForVoice(voice)`, and the
+generator is overridden per frame by `FractalSonicFrame.LatticeRatio` when geometry supplies one —
+Kleinian eigenvalue, Mandelbulb `(power+1)/power`):
 ```csharp
-float columnRoot = MathF.Pow(1.5f, col);
-float rowRatio   = MathF.Pow(1.5f, 3 - row); // bottom row 3 is root
-float rateRatio  = columnRoot * rowRatio;
-cellSps[ci] = SamplesPerStep / rateRatio;
+float ratio = frame.LatticeRatio > 1.001f ? frame.LatticeRatio : profile.LatticeRatio;
+float pitchMul = profile.RootDivisor
+               * MathF.Pow(ratio, ci % 4)        // column root
+               * MathF.Pow(ratio, 3 - ci / 4);   // row above bottom (row 3 is root)
+cellSps[ci]   = SamplesPerStep / pitchMul;
+chimeFreq[ci] = sampleRate * 8f / (cellSps[ci] * OrbtLen);
 ```
-This is intentionally not equal-tempered. A full occupied column yields a strict fifth stack
-(e.g. C2, G2, D3, A3), and a full screen yields a related Pythagorean fifth lattice. The total
-range is wide: col3/top row is `(3/2)^6 ≈ 11.39×` above base; if it is too bright, octave-reduce
-either column roots or final `rateRatio`, but preserve pure `3/2` relationships for adjacent steps.
+This is intentionally not equal-tempered. With the default `ratio = 1.5` a fully occupied column
+yields a strict fifth stack (e.g. C2, G2, D3, A3), and a full screen yields a related Pythagorean
+fifth lattice. The total range is wide: col3/top row is `ratio^6 ≈ 11.39×` above base at 1.5; if it
+is too bright, octave-reduce either column roots or final `pitchMul`, but preserve pure adjacent
+ratios. Per-frame recompute of `cellSps` is click-free because orbit phase restarts each
+frame/buffer with the 5 ms equal-power crossfade.
 
 **Projection-level voice floor:** `PreprocessOrbit` normalises 3D orbit length, but the audible
 signal is the camera right/up projection. Valid cells whose orbit motion is mostly depth-forward
@@ -846,7 +853,53 @@ else
 **Export routing.** Capture `_sonifyMode` into a local `exportSonifyMode` at click time (before the async task captures it), then choose the synth:
 ```csharp
 if (exportSonifyMode == SonificationMode.DirectOrbit && exportVoice != FractalVoice.Apollonian)
-    pcm = DirectOrbitSynth.Synthesize(sonicFrames, controlRateHz: RenderFps);
+    pcm = DirectOrbitSynth.Synthesize(sonicFrames, controlRateHz: RenderFps, voice: exportVoice);
 else
     pcm = HybridSynth.Synthesize(sonicFrames, ...);
 ```
+
+---
+
+## DirectOrbit proximity/enclosure macros + fold-event chimes
+
+Frame-level telemetry → DSP macros, applied identically in `DirectOrbitSynth` and
+`FractalDroneStream.FillDirectOrbit` (keep in sync):
+
+- **Proximity** = `exp(-max(0, MeanDepth) / 2.5) * min(1, HitRatio * 5)`. The HitRatio gate is
+  mandatory: `MeanDepth` is 0 when *no* rays hit, which without the gate reads as "at the
+  surface". Drives master brightness LPF (1.2–10 kHz), 180 Hz bass lift (`0.9*prox`), dry gain
+  (0.45–1.0).
+- **Enclosure** = `HitRatio`; lerps the Freeverb fb/damp/wet between the profile's
+  `Rev*0`/`Rev*1` endpoints. Reverb params are per-frame variables, not consts.
+- Both slewed with τ = 0.35 s (`coeff = 1 - exp(-dtFrame/τ)`).
+- **Morph bus** = `clamp(ParameterVelocity * 4, 0, 1)`, attack τ 0.08 s / release τ 1.2 s.
+  Drives per-cell pitch shimmer (divide `cellSps` by `1 + morph*0.02*sin(2π*(0.6+0.37*ci)*t)`,
+  ±~35 cents max) and fold threshold (`0.45 - 0.25*morph`).
+- **Fold detection**: per-cell mean pointwise distance between consecutive preprocessed orbit
+  segments (both peak-normalised → scale-free). Top-3 cells over threshold fire two-partial
+  chimes (8× cell orbit fundamental + `profile.ChimePartial`× partial, decay
+  `profile.ChimeDecaySec`) at the cell's pan position; 250 ms refractory.
+
+**Startup-cascade gotcha:** a cell appearing from silence is NOT a fold. Guard with
+`pSum = Σ prevSeg[i].LengthSquared(); foldDelta = pSum < 1e-6f ? 0f : dSum / OrbtLen;`
+Without this, the first frames fire a 16-cell chime cascade (broke the m9b −6 dBFS gate).
+
+---
+
+## DirectOrbitProfile — per-fractal sonic identity
+
+`src/Parsec.Audio/Sonification/DirectOrbitProfile.cs` — readonly record struct, `ForVoice()`
+factory. One place to tune register (`RootDivisor`: Mandelbox 1.0, Mandelbulb 6.0,
+Kleinian 0.667, BurningShip 2.25), default lattice generator, enclosure reverb endpoints,
+and chime decay/partial.
+
+- `FractalDroneStream`: set `_doProfile` in **both** the constructor and `SetVoice()` (and
+  recompute `_doChimeDecay` in both — it depends on `ChimeDecaySec`).
+- `DirectOrbitSynth.Synthesize` takes `voice:`; all callers (UI export, CLI) must pass it or
+  every fractal silently gets the Mandelbox palette.
+- Geometry lattice ratios: `GeometryScale.KleinianLatticeRatio` (eigenvalue, octave-reduced
+  into (1,2), degenerate → 1.5) and `MandelbulbLatticeRatio` (`(power+1)/power`, clamped
+  1.03–1.97). `FractalView.ComputeLatticeRatio()` → `SonificationController.Update(...,
+  latticeRatio:)` → `FractalSonicFrame.LatticeRatio` (0 = use profile default).
+- Palette validation without ears: `metal-m9c-direct` then per-second RMS/ZCR — distinct
+  voices show ZCR ~800 (Kleinian dark) → ~2100 (Mandelbulb bright) and RMS spread.

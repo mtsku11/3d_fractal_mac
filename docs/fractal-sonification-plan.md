@@ -447,7 +447,7 @@ No additional Metal passes required — only C# DSP changes in `HybridSynth.Synt
 
 ---
 
-### M9 — Direct-orbit synthesis mode (planned 2026-06-11, owner-approved)
+### M9 — Direct-orbit synthesis mode ✓ DONE (M9a–M9e + post-M9 refinements, 2026-06-11/12)
 
 **Goal:** a second, selectable sonification mode where **the iteration map itself is the
 oscillator**. Inspired by CodeParade's FractalSoundExplorer (FSE,
@@ -645,6 +645,55 @@ DirectOrbit mode it must fall back to its Hybrid timer-bell voice (guard, don't 
   implementation in sync between `DirectOrbitSynth` and `FractalDroneStream`. If the full
   `(3/2)^6` range is too wide, octave-reduce a chosen axis or the final rate ratio while preserving
   pure adjacent fifth relationships.
+
+- **Proximity/enclosure macros + fold-event chimes. ✓ DONE (verified 2026-06-11)**
+  Addresses two owner-reported gaps: "sounds the same far away as inside" and "morphing isn't
+  audible". DirectOrbit path only; implemented identically in `DirectOrbitSynth.Synthesize` and
+  `FractalDroneStream.FillDirectOrbit`.
+  - **Proximity macro** `exp(−MeanDepth/2.5) · min(1, HitRatio×5)` — the HitRatio gate is required
+    because `MeanDepth` is reported as 0 when no rays hit, which would otherwise read as "at the
+    surface". **Enclosure macro** = `HitRatio`. Both slewed with τ = 0.35 s. They drive: master
+    brightness LPF (1.2 kHz far → 10 kHz at surface), bass shelf lift (0.9·prox at 180 Hz),
+    dry gain (0.45 → 1.0), and the Freeverb fb/damp/wet (now per-frame variables interpolated
+    between profile endpoints — open void = short dry tail, fully enclosed = seconds of bloom).
+    Measured on `metal-m9d-animated`: −37 dBFS far → −15 dBFS inside.
+  - **Morph bus** `clamp(ParameterVelocity × 4, 0, 1)`, attack τ = 0.08 s / release τ = 1.2 s.
+    Drives per-cell pitch shimmer (±~35 cents at morph = 1, distinct per-cell LFO rates derived
+    from `frame.Time`, applied via `cellSpsEff`) and fold-detection sensitivity.
+  - **Fold-event chimes:** per-cell frame-to-frame orbit delta (mean pointwise distance between
+    consecutive preprocessed segments — both peak-normalised, so it is scale-free). Top-3 cells
+    above threshold (`0.45 − 0.25·morph`) fire two-partial decaying sines (1st partial at 8× the
+    cell's orbit fundamental; 2nd partial multiple and decay are per-profile) at the cell's pan
+    position; 250 ms refractory per cell. **Gotcha:** a cell appearing from silence (startup, or
+    entering view) must not count as a fold — guard with `pSum` (sum of previous-segment
+    `LengthSquared`); without it the first frames fire a 16-cell chime cascade that broke the
+    m9b −6 dBFS peak gate.
+
+- **Per-fractal DirectOrbit profiles + geometry-derived lattice ratios. ✓ DONE (verified 2026-06-12)**
+  Addresses the third owner-reported gap: "sonic palette barely changes across fractal types".
+  - **`DirectOrbitProfile`** (`src/Parsec.Audio/Sonification/DirectOrbitProfile.cs`) — readonly
+    record struct with `ForVoice()` factory. Fields: `RootDivisor` (whole-grid register —
+    Mandelbox 1.0 baseline, Mandelbulb 6.0 airy, Kleinian 0.667 dark, BurningShip 2.25),
+    `LatticeRatio` (default grid generator), reverb enclosure endpoints `RevFb0/1`, `RevDamp0/1`,
+    `RevWet0/1` (Kleinian T60 → ~8 s fully enclosed; BurningShip dry/tight), and chime character
+    `ChimeDecaySec` (0.22–2.5 s) + `ChimePartial` (2.0 harmonic – 2.76 clangy).
+  - **Grid pitch:** `pitchMul = RootDivisor · ratio^col · ratio^(3−row)`;
+    `cellSps = SamplesPerStep / pitchMul`; chime fundamental = `sampleRate·8/(cellSps·128)`.
+    Recomputed per control frame (offline) / per buffer (live) — click-free because phase
+    restarts each frame with the 5 ms crossfade.
+  - **Geometry-derived lattice ratios:** new `FractalSonicFrame.LatticeRatio` field (0 = use
+    profile default; used when > 1.001). `GeometryScale.KleinianLatticeRatio` (eigenvalue ratio
+    `scale·(1+fixed/min)/2`, octave-reduced into (1,2), degenerate → 1.5) and
+    `GeometryScale.MandelbulbLatticeRatio` (superparticular `(power+1)/power` — power 8 → 9/8
+    whole-tone grid; morphing Power slides the whole lattice through JI intervals).
+    `FractalView.ComputeLatticeRatio()` feeds all 3 `SonificationController.Update` call sites.
+  - **Plumbing:** `DirectOrbitSynth.Synthesize(…, voice)` new parameter — UI export
+    (`MainWindow.OnRenderToVideoClick`) and CLI (`metal-m9c-direct`,
+    `metal-m9d-animated-burning`) pass it. `FractalDroneStream` sets `_doProfile` in the
+    constructor and in `SetVoice` (which also recomputes `_doChimeDecay`).
+  - **Validated:** `metal-m9c-direct` four palettes measurably distinct (ZCR ~800 Kleinian-dark →
+    ~2100 Mandelbulb-bright; RMS spread −12 → −34 dBFS); `metal-m9b-direct` −6 dBFS gate passes;
+    `metal-m9d-check` passes; `metal-m9d-animated` proximity arc intact (−37 → −15 dBFS).
 
 **Gotchas for the implementing agent (read all of these before writing code):**
 1. **MSL `float3` in device arrays has 16-byte stride.** Use `float4` (as specced) or

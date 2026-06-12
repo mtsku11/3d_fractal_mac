@@ -62,6 +62,8 @@ A perturbation-theory escape-time explorer with four formulas — **Mandelbrot, 
 
 Load a WAV file via the audio transport bar. The engine performs offline multi-band analysis (RMS, bass, mid, treble, onset, spectral centroid) that drives fractal, camera, and palette parameters — both in CLI audio-reactive renders and in the app via the mapping panel (feature source → parameter, with depth and smoothing). Render to Video samples features deterministically at export timestamps and muxes the audio into the exported video: MP4 normally, MOV/ProRes 4444 when **Transparent BG** is enabled.
 
+**Fractal sonification** (macOS) runs the opposite direction: the fractal geometry *generates* sound. A low-res Metal telemetry pass reduces the distance-estimator march into per-frame statistics and a 4×4 grid of captured iteration orbits; the orbits are played directly as stereo waveforms, tuned to a pure-interval pitch lattice that retunes live as parameters morph (e.g. Mandelbulb Power slides the grid through just-intonation intervals). Each fractal family has its own register, tuning, reverb space, and fold-chime character; flying closer or inside the fractal audibly changes loudness, brightness, and reverb bloom. Toggle **Live Sonify** for real-time audio, blend between the Hybrid and DirectOrbit synth engines with the slider, and Render to Video exports the same audio deterministically. Sonification and audio-reactive modulation are mutually exclusive (one would feed back into the other).
+
 ---
 
 ## Using it
