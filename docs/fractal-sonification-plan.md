@@ -798,6 +798,12 @@ voices for the new four; in Hybrid mode they fall through to the generic Mandelb
 
 ### Next phase — geometry-conditioned resonance and stronger macro tone (planned)
 
+> **Handoff:** a step-by-step continuation brief for the next agent (Sonnet 4.6) lives in
+> `docs/sonification-handoff-sonnet46.md` — including an environment caveat (Metal rendering went
+> down mid-session 2026-06-12; `computeFunction must not be nil` is a host/device failure, not a
+> code bug — verify `metal-d-telemetry` prints `4/4 PASS` before trusting any render). Do not start
+> Phase 2 until the user confirms the Phase 1 modal direction passes the ear gate.
+
 The next work should deepen **instance-specific acoustic behaviour**, not add an unrelated third
 synth family. The modal resonator remains **selective** inside `DirectOrbit`; it is not promoted
 to a universal standalone mode.
