@@ -5762,6 +5762,154 @@ public static class Program
             catch (Exception ex) { Console.Error.WriteLine($"metal-burning-video-texture FAILED: {ex.Message}\n{ex.StackTrace}"); return 1; }
         }
 
+        // metal-closeup-hq [duration] [out.mp4]
+        // High-quality close-up: Mandelbox with Mandelbrot zoom texture (triplanar), camera
+        // approaches from radius 7→4.5 while arcing 90°. 960×540 4× SSAA (≈1920×1080 quality).
+        // Mandelbrot zoom radius 1.5→1e-6 over the clip. HDR: contrast 1.4, saturation 1.7, tanh.
+        if (args[0] == "metal-closeup-hq")
+        {
+            if (!OperatingSystem.IsMacOS()) { Console.Error.WriteLine("metal-closeup-hq requires macOS."); return 1; }
+            try
+            {
+                double duration  = args.Length >= 2 && double.TryParse(args[1], out var dch) ? dch : 8.0;
+                string outFile   = args.Length >= 3 ? args[2] : ResolveOutputPath("closeup_hq.mp4");
+                Directory.CreateDirectory(Path.GetDirectoryName(outFile)!);
+
+                const int fps    = 24;
+                const int sceneW = 960, sceneH = 540;
+                const int texW   = 384, texH   = 384;
+                int totalFrames  = (int)Math.Ceiling(duration * fps);
+
+                const string centerRe   = "-0.743643887037158704752191506114774";
+                const string centerIm   =  "0.131825904205311970493132056385139";
+                const double startRadius = 1.5;
+                const double endRadius   = 1e-6;
+                double logStart = Math.Log(startRadius);
+                double logEnd   = Math.Log(endRadius);
+
+                Console.WriteLine($"metal-closeup-hq — Mandelbox close fly-in, 4× SSAA, {sceneW}×{sceneH}, {duration:F1}s @ {fps}fps ({totalFrames} frames)");
+                Console.WriteLine($"  Mandelbrot zoom texture {texW}×{texH}  radius {startRadius}→{endRadius:e1}  camera radius 7→4.5");
+
+                using var deepRenderer  = new MetalDeepZoomRenderer();
+                if (!deepRenderer.IsAvailable) { Console.Error.WriteLine("Metal deep-zoom unavailable."); return 1; }
+                using var sceneRenderer = new MetalMandelboxRenderer();
+                if (!sceneRenderer.IsAvailable) { Console.Error.WriteLine("Metal unavailable."); return 1; }
+
+                var texPalette = new PaletteParams
+                {
+                    Base      = new Vector3(0.5f, 0.5f, 0.5f),
+                    Amp       = new Vector3(0.5f, 0.45f, 0.4f),
+                    Frequency = 1.8f,
+                    Phase     = new Vector3(0.0f, 0.25f, 0.58f),
+                    TrapScale = 1.0f, ShellMix = 0f,
+                };
+                var texBg       = new Color(0.01f, 0.01f, 0.03f);
+                var texSettings = new RaymarchSettings(
+                    MaxSteps: 0, HitEpsilon: 0, MaxDistance: 0, NormalEpsilon: 0,
+                    EnableSoftShadows: false, ShadowSteps: 0, ShadowSoftness: 0,
+                    EnableAmbientOcclusion: false, AOSamples: 0, AOStepDistance: 0, AOIntensity: 0,
+                    HeroSamples: 1,
+                    EnableReflections: false, ReflectionBounces: 0, Gloss: 0, F0: 0, LightIntensity: 0);
+
+                var sceneFractal  = new MandelboxParams();
+                var sceneSettings = new RaymarchSettings(
+                    MaxSteps: 160, HitEpsilon: 5e-4f, MaxDistance: 30f, NormalEpsilon: 8e-4f,
+                    EnableSoftShadows: true, ShadowSteps: 48, ShadowSoftness: 14f,
+                    EnableAmbientOcclusion: true, AOSamples: 6, AOStepDistance: 0.04f, AOIntensity: 1.1f,
+                    HeroSamples: 4,
+                    EnableReflections: false, ReflectionBounces: 0, Gloss: 0f, F0: 0f, LightIntensity: 1.2f);
+
+                var post = new PostProcessParams
+                {
+                    Brightness = 1.0f, Contrast  = 1.4f,
+                    Gamma      = 0.95f, Saturation = 1.7f,
+                    HdrEnabled = true,
+                };
+                var sceneBg      = new Color(0.03f, 0.03f, 0.06f);
+                var sceneSurface = new Color(0.65f, 0.60f, 0.55f);
+                var sceneLight   = Vector3.Normalize(new Vector3(1.5f, 2.5f, 0.8f));
+                var scenePalette = new PaletteParams
+                {
+                    Base      = new Vector3(0.55f, 0.50f, 0.45f),
+                    Amp       = new Vector3(0.35f, 0.30f, 0.25f),
+                    Frequency = 0.7f,
+                    Phase     = new Vector3(0.0f, 0.15f, 0.30f),
+                    TrapScale = 0.8f, ShellMix = 0.2f,
+                    TrapMix   = new Vector3(0.5f, 0.4f, 0.3f),
+                };
+
+                string frameDir = Path.Combine(Path.GetDirectoryName(outFile)!, "closeup-hq-frames");
+                Directory.CreateDirectory(frameDir);
+
+                MetalSurfaceTextureManager.ClearImage();
+                MetalSurfaceTextureManager.SetControls(enabled: false, blend: 0f, scale: 1f, mode: 0);
+
+                var texBytes = new byte[texW * texH * 4];
+
+                for (int i = 0; i < totalFrames; i++)
+                {
+                    float  t    = (float)i / fps;
+                    double tN   = (double)i / totalFrames;
+                    double radius = Math.Exp(logStart + tN * (logEnd - logStart));
+
+                    // Camera approaches and arcs: radius 7→4.5, sweeps 90° horizontally, rises slightly
+                    float camR   = 7.0f - (float)tN * 2.5f;
+                    float camAng = (float)tN * MathF.PI * 0.5f;
+                    float camY   = 1.0f + (float)tN * 1.5f;
+                    var camera   = new Camera3D(
+                        new Vector3(camR * MathF.Sin(camAng), camY, camR * MathF.Cos(camAng)),
+                        new Vector3(0f, 0.3f, 0f),
+                        Vector3.UnitY, MathF.PI / 4f, (float)sceneW / sceneH);
+
+                    float blend = Math.Min(t / 1.5f, 1.0f) * 0.72f;
+
+                    // --- 2D Mandelbrot zoom → texture ---
+                    var view = new Parsec.Rendering.DeepZoom.DeepZoomView
+                    {
+                        CenterRe = centerRe, CenterIm = centerIm,
+                        Radius   = radius,   Formula  = 0,
+                    };
+                    uint[] texPixels = deepRenderer.Render(view, texW, texH, texPalette, texBg, texSettings);
+                    Buffer.BlockCopy(texPixels, 0, texBytes, 0, texBytes.Length);
+
+                    if (i == 0)
+                        MetalSurfaceTextureManager.SetImage(texBytes, texW, texH, texW * 4);
+                    else
+                        MetalSurfaceTextureManager.UpdateImage(texBytes, texW, texH, texW * 4);
+                    MetalSurfaceTextureManager.SetControls(enabled: true, blend: blend, scale: 0.7f, mode: 0);
+
+                    // --- 3D Mandelbox 4× SSAA ---
+                    uint[] scenePixels = sceneRenderer.RenderMandelbox(
+                        sceneFractal, camera, sceneW, sceneH,
+                        sceneSettings, sceneBg, sceneSurface, sceneLight, scenePalette);
+
+                    string framePath = Path.Combine(frameDir, $"frame_{i:D5}.png");
+                    var info = new SKImageInfo(sceneW, sceneH, SKColorType.Rgba8888, SKAlphaType.Premul);
+                    using var bmp = new SKBitmap(info);
+                    var saveBytes = new byte[scenePixels.Length * 4];
+                    Buffer.BlockCopy(scenePixels, 0, saveBytes, 0, saveBytes.Length);
+                    Marshal.Copy(saveBytes, 0, bmp.GetPixels(), saveBytes.Length);
+                    ImageOutput.SavePng(bmp, framePath);
+
+                    if (i % 24 == 0 || i == totalFrames - 1)
+                        Console.WriteLine($"  frame {i + 1}/{totalFrames}  camR={camR:F2}  radius={radius:e2}  blend={blend:F2}  t={t:F1}s");
+                }
+
+                Console.WriteLine($"  muxing → {outFile} ...");
+                var ffArgs = $"-y -framerate {fps} -i \"{frameDir}/frame_%05d.png\" -c:v libx264 -preset slow -crf 15 -pix_fmt yuv420p \"{outFile}\"";
+                var proc = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("ffmpeg", ffArgs)
+                    { RedirectStandardError = true, UseShellExecute = false })!;
+                proc.WaitForExit();
+                if (proc.ExitCode != 0) { Console.Error.WriteLine("ffmpeg failed"); return 1; }
+                Directory.Delete(frameDir, recursive: true);
+                MetalSurfaceTextureManager.ClearImage();
+                MetalSurfaceTextureManager.SetControls(enabled: false, blend: 0f, scale: 1f, mode: 0);
+                Console.WriteLine($"  done → {outFile}");
+                return 0;
+            }
+            catch (Exception ex) { Console.Error.WriteLine($"metal-closeup-hq FAILED: {ex.Message}\n{ex.StackTrace}"); return 1; }
+        }
+
         // metal-oracle [duration] [out.mp4]
         // Experimental: BurningShip orbit-trap with texture = blend(Mandelbrot_zoom, prev_frame).
         // Three recursion layers: Mandelbrot structure mapped through BurningShip iteration-space
@@ -6434,7 +6582,8 @@ public static class Program
         Console.WriteLine("  parsec metal-surface-texture-smoke <image> [w] [h] [outDir]  Metal texture projection A/B render");
         Console.WriteLine("  parsec metal-burning-texture-mp4 [image] [duration] [out.mp4]  BurningShip surface texture fly-in (macOS)");
         Console.WriteLine("  parsec metal-burning-video-texture [video] [duration] [out.mp4]  BurningShip orbit-trap video texture fly-in (macOS)");
-        Console.WriteLine("  parsec metal-cross-fractal-texture [duration] [out.mp4]  Mandelbrot zoom projected onto Mandelbox surface (macOS)");
+        Console.WriteLine("  parsec metal-closeup-hq [duration] [out.mp4]  Mandelbox close fly-in, 4× SSAA, Mandelbrot texture (macOS)");
+        Console.WriteLine("  parsec metal-cross-fractal-texture [duration] [out.mp4]  Mandelbrot zoom projected onto Mandelbox surface (macOS)");;
         Console.WriteLine("  parsec metal-fractal-feedback [duration] [out.mp4]  Mandelbox recursive self-texture feedback loop (macOS)");;
         Console.WriteLine("  parsec metal-bulb-smoke [w] [h]      Metal Mandelbulb smoke test (macOS only)");
         Console.WriteLine("  parsec metal-rotbox-smoke [w] [h]    Metal RotBox smoke test (macOS only)");
