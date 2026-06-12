@@ -149,6 +149,14 @@ public partial class MainWindow : Window
                     _view.SurfaceTextureEnabled = surfaceTextureEnableCheckBox.IsChecked == true;
             };
 
+        var textureFeedbackCheckBox = this.FindControl<CheckBox>("TextureFeedbackCheckBox");
+        if (textureFeedbackCheckBox != null)
+            textureFeedbackCheckBox.IsCheckedChanged += (_, _) =>
+            {
+                if (_view != null)
+                    _view.TextureFeedbackEnabled = textureFeedbackCheckBox.IsChecked == true;
+            };
+
         var surfaceTextureBlendSlider = this.FindControl<Slider>("SurfaceTextureBlendSlider");
         if (surfaceTextureBlendSlider != null)
             surfaceTextureBlendSlider.PropertyChanged += (_, e) =>

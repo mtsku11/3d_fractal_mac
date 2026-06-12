@@ -150,6 +150,9 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
     private float _surfaceTextureBlend = 0.7f;
     private float _surfaceTextureScale = 1.25f;
     private string? _surfaceTexturePath;
+    private bool _textureFeedbackEnabled;
+    private bool _feedbackBootstrapped;
+    private byte[]? _feedbackBytes;
 
     public bool SurfaceTextureEnabled
     {
@@ -180,6 +183,24 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
         {
             _surfaceTextureScale = Math.Clamp(value, 0.05f, 16f);
             SyncSurfaceTextureState();
+            MarkDirty();
+        }
+    }
+
+    public bool TextureFeedbackEnabled
+    {
+        get => _textureFeedbackEnabled;
+        set
+        {
+            _textureFeedbackEnabled = value;
+            if (!value)
+            {
+                _feedbackBootstrapped = false;
+                _feedbackBytes = null;
+                if (!HasSurfaceTextureImage)
+                    MetalSurfaceTextureManager.ClearImage();
+                SyncSurfaceTextureState();
+            }
             MarkDirty();
         }
     }
@@ -246,8 +267,9 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
 
     private void SyncSurfaceTextureState()
     {
+        bool hasTexture = HasSurfaceTextureImage || _feedbackBootstrapped;
         MetalSurfaceTextureManager.SetControls(
-            enabled: SupportsSurfaceTexture && _surfaceTextureEnabled && HasSurfaceTextureImage,
+            enabled: SupportsSurfaceTexture && _surfaceTextureEnabled && hasTexture,
             blend: _surfaceTextureBlend,
             scale: _surfaceTextureScale);
         GpuSurfaceTextureManager.SetControls(
@@ -1033,6 +1055,29 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
                 Status($"Preview failed: {ex.Message}");
             }
             _totalFrameMs = sw.ElapsedMilliseconds;
+
+            // Texture feedback: prime next frame's texture with this frame's output.
+            // Only Metal; bootstraps itself on first frame so no image file is needed.
+            if (_textureFeedbackEnabled && _surfaceTextureEnabled && SupportsSurfaceTexture
+                && OperatingSystem.IsMacOS() && renderedPreview)
+            {
+                int fbRowBytes = rw * 4;
+                int fbLen = pixels.Length * 4;
+                if (_feedbackBytes is null || _feedbackBytes.Length != fbLen)
+                    _feedbackBytes = new byte[fbLen];
+                Buffer.BlockCopy(pixels, 0, _feedbackBytes, 0, fbLen);
+                if (!_feedbackBootstrapped)
+                {
+                    MetalSurfaceTextureManager.SetImage(_feedbackBytes, rw, rh, fbRowBytes);
+                    _feedbackBootstrapped = true;
+                    SyncSurfaceTextureState();
+                }
+                else
+                {
+                    MetalSurfaceTextureManager.UpdateImage(_feedbackBytes, rw, rh, fbRowBytes);
+                }
+                MarkDirty();
+            }
             _texW = rw; _texH = rh;
             _dirty = false;
 
