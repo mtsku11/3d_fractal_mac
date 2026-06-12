@@ -75,6 +75,23 @@ public static class GeometryScale
     }
 
     /// <summary>
+    /// Generic fold-scale lattice generator: octave-reduce |scale| into (1, 2).
+    /// Menger scale 3 → 3/2 (fifths); KIFS/QJBox scale 2 is a pure octave (degenerate)
+    /// → returns 0 so the per-voice profile default applies; morphing Scale away from 2
+    /// slides the grid through nearby just intervals.
+    /// </summary>
+    public static float FoldScaleLatticeRatio(float scale)
+    {
+        float r = MathF.Abs(scale);
+        if (!float.IsFinite(r) || r < 1e-3f) return 0f;
+        while (r >= 2f) r /= 2f;
+        while (r < 1f)  r *= 2f;
+        // Degenerate: unison/octave stack — signal "use profile default" (frame semantics: 0)
+        if (r < 1.03f || r > 1.97f) return 0f;
+        return r;
+    }
+
+    /// <summary>
     /// Mandelbulb lattice generator from the bulb power: the superparticular ratio
     /// (p+1)/p — power 8 → 9/8 (whole-tone cluster lattice), power 2 → 3/2 (fifths).
     /// Morphing Power slides the grid through the just-intonation interval series.

@@ -629,15 +629,14 @@ public sealed class FractalDroneStream : IDisposable
     private void FillBuffer(short[] buf)
     {
         float blend = _blendAmount;
-        bool canDirect = _voice != FractalVoice.Apollonian; // Apollonian has no telemetry kernel
 
-        if (blend >= 0.99f && canDirect)
+        if (blend >= 0.99f)
         {
             FillDirectOrbit(buf);
             return;
         }
 
-        if (blend <= 0.01f || !canDirect)
+        if (blend <= 0.01f)
         {
             FillHybridVoiceStereo(buf);
             return;

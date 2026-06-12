@@ -56,7 +56,39 @@ public readonly record struct DirectOrbitProfile(
             RevWet0: 0.08f, RevWet1: 0.25f,
             ChimeDecaySec: 0.22f, ChimePartial: 2.41f),
 
-        // Mandelbox + Apollonian (DirectOrbit falls back to hybrid for Apollonian anyway)
+        // Hollow caverns one octave down: fifth lattice from the fold scale (|scale| 3 → 3/2),
+        // damp open space blooming to a vast wet interior, short clangy chimes.
+        FractalVoice.Menger => new(
+            RootDivisor: 0.5f, LatticeRatio: 1.5f,
+            RevFb0: 0.74f, RevFb1: 0.95f, RevDamp0: 0.45f, RevDamp1: 0.25f,
+            RevWet0: 0.12f, RevWet1: 0.50f,
+            ChimeDecaySec: 0.4f, ChimePartial: 3.0f),
+
+        // Glassy bell register two octaves up on the gasket's 19/16 neutral third,
+        // bright sparse space, ringing near-harmonic chimes.
+        FractalVoice.Apollonian => new(
+            RootDivisor: 4.0f, LatticeRatio: 19f / 16f,
+            RevFb0: 0.68f, RevFb1: 0.90f, RevDamp0: 0.20f, RevDamp1: 0.08f,
+            RevWet0: 0.12f, RevWet1: 0.40f,
+            ChimeDecaySec: 0.9f, ChimePartial: 2.24f),
+
+        // Crystalline: fourth lattice (4/3) high above the baseline, airy bright tail,
+        // icy inharmonic chimes.
+        FractalVoice.Kifs => new(
+            RootDivisor: 3.0f, LatticeRatio: 4f / 3f,
+            RevFb0: 0.72f, RevFb1: 0.92f, RevDamp0: 0.15f, RevDamp1: 0.05f,
+            RevWet0: 0.14f, RevWet1: 0.45f,
+            ChimeDecaySec: 0.6f, ChimePartial: 3.36f),
+
+        // Warm quaternion pad: major-third lattice (5/4) a fifth up, enveloping wet
+        // space, long pure harmonic chimes.
+        FractalVoice.QJBox => new(
+            RootDivisor: 1.5f, LatticeRatio: 5f / 4f,
+            RevFb0: 0.76f, RevFb1: 0.93f, RevDamp0: 0.40f, RevDamp1: 0.20f,
+            RevWet0: 0.18f, RevWet1: 0.50f,
+            ChimeDecaySec: 1.8f, ChimePartial: 2.0f),
+
+        // Mandelbox baseline
         _ => Default,
     };
 }

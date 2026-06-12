@@ -674,15 +674,14 @@ public partial class MainWindow : Window
                         {
                             short[] pcm;
                             int exportSr = HybridSynth.DefaultSampleRate; // both synths use 44100
-                            bool canDirect = exportVoice != FractalVoice.Apollonian;
 
-                            if (exportBlend >= 0.99f && canDirect)
+                            if (exportBlend >= 0.99f)
                             {
                                 pcm = DirectOrbitSynth.Synthesize(sonicFrames,
                                     controlRateHz: RenderFps,
                                     voice: exportVoice);
                             }
-                            else if (exportBlend <= 0.01f || !canDirect)
+                            else if (exportBlend <= 0.01f)
                             {
                                 pcm = HybridSynth.Synthesize(sonicFrames,
                                     temperamentCeiling: exportCeiling,

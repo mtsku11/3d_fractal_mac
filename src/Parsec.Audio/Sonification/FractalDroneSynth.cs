@@ -18,6 +18,12 @@ public enum FractalVoice
     BurningShip,
     /// <summary>M7g: bells at integer Apollonian curvature pitches, triggered by camera motion.</summary>
     Apollonian,
+    /// <summary>Hollow sub-register lattice — DirectOrbit-first; Hybrid mode reuses the Mandelbox fill.</summary>
+    Menger,
+    /// <summary>Crystalline high lattice of fourths — DirectOrbit-first; Hybrid mode reuses the Mandelbox fill.</summary>
+    Kifs,
+    /// <summary>Warm mid pad on a 5/4 third lattice — DirectOrbit-first; Hybrid mode reuses the Mandelbox fill.</summary>
+    QJBox,
 }
 
 /// <summary>
