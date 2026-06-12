@@ -107,6 +107,14 @@
                     ToolTip.Tip="0 = pure Hybrid drone, 1 = pure DirectOrbit, middle = blend" />
             <TextBlock Grid.Column="2" Text="DirectOrbit" FontSize="11" VerticalAlignment="Center" />
           </Grid>
+          <Grid ColumnDefinitions="Auto,*,Auto" Margin="0,4,0,0">
+            <TextBlock Text="Raw Orbit" FontSize="11" VerticalAlignment="Center" />
+            <Slider Name="DirectOrbitModalBlendSlider" Grid.Column="1"
+                    Minimum="0" Maximum="1" Value="1"
+                    TickFrequency="0.01" IsSnapToTickEnabled="False" Margin="4,0"
+                    ToolTip.Tip="DirectOrbit only. 0 = raw orbit texture, 1 = modal body. Enabled for modal voices such as Menger and Apollonian." />
+            <TextBlock Grid.Column="2" Text="Modal Body" FontSize="11" VerticalAlignment="Center" />
+          </Grid>
         </StackPanel>
         <StackPanel Margin="0,8,0,0">
           <TextBlock Text="Temperament Ceiling" FontSize="11" />

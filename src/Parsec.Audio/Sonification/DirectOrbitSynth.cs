@@ -17,8 +17,11 @@ namespace Parsec.Audio.Sonification;
 ///   3. Escaped-orbit zeroing + (0.30 floor + sqrt(bounded fraction)) amplitude: empty
 ///      cells are silenced (stereo gate) while partially-bounded cells stay audible (16-voice wall)
 ///   4. Per-cell one-pole DC blocker (~20 Hz) then one-pole LPF (depth-modulated)
-///   5. Segment-to-segment equal-power crossfade (~5 ms) at every frame boundary
-///   6. Master tanh soft limiter + Shepard–Risset layer panned to the on-screen fractal centroid
+///   5. Optional modal resonator bank (profile-keyed): the orbit excites tuned two-pole
+///      resonators so the fractal sounds like a struck/bowed body, not a noise drone,
+///      with a raw-orbit <-> modal-body blend inside the DirectOrbit branch
+///   6. Segment-to-segment equal-power crossfade (~5 ms) at every frame boundary
+///   7. Master tanh soft limiter + Shepard–Risset layer panned to the on-screen fractal centroid
 ///
 /// Output: stereo interleaved short[] (L0, R0, L1, R1, …), same contract as HybridSynth.
 /// Deterministic: no RNG; same orbit captures → identical PCM.
@@ -51,10 +54,13 @@ public static class DirectOrbitSynth
         IReadOnlyList<FractalSonicFrame> frames,
         double controlRateHz = 30.0,
         int sampleRate       = DefaultSampleRate,
-        FractalVoice voice   = FractalVoice.Mandelbox)
+        FractalVoice voice   = FractalVoice.Mandelbox,
+        bool enableModal     = true,
+        float modalBodyBlend = 1f)
     {
         if (frames.Count == 0) return [];
         var profile = DirectOrbitProfile.ForVoice(voice);
+        float modalBlend = Math.Clamp(modalBodyBlend, 0f, 1f);
 
         int spf = (int)Math.Round(sampleRate / controlRateHz);
         var output = new short[frames.Count * spf * 2];
@@ -82,6 +88,25 @@ public static class DirectOrbitSynth
         var refract   = new int[NCells];
         float chimeDecay = MathF.Exp(-1f / (profile.ChimeDecaySec * sampleRate));
         int refractFrames = (int)MathF.Ceiling(ChimeRefractorySec * (float)controlRateHz);
+
+        // Modal resonator bank (profile-keyed). When the profile carries a modal
+        // signature the orbit signal is not played raw — it excites a bank of tuned
+        // two-pole resonators per cell, so the fractal sounds like a struck/bowed
+        // body instead of a noise drone. Coefficients are refreshed per control
+        // frame (lattice retunes live); y1/y2 ring state persists across frames.
+        bool modal  = enableModal && profile.HasModalBody;
+        int  nModes = modal ? profile.ModeRatios!.Length : 0;
+        var modA1 = new float[NCells][];   // 2R·cos(ω)
+        var modA2 = new float[NCells][];   // R²
+        var modGn = new float[NCells][];   // per-mode input gain (noise-power normalised)
+        var mY1L  = new float[NCells][]; var mY2L = new float[NCells][];
+        var mY1R  = new float[NCells][]; var mY2R = new float[NCells][];
+        for (int ci = 0; ci < NCells; ci++)
+        {
+            modA1[ci] = new float[nModes]; modA2[ci] = new float[nModes]; modGn[ci] = new float[nModes];
+            mY1L[ci]  = new float[nModes]; mY2L[ci]  = new float[nModes];
+            mY1R[ci]  = new float[nModes]; mY2R[ci]  = new float[nModes];
+        }
 
         // Proximity/enclosure macro state + morph bus
         float dtFrame  = 1f / (float)controlRateHz;
@@ -214,6 +239,25 @@ public static class DirectOrbitSynth
                 chimeFreq[ci] = sampleRate * 8f / (cellSps[ci] * OrbtLen);
                 cellSpsEff[ci] = cellSps[ci] /
                     (1f + morph * 0.02f * MathF.Sin(2f * MathF.PI * (0.6f + 0.37f * ci) * (float)frame.Time));
+
+                if (modal)
+                {
+                    // Mode m rings at loopRate · ModeFreqMul · ModeRatios[m]; the input
+                    // gain sin(ω)·√(1−R²) normalises sustained broadband excitation so
+                    // long-decay (high-Q) modes don't dwarf short ones.
+                    float loopHz = sampleRate / (cellSps[ci] * OrbtLen);
+                    for (int m = 0; m < nModes; m++)
+                    {
+                        float fm = Math.Clamp(loopHz * profile.ModeFreqMul * profile.ModeRatios![m],
+                                              20f, 0.45f * sampleRate);
+                        float w  = 2f * MathF.PI * fm / sampleRate;
+                        float R  = MathF.Exp(-6.9078f / (profile.ModeDecaysSec![m] * sampleRate)); // T60 decay
+                        modA1[ci][m] = 2f * R * MathF.Cos(w);
+                        modA2[ci][m] = R * R;
+                        modGn[ci][m] = profile.ModeGains![m] * MathF.Sin(w)
+                                     * MathF.Sqrt(1f - R * R) * profile.ModalDrive;
+                    }
+                }
             }
 
             // ── Fold-event detection: frame-to-frame orbit delta per cell ──
@@ -304,13 +348,37 @@ public static class DirectOrbitSynth
                     float cf = lpfCoeff[ci];
                     lpfL[ci] += cf * (hl - lpfL[ci]);
                     lpfR[ci] += cf * (hr - lpfR[ci]);
+                    float vL = lpfL[ci], vR = lpfR[ci];
+
+                    // Modal resonator bank: the conditioned orbit signal excites the
+                    // fractal's tuned body. The DirectOrbit branch then blends between
+                    // raw orbit texture and the resonant body, rather than hard-switching.
+                    if (modal)
+                    {
+                        float rawOrbitL = vL, rawOrbitR = vR;
+                        float bnkL = 0f, bnkR = 0f;
+                        var a1 = modA1[ci]; var a2 = modA2[ci]; var gn = modGn[ci];
+                        var y1l = mY1L[ci]; var y2l = mY2L[ci];
+                        var y1r = mY1R[ci]; var y2r = mY2R[ci];
+                        for (int m = 0; m < nModes; m++)
+                        {
+                            float yl = a1[m] * y1l[m] - a2[m] * y2l[m] + gn[m] * vL;
+                            y2l[m] = y1l[m]; y1l[m] = yl; bnkL += yl;
+                            float yr = a1[m] * y1r[m] - a2[m] * y2r[m] + gn[m] * vR;
+                            y2r[m] = y1r[m]; y1r[m] = yr; bnkR += yr;
+                        }
+                        float modalL = bnkL + profile.ExciterBleed * rawOrbitL;
+                        float modalR = bnkR + profile.ExciterBleed * rawOrbitR;
+                        vL = rawOrbitL + modalBlend * (modalL - rawOrbitL);
+                        vR = rawOrbitR + modalBlend * (modalR - rawOrbitR);
+                    }
 
                     // Spectral-tilt elevation shelf (top rows bright, bottom rows dark)
                     float tilt = rowTilt[ci / 4];
-                    tiltLpfL[ci] += tiltCf * (lpfL[ci] - tiltLpfL[ci]);
-                    tiltLpfR[ci] += tiltCf * (lpfR[ci] - tiltLpfR[ci]);
-                    float tiltedL = lpfL[ci] + tilt * (lpfL[ci] - tiltLpfL[ci]);
-                    float tiltedR = lpfR[ci] + tilt * (lpfR[ci] - tiltLpfR[ci]);
+                    tiltLpfL[ci] += tiltCf * (vL - tiltLpfL[ci]);
+                    tiltLpfR[ci] += tiltCf * (vR - tiltLpfR[ci]);
+                    float tiltedL = vL + tilt * (vL - tiltLpfL[ci]);
+                    float tiltedR = vR + tilt * (vR - tiltLpfR[ci]);
 
                     // Mix into stereo output with column panning
                     float cellGain = CellScale * voiceGain[ci];

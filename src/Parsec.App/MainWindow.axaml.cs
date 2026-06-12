@@ -26,6 +26,7 @@ public partial class MainWindow : Window
     private bool _sonifyActive;
     private SonificationMode _sonifyMode  = SonificationMode.Hybrid;
     private float            _sonifyBlend = 0f;   // 0 = Hybrid, 1 = DirectOrbit
+    private float            _directOrbitModalBlend = 1f;
 
     // Animation timeline state.
     private KeyframeBank? _bank;
@@ -121,6 +122,16 @@ public partial class MainWindow : Window
                     _droneStream.BlendAmount = _sonifyBlend;
             };
 
+        var directOrbitModalBlendSlider = this.FindControl<Slider>("DirectOrbitModalBlendSlider");
+        if (directOrbitModalBlendSlider != null)
+            directOrbitModalBlendSlider.PropertyChanged += (_, e) =>
+            {
+                if (e.Property.Name != nameof(Slider.Value)) return;
+                _directOrbitModalBlend = (float)directOrbitModalBlendSlider.Value;
+                if (_droneStream != null)
+                    _droneStream.DirectOrbitModalBlend = _directOrbitModalBlend;
+            };
+
         var temperamentSlider = this.FindControl<Slider>("TemperamentCeilingSlider");
         if (temperamentSlider != null)
             temperamentSlider.PropertyChanged += (_, e) =>
@@ -172,6 +183,7 @@ public partial class MainWindow : Window
         Closed += OnWindowClosed;
 
         RebuildForActiveFractal();
+        UpdateDirectOrbitModalBlendUi(_view?.ActiveType ?? FractalType.Kifs);
     }
 
     private async void OnWindowClosed(object? sender, EventArgs e)
@@ -204,6 +216,7 @@ public partial class MainWindow : Window
             var voice = ActiveTypeToVoice(_view?.ActiveType ?? FractalType.Mandelbox);
             _droneStream = new FractalDroneStream(() => _sonification.LatestFrame, voice, _sonifyMode);
             _droneStream.BlendAmount = _sonifyBlend;
+            _droneStream.DirectOrbitModalBlend = _directOrbitModalBlend;
             var ceilSlider = this.FindControl<Slider>("TemperamentCeilingSlider");
             if (ceilSlider != null)
                 _droneStream.TemperamentCeiling = (float)ceilSlider.Value;
@@ -318,6 +331,7 @@ public partial class MainWindow : Window
         };
         _view.SetActiveType(type);
         _droneStream?.SetVoice(ActiveTypeToVoice(type));
+        UpdateDirectOrbitModalBlendUi(type);
         if (_generateButton != null)
             _generateButton.IsVisible = type == FractalType.Attractor;
 
@@ -346,6 +360,16 @@ public partial class MainWindow : Window
         FractalType.QJBox       => FractalVoice.QJBox,
         _                       => FractalVoice.Mandelbox,
     };
+
+    private void UpdateDirectOrbitModalBlendUi(FractalType type)
+    {
+        var slider = this.FindControl<Slider>("DirectOrbitModalBlendSlider");
+        if (slider == null) return;
+
+        bool enabled = DirectOrbitProfile.ForVoice(ActiveTypeToVoice(type)).HasModalBody;
+        slider.IsEnabled = enabled;
+        slider.Opacity = enabled ? 1.0 : 0.45;
+    }
 
     private void RebuildPanel()
     {
@@ -649,6 +673,7 @@ public partial class MainWindow : Window
         FractalVoice exportVoice = ActiveTypeToVoice(_view.ActiveType);
         SonificationMode exportSonifyMode = _sonifyMode;
         float exportBlend   = _sonifyBlend;
+        float exportModalBlend = (float)(this.FindControl<Slider>("DirectOrbitModalBlendSlider")?.Value ?? 1.0);
         float exportCeiling = (float)(this.FindControl<Slider>("TemperamentCeilingSlider")?.Value ?? 0.9);
         if (sonify)
         {
@@ -682,7 +707,8 @@ public partial class MainWindow : Window
                             {
                                 pcm = DirectOrbitSynth.Synthesize(sonicFrames,
                                     controlRateHz: RenderFps,
-                                    voice: exportVoice);
+                                    voice: exportVoice,
+                                    modalBodyBlend: exportModalBlend);
                             }
                             else if (exportBlend <= 0.01f)
                             {
@@ -700,7 +726,8 @@ public partial class MainWindow : Window
                                     voice: exportVoice);
                                 var pcmD = DirectOrbitSynth.Synthesize(sonicFrames,
                                     controlRateHz: RenderFps,
-                                    voice: exportVoice);
+                                    voice: exportVoice,
+                                    modalBodyBlend: exportModalBlend);
                                 float hybGain = 1f - exportBlend;
                                 pcm = new short[Math.Max(pcmH.Length, pcmD.Length)];
                                 for (int i = 0; i < pcm.Length; i++)

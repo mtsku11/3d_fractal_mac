@@ -543,6 +543,10 @@ dotnet run --project src/Parsec.Cli/Parsec.Cli.csproj -c Release -- metal-m9d-an
 # writes m9d_animated_direct.wav; Mandelbox helical camera spiral + Scale modulation
 dotnet run --project src/Parsec.Cli/Parsec.Cli.csproj -c Release -- metal-m9d-animated-burning [duration] [outDir]
 # writes m9d_burningship_animated_direct.wav; 3D Burning Ship helical camera spiral + Power modulation
+
+# Track D modal-resonator raw/blend/modal render (Menger + Apollonian)
+dotnet run --project src/Parsec.Cli/Parsec.Cli.csproj -c Release -- metal-d-modal [duration] [outDir] [modalBlend]
+# writes d_menger_raw.wav / d_menger_blend.wav / d_menger_modal.wav + d_apollonian_raw.wav / d_apollonian_blend.wav / d_apollonian_modal.wav
 ```
 
 **M8-spatial stereo design:**
@@ -842,9 +846,9 @@ for (int ci = 0; ci < NCells; ci++) {
 
 **Mode switch without restart.** `Mode` property writes `_mode` (read by `FillBuffer` before each dispatch) and calls `ResetDirectOrbitState()` to clear crossfade state. The worker thread sees the new value at the next `FillBuffer` call — no stop/start needed.
 
-**Apollonian fallback.** Apollonian has no telemetry kernel, so it has no orbit trajectories. Guard in `FillBuffer`:
+**Apollonian DirectOrbit.** Track D added an Apollonian telemetry kernel, so do not keep the old fallback guard:
 ```csharp
-if (_mode == SonificationMode.DirectOrbit && _voice != FractalVoice.Apollonian)
+if (_mode == SonificationMode.DirectOrbit)
     FillDirectOrbit(buf);
 else
     // ... existing voice switch ...
@@ -852,7 +856,7 @@ else
 
 **Export routing.** Capture `_sonifyMode` into a local `exportSonifyMode` at click time (before the async task captures it), then choose the synth:
 ```csharp
-if (exportSonifyMode == SonificationMode.DirectOrbit && exportVoice != FractalVoice.Apollonian)
+if (exportSonifyMode == SonificationMode.DirectOrbit)
     pcm = DirectOrbitSynth.Synthesize(sonicFrames, controlRateHz: RenderFps, voice: exportVoice);
 else
     pcm = HybridSynth.Synthesize(sonicFrames, ...);
@@ -890,13 +894,21 @@ Without this, the first frames fire a 16-cell chime cascade (broke the m9b −6 
 
 `src/Parsec.Audio/Sonification/DirectOrbitProfile.cs` — readonly record struct, `ForVoice()`
 factory. One place to tune register, default lattice generator, enclosure reverb endpoints,
-and chime decay/partial. `RootDivisor` ladder (low → high): Menger 0.5, Kleinian 0.667,
+chime decay/partial, and optional modal resonator body. `RootDivisor` ladder (low → high): Menger 0.5, Kleinian 0.667,
 Mandelbox 1.0, QJBox 1.5, BurningShip 2.25, KIFS 3.0, Apollonian 4.0, Mandelbulb 6.0.
 
 - `FractalDroneStream`: set `_doProfile` in **both** the constructor and `SetVoice()` (and
   recompute `_doChimeDecay` in both — it depends on `ChimeDecaySec`).
 - `DirectOrbitSynth.Synthesize` takes `voice:`; all callers (UI export, CLI) must pass it or
   every fractal silently gets the Mandelbox palette.
+- Modal profiles: `ModeRatios`/`ModeGains`/`ModeDecaysSec` switch the DirectOrbit path from
+  raw orbit playback to a tuned two-pole resonator bank excited by the conditioned orbit. Keep
+  offline and live in sync: `DirectOrbitSynth` can allocate per render, but
+  `FractalDroneStream` must preallocate `_doModal*` arrays (`MaxModalModes=8`) and clear ring
+  state on `ResetDirectOrbitState()` and `SetVoice()`. Current bodies: Menger = odd-harmonic
+  hollow tube; Apollonian = inharmonic high-Q glass. Mode frequency is
+  `loopHz * ModeFreqMul * ModeRatios[m]`, so it retunes with the profile/geometry lattice.
+  Offline raw A/B uses `DirectOrbitSynth.Synthesize(..., enableModal: false)`.
 - Geometry lattice ratios: `GeometryScale.KleinianLatticeRatio` (eigenvalue, octave-reduced
   into (1,2), degenerate → 1.5), `MandelbulbLatticeRatio` (`(power+1)/power`, clamped
   1.03–1.97), and `FoldScaleLatticeRatio` (generic |scale| octave-reduced; **degenerate → 0**,

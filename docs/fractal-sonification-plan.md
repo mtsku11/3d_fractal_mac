@@ -521,8 +521,8 @@ voice enum keys per-fractal telemetry dispatch and must keep working in both mod
 "Sonify Mode" toggle next to the Live Sonify button. Render-to-Video export already captures
 `FractalSonicFrame`s per export frame and synthesizes via the offline synth (wired 2026-06-11
 in `MainWindow.OnRenderToVideoClick`) — pass the mode through to select
-`DirectOrbitSynth` vs `HybridSynth` there. **Apollonian has no telemetry kernel** — in
-DirectOrbit mode it must fall back to its Hybrid timer-bell voice (guard, don't crash).
+`DirectOrbitSynth` vs `HybridSynth` there. Track D added telemetry for Apollonian, so
+DirectOrbit should run for Apollonian; its Hybrid timer-bell voice remains Hybrid-only.
 
 **Build order:**
 - **M9a — Metal trajectory capture (Mandelbox only). ✓ DONE (verified 2026-06-11)**
@@ -765,6 +765,23 @@ voices for the new four; in Hybrid mode they fall through to the generic Mandelb
   KIFS 3.0 (crystalline, 4/3 lattice, icy inharmonic chimes), Apollonian 4.0 (glassy,
   19/16 gasket lattice). Full ladder: Menger 0.5 → Kleinian 0.667 → Mandelbox 1.0 →
   QJBox 1.5 → BurningShip 2.25 → KIFS 3.0 → Apollonian 4.0 → Mandelbulb 6.0.
+- **Modal resonator bodies:** Menger and Apollonian profiles now have optional modal signatures
+  applied by both `DirectOrbitSynth` and `FractalDroneStream`. The conditioned orbit is the
+  exciter; mode frequency is `loopHz * ModeFreqMul * ModeRatios[m]`, keeping the body locked to
+  the same lattice as the raw orbit. Menger uses odd-harmonic tube modes (`1,3,5,7,9`); Apollonian
+  uses inharmonic high-Q glass modes (`1,2.32,4.25,6.63,9.38`). Live state is preallocated and
+  cleared on DirectOrbit reset/voice switch. `DirectOrbitSynth.Synthesize(..., enableModal: false)`
+  gives a raw offline reference. CLI `metal-d-modal [duration] [outDir] [modalBlend]` writes
+  raw/blend/modal triplets from the same telemetry frames
+  (`d_menger_raw.wav`/`d_menger_blend.wav`/`d_menger_modal.wav`,
+  `d_apollonian_raw.wav`/`d_apollonian_blend.wav`/`d_apollonian_modal.wav`).
+- **Raw Orbit <-> Modal Body blend (done, 2026-06-12):** DirectOrbit now has a second blend axis
+  inside the engine. The conditioned orbit can be mixed continuously against the resonant body
+  after excitation and before tilt / master-bus processing, instead of hard-switching to the
+  modal bank. `DirectOrbitSynth.Synthesize(..., modalBodyBlend)` and
+  `FractalDroneStream.DirectOrbitModalBlend` share the same behaviour. The UI exposes a dedicated
+  `Raw Orbit` ↔ `Modal Body` slider and disables it for voices that do not yet carry modal
+  profiles. `1.0` preserves the previous full-modal behaviour.
 - **Lattice ratios:** `GeometryScale.FoldScaleLatticeRatio(scale)` octave-reduces |scale|
   into (1, 2); returns **0 on degenerate** (unison/octave, e.g. KIFS scale 2) so the profile
   default applies — matches `FractalSonicFrame.LatticeRatio` semantics. Menger scale 3 →
@@ -776,6 +793,66 @@ voices for the new four; in Hybrid mode they fall through to the generic Mandelb
   `metal-m9b-direct` (default duration) and `metal-m9d-check` pass. (Note: the m9b −6 dBFS
   gate is duration-sensitive — at 6 s it reads −5.8 dBFS on pre-Track-D commits too;
   validate at the default duration.)
+
+---
+
+### Next phase — geometry-conditioned resonance and stronger macro tone (planned)
+
+The next work should deepen **instance-specific acoustic behaviour**, not add an unrelated third
+synth family. The modal resonator remains **selective** inside `DirectOrbit`; it is not promoted
+to a universal standalone mode.
+
+Priority order:
+
+1. **Raw Orbit <-> Modal Body blend inside DirectOrbit** (done)
+   - Implemented as a continuous per-voice blend after the conditioned orbit stage and before the
+     spectral-tilt / master bus, so modal-capable fractals can move between noisy/raw orbit
+     texture and instrument-like body resonance.
+   - Kept orthogonal to the existing `Hybrid <-> DirectOrbit` blend. One chooses the engine; the
+     other chooses how much of the DirectOrbit branch is raw exciter vs modal body.
+
+2. **Geometry-conditioned modal body, not just family-conditioned**
+   - The current modal profiles are family defaults. Extend them so a specific *instance* of the
+     fractal can sound like "large mass + fine tingly structure" at the same time.
+   - Slow, global metrics should steer the deep body:
+     `HitRatio`, `MeanDepth`, low-passed cell energy sum, large-scale bounded fraction,
+     and/or a low-order size proxy from the orbit spread.
+     These should control modal register tilt, decay length, modal drive, and low-mode gain.
+   - Fast, local/detail metrics should excite or brighten the upper body:
+     fold-event rate, high-row/cell energy skew, orbit delta variance, normal variance,
+     and short-time energy bursts.
+     These should trigger/brighten short high modes rather than retune the whole body every frame.
+   - Design constraint: split **body shape** (slow) from **excitation/detail** (fast) so the
+     resonator does not chatter or sound like parameter automation.
+
+3. **Selective modal rollout to KIFS and QJBox**
+   - Keep the modal path selective where it fits the geometry:
+     KIFS should bias toward brittle/crystalline, short bright upper modes;
+     QJBox should bias toward warmer, smoother, longer mid-register body modes.
+   - Do not force modal bodies onto every telemetry fractal. Mandelbox / BurningShip may still
+     work better with raw-orbit dominance plus chimes/reverb than with a persistent body.
+
+4. **Strengthen the Shepard layer with geometry**
+   - The current Shepard layer is structurally useful but tonally weak because it is mostly a
+     zoom-glide carrier with limited geometry ownership.
+   - Next revision should derive its centre, envelope, and/or partial weighting from whole-fractal
+     geometry rather than only `ZoomVelocity` and centroid pan.
+   - Candidate controls:
+     global resonance estimate from low-passed total cell energy / bounded mass,
+     spectral brightness proxy from `NormalVariance` or upper-row activity,
+     enclosure/proximity for width and bloom,
+     and optional modal locking so the Shepard partial cloud reinforces the active body rather than
+     floating independently.
+   - Goal: the Shepard layer should read as the fractal's large-scale tonal field, not a generic
+     psychoacoustic garnish.
+
+Acceptance direction for this phase:
+
+- A massive filled structure should yield audibly deeper, longer body modes.
+- Fine filamentary or folded detail should add short, bright, high-pitched activity on top.
+- RawOrbit<->ModalBody blend should clearly traverse "texture" ↔ "object resonance" without
+  collapsing loudness or stereo image.
+- Shepard should feel harmonically anchored to the current fractal instance, not merely to camera motion.
 
 ---
 

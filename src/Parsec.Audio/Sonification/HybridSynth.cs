@@ -228,14 +228,14 @@ public static class HybridSynth
             float shepGL  = MathF.Cos((shepPan + 1f) * MathF.PI / 4f) * 1.41421356f;
             float shepGR  = MathF.Sin((shepPan + 1f) * MathF.PI / 4f) * 1.41421356f;
 
-            // M7h: update waveshaper target (Apollonian has no telemetry — skip)
+            // M7h: update waveshaper target (Apollonian Hybrid remains timer-bell only)
             if (!isApolloVoice && frame.WaveshaperCurve is { Length: >= WtLen } wsc)
             {
                 Array.Copy(wsc, wsTableTarget, WtLen);
                 wsHasData = true;
             }
 
-            // Update resonators from cells (or from Apollonian timer for no-telemetry voice)
+            // Update resonators from cells (or from the Apollonian Hybrid timer-bell voice)
             if (isApolloVoice)
             {
                 // Apollonian: trigger interval from camera speed

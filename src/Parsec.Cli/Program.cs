@@ -4979,6 +4979,153 @@ public static class Program
             catch (Exception ex) { Console.Error.WriteLine($"metal-d-direct FAILED: {ex.Message}\n{ex.StackTrace}"); return 1; }
         }
 
+        // metal-d-modal [duration] [outDir] [modalBlend]
+        // Modal-resonator A/B renders: Menger + Apollonian with their DirectOrbitProfile
+        // modal signatures (hollow odd-harmonic tube vs inharmonic high-Q glass).
+        // Writes raw + blended + modal playback sets from the same telemetry frames.
+        // Accept: blended should sit perceptibly between raw texture and full modal body.
+        if (args[0] == "metal-d-modal")
+        {
+            if (!OperatingSystem.IsMacOS()) { Console.Error.WriteLine("metal-d-modal requires macOS."); return 1; }
+            try
+            {
+                double duration    = args.Length >= 2 && double.TryParse(args[1], out var dD) ? dD : 10.0;
+                string outDir      = args.Length >= 3 ? args[2] : Path.GetDirectoryName(ResolveOutputPath("x"))!;
+                float modalBlend   = args.Length >= 4 && float.TryParse(args[3], out var dBlend)
+                    ? Math.Clamp(dBlend, 0f, 1f) : 0.50f;
+                const double controlHz = 30.0;
+                int totalFrames    = (int)Math.Ceiling(duration * controlHz);
+                const float fov    = MathF.PI / 4f;
+                const float aspect = 16f / 9f;
+
+                Console.WriteLine($"metal-d-modal — modal-bank DirectOrbit for Menger/Apollonian, {duration:F1}s @ {controlHz:F0} Hz ({totalFrames} frames), blend {modalBlend:F2}");
+                Directory.CreateDirectory(outDir);
+
+                static List<FractalSonicFrame> BuildFrames<TParams, TRenderer>(
+                    int frames, double hz, float fovR, float asp,
+                    Vector3 startPos, Vector3 endPos,
+                    TParams fxParams,
+                    TRenderer renderer,
+                    Func<TRenderer, TParams, Camera3D, RaymarchSettings, FractalGeometryStats?> runPass,
+                    RaymarchSettings settings,
+                    float latticeRatio)
+                    where TRenderer : class
+                {
+                    var list = new List<FractalSonicFrame>(frames);
+                    var prevPos = startPos;
+                    for (int fi = 0; fi < frames; fi++)
+                    {
+                        float t   = frames > 1 ? fi / (float)(frames - 1) : 0f;
+                        var pos   = Vector3.Lerp(startPos, endPos, t);
+                        var camFwd = Vector3.Normalize(Vector3.Zero - pos);
+                        var cam   = new Camera3D(pos, Vector3.Zero, Vector3.UnitY, fovR, asp);
+                        var stats = runPass(renderer, fxParams, cam, settings);
+                        float camSpd = (pos - prevPos).Length() * (float)hz;
+                        float zoomV  = Vector3.Dot(pos - prevPos, camFwd) * (float)hz;
+                        prevPos = pos;
+
+                        FractalSonicCell[]? cells = null;
+                        if (stats?.Cells is { Length: > 0 } mc)
+                        {
+                            cells = new FractalSonicCell[mc.Length];
+                            for (int ci = 0; ci < mc.Length; ci++)
+                                cells[ci] = new FractalSonicCell(
+                                    mc[ci].WorldPosition, mc[ci].HitRatio, mc[ci].MeanDepth,
+                                    mc[ci].StepComplexity, mc[ci].NormalMean, mc[ci].TrapMean,
+                                    mc[ci].Energy, mc[ci].RayWavetable, mc[ci].OrbitWavetable,
+                                    mc[ci].OrbitTrajectory);
+                        }
+                        list.Add(new FractalSonicFrame(
+                            Time: fi / hz, HitRatio: stats?.HitRatio ?? 0f,
+                            MeanDepth: stats?.MeanDepth ?? 0f, DepthVariance: stats?.DepthVariance ?? 0f,
+                            StepMean: stats?.StepMean ?? 0f, StepP90: stats?.StepP90 ?? 0f,
+                            NormalMean: stats?.NormalMean ?? Vector3.Zero,
+                            NormalVariance: stats?.NormalVariance ?? 0f,
+                            TrapMean: stats?.TrapMean ?? Vector4.Zero,
+                            TrapVariance: stats?.TrapVariance ?? Vector4.Zero,
+                            CameraSpeed: camSpd, ParameterVelocity: 0f,
+                            CameraPosition: pos, CameraForward: camFwd, CameraUp: Vector3.UnitY,
+                            Cells: cells, ZoomVelocity: zoomV,
+                            WaveshaperCurve: stats?.WaveshaperCurve,
+                            FieldScanWaveformTL: stats?.FieldScanWaveformTL,
+                            FieldScanWaveformTR: stats?.FieldScanWaveformTR,
+                            FieldScanWaveformBL: stats?.FieldScanWaveformBL,
+                            FieldScanWaveformBR: stats?.FieldScanWaveformBR,
+                            LatticeRatio: latticeRatio));
+                        if (fi % (int)hz == 0 || fi == frames - 1)
+                            Console.Write($"\r    frame {fi + 1}/{frames}  orbs={(cells?.Count(c => c.OrbitTrajectory != null) ?? 0),2}/16");
+                    }
+                    Console.WriteLine();
+                    return list;
+                }
+
+                static void SynthAndReport(List<FractalSonicFrame> frames, double hz,
+                    string label, string outPath, FractalVoice voice, bool enableModal, float bodyBlend)
+                {
+                    Console.Write($"  Synth {label}...  ");
+                    var sw = System.Diagnostics.Stopwatch.StartNew();
+                    var pcm = DirectOrbitSynth.Synthesize(frames, controlRateHz: hz, voice: voice,
+                        enableModal: enableModal, modalBodyBlend: bodyBlend);
+                    sw.Stop();
+                    WavEncoder.Write(outPath, pcm, DirectOrbitSynth.DefaultSampleRate, 2);
+                    double peak = 20.0 * Math.Log10(
+                        (pcm.Length > 0 ? pcm.Max(s => Math.Abs((int)s)) : 1) / 32767.0 + 1e-10);
+                    long zc = 0;
+                    for (int i = 2; i < pcm.Length; i += 2)
+                        if ((pcm[i] >= 0) != (pcm[i - 2] >= 0)) zc++;
+                    double zcr = zc / Math.Max(1.0, pcm.Length / 2.0 / DirectOrbitSynth.DefaultSampleRate);
+                    bool orbOk = frames.Count > 0 && (frames[^1].Cells?.All(c => c.OrbitTrajectory != null) ?? false);
+                    Console.WriteLine($"{sw.ElapsedMilliseconds} ms | peak {peak:F1} dBFS | zcr {zcr:F0}/s | orbs {(orbOk ? "16/16" : "!!")} → {outPath}");
+                }
+
+                var settingsD = new RaymarchSettings(
+                    MaxSteps: 96, HitEpsilon: 1e-3f, MaxDistance: 20f, NormalEpsilon: 1e-3f,
+                    EnableSoftShadows: false, ShadowSteps: 0, ShadowSoftness: 0f,
+                    EnableAmbientOcclusion: false, AOSamples: 0, AOStepDistance: 0f, AOIntensity: 0f,
+                    HeroSamples: 1, EnableReflections: false, ReflectionBounces: 0,
+                    Gloss: 0f, F0: 0f, LightIntensity: 1f);
+
+                Console.WriteLine("\n[1/2] Menger (modal: hollow odd-harmonic tube)");
+                using (var r = new MetalMengerRenderer())
+                {
+                    if (!r.IsAvailable) Console.WriteLine("  SKIP (renderer unavailable)");
+                    else
+                    {
+                        var p  = new MengerParams();
+                        var fr = BuildFrames(totalFrames, controlHz, fov, aspect,
+                            new Vector3(0f, 2f, 9f), new Vector3(0f, 0.5f, 2.4f),
+                            p, r, (rr, pp, c, s) => rr.RunTelemetryPass(pp, c, s), settingsD,
+                            GeometryScale.FoldScaleLatticeRatio(p.Scale));
+                        SynthAndReport(fr, controlHz, "menger raw", Path.Combine(outDir, "d_menger_raw.wav"), FractalVoice.Menger, enableModal: false, bodyBlend: 0f);
+                        SynthAndReport(fr, controlHz, $"menger blend {modalBlend:F2}", Path.Combine(outDir, "d_menger_blend.wav"), FractalVoice.Menger, enableModal: true, bodyBlend: modalBlend);
+                        SynthAndReport(fr, controlHz, "menger modal", Path.Combine(outDir, "d_menger_modal.wav"), FractalVoice.Menger, enableModal: true, bodyBlend: 1f);
+                    }
+                }
+
+                Console.WriteLine("[2/2] Apollonian (modal: inharmonic high-Q glass)");
+                using (var r = new MetalApollonianRenderer())
+                {
+                    if (!r.IsAvailable) Console.WriteLine("  SKIP (renderer unavailable)");
+                    else
+                    {
+                        var fr = BuildFrames(totalFrames, controlHz, fov, aspect,
+                            new Vector3(0f, 1f, 6f), new Vector3(0f, 0.25f, 1.6f),
+                            new ApollonianParams(), r,
+                            (rr, pp, c, s) => rr.RunTelemetryPass(pp, c, s), settingsD,
+                            0f); // profile default 19/16 (gasket pentatonic third)
+                        SynthAndReport(fr, controlHz, "apollonian raw", Path.Combine(outDir, "d_apollonian_raw.wav"), FractalVoice.Apollonian, enableModal: false, bodyBlend: 0f);
+                        SynthAndReport(fr, controlHz, $"apollonian blend {modalBlend:F2}", Path.Combine(outDir, "d_apollonian_blend.wav"), FractalVoice.Apollonian, enableModal: true, bodyBlend: modalBlend);
+                        SynthAndReport(fr, controlHz, "apollonian modal", Path.Combine(outDir, "d_apollonian_modal.wav"), FractalVoice.Apollonian, enableModal: true, bodyBlend: 1f);
+                    }
+                }
+
+                Console.WriteLine($"\nOK — modal A/B outputs in {outDir}");
+                Console.WriteLine("Accept: compare d_<fractal>_raw.wav / d_<fractal>_blend.wav / d_<fractal>_modal.wav — blend should sit clearly between texture and body.");
+                return 0;
+            }
+            catch (Exception ex) { Console.Error.WriteLine($"metal-d-modal FAILED: {ex.Message}\n{ex.StackTrace}"); return 1; }
+        }
+
         // metal-m9d-animated [duration] [outDir]
         // DirectOrbit listening render with stronger geometry motion than the m9d fly-in:
         // helical camera spiral plus Mandelbox scale modulation.
