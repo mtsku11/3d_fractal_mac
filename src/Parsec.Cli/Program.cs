@@ -5762,6 +5762,196 @@ public static class Program
             catch (Exception ex) { Console.Error.WriteLine($"metal-burning-video-texture FAILED: {ex.Message}\n{ex.StackTrace}"); return 1; }
         }
 
+        // metal-oracle [duration] [out.mp4]
+        // Experimental: BurningShip orbit-trap with texture = blend(Mandelbrot_zoom, prev_frame).
+        // Three recursion layers: Mandelbrot structure mapped through BurningShip iteration-space
+        // UV, previous frames haunting the surface via feedback, Power morphing the UV space live.
+        // Aggressive HDR post (contrast 1.5, tanh, saturation 1.8). Two Metal renders + CPU blend.
+        if (args[0] == "metal-oracle")
+        {
+            if (!OperatingSystem.IsMacOS()) { Console.Error.WriteLine("metal-oracle requires macOS."); return 1; }
+            try
+            {
+                double duration = args.Length >= 2 && double.TryParse(args[1], out var dor) ? dor : 20.0;
+                string outFile  = args.Length >= 3 ? args[2] : ResolveOutputPath("oracle.mp4");
+                Directory.CreateDirectory(Path.GetDirectoryName(outFile)!);
+
+                const int fps    = 24;
+                const int sceneW = 480, sceneH = 270;
+                const int texW   = 320, texH   = 320;   // square — orbit trap UV is roughly square
+                int totalFrames  = (int)Math.Ceiling(duration * fps);
+
+                // Seahorse Valley deep zoom — saturated rainbow cosine palette
+                const string centerRe   = "-0.743643887037158704752191506114774";
+                const string centerIm   =  "0.131825904205311970493132056385139";
+                const double startRadius = 1.5;
+                const double endRadius   = 1e-10;
+                double logStart = Math.Log(startRadius);
+                double logEnd   = Math.Log(endRadius);
+
+                Console.WriteLine($"metal-oracle — BurningShip orbit-trap × Mandelbrot zoom × feedback, {duration:F1}s @ {fps}fps ({totalFrames} frames)");
+                Console.WriteLine($"  texture: {texW}×{texH}  scene: {sceneW}×{sceneH}  Power: 1.4→2.6  zoom: {startRadius}→{endRadius:e1}");
+
+                using var deepRenderer  = new MetalDeepZoomRenderer();
+                if (!deepRenderer.IsAvailable) { Console.Error.WriteLine("Metal deep-zoom unavailable."); return 1; }
+                using var sceneRenderer = new MetalBurningShipRenderer();
+                if (!sceneRenderer.IsAvailable) { Console.Error.WriteLine("Metal BurningShip unavailable."); return 1; }
+
+                var texPalette = new PaletteParams
+                {
+                    Base      = new Vector3(0.5f, 0.5f, 0.5f),
+                    Amp       = new Vector3(0.5f, 0.5f, 0.45f),
+                    Frequency = 1.5f,
+                    Phase     = new Vector3(0.0f, 0.20f, 0.55f),
+                    TrapScale = 1.0f, ShellMix = 0f,
+                };
+                var texBg       = new Color(0.01f, 0.01f, 0.03f);
+                var texSettings = new RaymarchSettings(
+                    MaxSteps: 0, HitEpsilon: 0, MaxDistance: 0, NormalEpsilon: 0,
+                    EnableSoftShadows: false, ShadowSteps: 0, ShadowSoftness: 0,
+                    EnableAmbientOcclusion: false, AOSamples: 0, AOStepDistance: 0, AOIntensity: 0,
+                    HeroSamples: 1,
+                    EnableReflections: false, ReflectionBounces: 0, Gloss: 0, F0: 0, LightIntensity: 0);
+
+                var sceneSettings = new RaymarchSettings(
+                    MaxSteps: 96, HitEpsilon: 1.2e-3f, MaxDistance: 25f, NormalEpsilon: 1.8e-3f,
+                    EnableSoftShadows: true, ShadowSteps: 32, ShadowSoftness: 12f,
+                    EnableAmbientOcclusion: true, AOSamples: 4, AOStepDistance: 0.05f, AOIntensity: 1.0f,
+                    HeroSamples: 1, EnableReflections: false, ReflectionBounces: 0, Gloss: 0f, F0: 0f, LightIntensity: 1.3f);
+
+                var post = new PostProcessParams
+                {
+                    Brightness = 1.05f, Contrast   = 1.5f,
+                    Gamma      = 1.0f,  Saturation  = 1.8f,
+                    HdrEnabled = true,
+                };
+
+                var sceneBg      = new Color(0.02f, 0.02f, 0.05f);
+                var sceneSurface = new Color(0.55f, 0.45f, 0.60f);   // purple-ish base tint
+                var sceneLight   = Vector3.Normalize(new Vector3(0.8f, 1.8f, 1.2f));
+                var scenePalette = new PaletteParams
+                {
+                    Base      = new Vector3(0.5f, 0.4f, 0.6f),
+                    Amp       = new Vector3(0.4f, 0.5f, 0.4f),
+                    Frequency = 0.8f,
+                    Phase     = new Vector3(0.1f, 0.45f, 0.8f),
+                    TrapScale = 1.2f, ShellMix = 0.3f,
+                    TrapMix   = new Vector3(0.4f, 0.5f, 0.35f),
+                };
+
+                string frameDir = Path.Combine(Path.GetDirectoryName(outFile)!, "oracle-frames");
+                Directory.CreateDirectory(frameDir);
+
+                MetalSurfaceTextureManager.ClearImage();
+                MetalSurfaceTextureManager.SetControls(enabled: false, blend: 0f, scale: 1.5f, mode: 1); // orbit trap
+
+                int texLen         = texW * texH * 4;
+                var mandelbrotBytes = new byte[texLen];
+                var feedbackBytes   = new byte[texLen];
+                var blendedBytes    = new byte[texLen];
+                bool bootstrapped   = false;
+
+                for (int i = 0; i < totalFrames; i++)
+                {
+                    float  t     = (float)i / fps;
+                    double tN    = (double)i / totalFrames;
+                    double radius = Math.Exp(logStart + tN * (logEnd - logStart));
+
+                    // Power: slow sinusoidal morph 1.4→2.6, 2 full cycles
+                    float power  = 2.0f + 0.6f * MathF.Sin(2f * MathF.PI * 2f * (float)tN);
+
+                    // Camera: very slow arc — mostly static so orbit trap UV holds still
+                    float camAngle = (float)tN * 0.4f * MathF.PI;
+                    float camR     = 11f - (float)tN * 3f;  // slowly approaching
+                    var camera = new Camera3D(
+                        new Vector3(camR * MathF.Sin(camAngle), 1.5f + (float)tN * 2f, camR * MathF.Cos(camAngle)),
+                        Vector3.Zero, Vector3.UnitY, MathF.PI / 4f, (float)sceneW / sceneH);
+
+                    // Blend: Mandelbrot weight fades in; feedback weight builds from 0→0.5 after 4 s
+                    float feedbackWeight   = Math.Min(Math.Max(t - 4f, 0f) / 4f, 1f) * 0.5f;
+                    float mandelbrotWeight = 1f - feedbackWeight;
+                    float textureBlend     = Math.Min(t / 2.5f, 1.0f) * 0.88f;
+
+                    // --- Step 1: render 2D Mandelbrot zoom frame ---
+                    var view = new Parsec.Rendering.DeepZoom.DeepZoomView
+                    {
+                        CenterRe = centerRe, CenterIm = centerIm,
+                        Radius   = radius,   Formula  = 0,
+                    };
+                    uint[] texPixels = deepRenderer.Render(view, texW, texH, texPalette, texBg, texSettings);
+                    Buffer.BlockCopy(texPixels, 0, mandelbrotBytes, 0, texLen);
+
+                    // --- Step 2: CPU blend Mandelbrot + prev-frame feedback ---
+                    if (!bootstrapped)
+                    {
+                        Buffer.BlockCopy(mandelbrotBytes, 0, blendedBytes, 0, texLen);
+                    }
+                    else
+                    {
+                        for (int p = 0; p < texLen; p++)
+                            blendedBytes[p] = (byte)(mandelbrotBytes[p] * mandelbrotWeight + feedbackBytes[p] * feedbackWeight);
+                    }
+
+                    if (!bootstrapped)
+                    {
+                        MetalSurfaceTextureManager.SetImage(blendedBytes, texW, texH, texW * 4);
+                        bootstrapped = true;
+                    }
+                    else
+                    {
+                        MetalSurfaceTextureManager.UpdateImage(blendedBytes, texW, texH, texW * 4);
+                    }
+                    MetalSurfaceTextureManager.SetControls(enabled: true, blend: textureBlend, scale: 1.5f, mode: 1);
+
+                    // --- Step 3: render 3D BurningShip scene ---
+                    var bs = new BurningShipParams { Power = power };
+                    uint[] scenePixels = sceneRenderer.RenderBurningShip(
+                        bs, camera, sceneW, sceneH,
+                        sceneSettings, sceneBg, sceneSurface, sceneLight, scenePalette, post);
+
+                    // Store scene output as feedback for next frame (at texture resolution via resize)
+                    // Simple: just use the mandelbrot texture dims — feed the scene pixel data
+                    // downsampled by block-copying only as many bytes as fit (scene is smaller than tex)
+                    int sceneLen = scenePixels.Length * 4;
+                    if (sceneLen >= texLen)
+                    {
+                        Buffer.BlockCopy(scenePixels, 0, feedbackBytes, 0, texLen);
+                    }
+                    else
+                    {
+                        // scene is smaller: tile it
+                        Buffer.BlockCopy(scenePixels, 0, feedbackBytes, 0, sceneLen);
+                        Buffer.BlockCopy(scenePixels, 0, feedbackBytes, sceneLen, texLen - sceneLen);
+                    }
+
+                    // Save frame
+                    string framePath = Path.Combine(frameDir, $"frame_{i:D5}.png");
+                    var info = new SKImageInfo(sceneW, sceneH, SKColorType.Rgba8888, SKAlphaType.Premul);
+                    using var bmp = new SKBitmap(info);
+                    var saveBytes = new byte[scenePixels.Length * 4];
+                    Buffer.BlockCopy(scenePixels, 0, saveBytes, 0, saveBytes.Length);
+                    Marshal.Copy(saveBytes, 0, bmp.GetPixels(), saveBytes.Length);
+                    ImageOutput.SavePng(bmp, framePath);
+
+                    if (i % 24 == 0 || i == totalFrames - 1)
+                        Console.WriteLine($"  frame {i + 1}/{totalFrames}  power={power:F3}  radius={radius:e2}  fbWeight={feedbackWeight:F2}  blend={textureBlend:F2}  t={t:F1}s");
+                }
+
+                Console.WriteLine($"  muxing → {outFile} ...");
+                var ffArgs = $"-y -framerate {fps} -i \"{frameDir}/frame_%05d.png\" -c:v libx264 -preset slow -crf 16 -pix_fmt yuv420p \"{outFile}\"";
+                var proc = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("ffmpeg", ffArgs)
+                    { RedirectStandardError = true, UseShellExecute = false })!;
+                proc.WaitForExit();
+                if (proc.ExitCode != 0) { Console.Error.WriteLine("ffmpeg failed"); return 1; }
+                Directory.Delete(frameDir, recursive: true);
+                MetalSurfaceTextureManager.ClearImage();
+                MetalSurfaceTextureManager.SetControls(enabled: false, blend: 0f, scale: 1f, mode: 0);
+                Console.WriteLine($"  done → {outFile}");
+                return 0;
+            }
+            catch (Exception ex) { Console.Error.WriteLine($"metal-oracle FAILED: {ex.Message}\n{ex.StackTrace}"); return 1; }
+        }
+
         // metal-cross-fractal-texture [duration] [out.mp4]
         // Cross-fractal texture: render a Mandelbrot deep-zoom frame each tick, project it onto
         // the Mandelbox surface via triplanar mapping. Two renders per frame (2D tex + 3D scene).
