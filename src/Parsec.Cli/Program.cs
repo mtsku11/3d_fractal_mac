@@ -6756,6 +6756,172 @@ public static class Program
             catch (Exception ex) { Console.Error.WriteLine($"metal-m9d-check FAILED: {ex.Message}\n{ex.StackTrace}"); return 1; }
         }
 
+        // metal-golden [--generate]
+        // Golden-frame regression: renders 5 fixed-seed deterministic frames (64×64, 1 sample)
+        // and compares SHA-256 hashes against committed baselines in tests/golden/hashes.txt.
+        // Pass --generate on first run (or after intentional shader changes) to write baselines.
+        if (args[0] == "metal-golden")
+        {
+            if (!OperatingSystem.IsMacOS()) { Console.Error.WriteLine("metal-golden requires macOS."); return 1; }
+            try
+            {
+                bool generate = args.Contains("--generate");
+                string goldenDir = Path.Combine(
+                    Path.GetDirectoryName(System.Reflection.Assembly.GetExecutingAssembly().Location) ?? ".",
+                    "..", "..", "..", "..", "..", "tests", "golden");
+                goldenDir = Path.GetFullPath(goldenDir);
+                Directory.CreateDirectory(goldenDir);
+                string hashFile = Path.Combine(goldenDir, "hashes.txt");
+
+                const int w = 64, h = 64;
+                var settings = new RaymarchSettings(
+                    MaxSteps: 128, HitEpsilon: 5e-4f, MaxDistance: 30f, NormalEpsilon: 6e-4f,
+                    EnableSoftShadows: false, ShadowSteps: 32, ShadowSoftness: 8f,
+                    EnableAmbientOcclusion: false, AOSamples: 3, AOStepDistance: 0.05f, AOIntensity: 0.35f,
+                    HeroSamples: 1, EnableReflections: false, ReflectionBounces: 0,
+                    Gloss: 0f, F0: 0f, LightIntensity: 1.8f);
+                var palette  = PaletteParams.Default;
+                var bg       = new Color(0.02f, 0.03f, 0.07f);
+                var surf     = new Color(0.6f, 0.6f, 0.6f);
+                var light    = Vector3.Normalize(new Vector3(1f, 2f, 1.5f));
+                var camera   = new Camera3D(new Vector3(0f, 1f, 5f), Vector3.Zero, Vector3.UnitY, MathF.PI / 4f, 1f);
+                var post     = new PostProcessParams { Brightness = 1f, Contrast = 1f, Gamma = 1f, Saturation = 1f, HdrEnabled = false };
+
+                DomainWarpState.SetPhase(0f);
+                MetalSurfaceTextureManager.ClearImage();
+                MetalSurfaceTextureManager.SetControls(enabled: false, blend: 0f, scale: 1f, mode: 0);
+
+                static string Sha256Hex(uint[] pixels)
+                {
+                    byte[] raw = new byte[pixels.Length * 4];
+                    Buffer.BlockCopy(pixels, 0, raw, 0, raw.Length);
+                    using var sha = System.Security.Cryptography.SHA256.Create();
+                    return string.Concat(sha.ComputeHash(raw).Select(b => b.ToString("x2")));
+                }
+
+                var rendered = new List<(string name, string hash)>();
+
+                // 1 — Plain Mandelbox
+                {
+                    using var r = new MetalMandelboxRenderer();
+                    var px = r.RenderMandelbox(new MandelboxParams(), camera, w, h, settings, bg, surf, light, palette, post);
+                    rendered.Add(("plain_mandelbox", Sha256Hex(px)));
+                }
+                Console.WriteLine($"  plain_mandelbox         done ({rendered[^1].hash[..12]}…)");
+
+                // 2 — Mandelbulb
+                {
+                    using var r = new MetalMandelbulbRenderer();
+                    var px = r.RenderMandelbulb(new MandelbulbParams(), camera, w, h, settings, bg, surf, light, palette, postProcess: post);
+                    rendered.Add(("mandelbulb", Sha256Hex(px)));
+                }
+                Console.WriteLine($"  mandelbulb              done ({rendered[^1].hash[..12]}…)");
+
+                // 3 — BurningShip with orbit-trap projection
+                {
+                    // Minimal 4×4 checkerboard test texture (RGBA8)
+                    int texW = 4, texH = 4;
+                    var texBytes = new byte[texW * texH * 4];
+                    for (int ty = 0; ty < texH; ty++)
+                    for (int tx = 0; tx < texW; tx++)
+                    {
+                        byte v = (byte)(((tx + ty) & 1) == 0 ? 220 : 80);
+                        int offs = (ty * texW + tx) * 4;
+                        texBytes[offs] = v; texBytes[offs+1] = v; texBytes[offs+2] = (byte)(255 - v); texBytes[offs+3] = 255;
+                    }
+                    MetalSurfaceTextureManager.SetImage(texBytes, texW, texH, texW * 4);
+                    MetalSurfaceTextureManager.SetControls(enabled: true, blend: 0.7f, scale: 1f, mode: 2); // orbit trap
+                    using var r = new MetalBurningShipRenderer();
+                    var bs   = new BurningShipParams();
+                    var px   = r.RenderBurningShip(bs, camera, w, h, settings, bg, surf, light, palette, post);
+                    rendered.Add(("burningship_orbittrap", Sha256Hex(px)));
+                    MetalSurfaceTextureManager.SetControls(enabled: false, blend: 0f, scale: 1f, mode: 0);
+                    MetalSurfaceTextureManager.ClearImage();
+                }
+                Console.WriteLine($"  burningship_orbittrap   done ({rendered[^1].hash[..12]}…)");
+
+                // 4 — Mandelbox with domain warp enabled
+                {
+                    DomainWarpState.SetControls(enabled: true, strength: 0.15f, scale: 1.5f);
+                    DomainWarpState.SetPhase(0f);
+                    using var r = new MetalMandelboxRenderer();
+                    var px = r.RenderMandelbox(new MandelboxParams(), camera, w, h, settings, bg, surf, light, palette, post);
+                    rendered.Add(("mandelbox_domainwarp", Sha256Hex(px)));
+                    DomainWarpState.SetControls(enabled: false, strength: 0f, scale: 1f);
+                }
+                Console.WriteLine($"  mandelbox_domainwarp    done ({rendered[^1].hash[..12]}…)");
+
+                // 5 — Deep zoom (Mandelbrot, Seahorse Valley, fixed radius)
+                {
+                    var dzSettings = new RaymarchSettings(
+                        MaxSteps: 0, HitEpsilon: 0, MaxDistance: 0, NormalEpsilon: 0,
+                        EnableSoftShadows: false, ShadowSteps: 0, ShadowSoftness: 0,
+                        EnableAmbientOcclusion: false, AOSamples: 0, AOStepDistance: 0, AOIntensity: 0,
+                        HeroSamples: 1, EnableReflections: false, ReflectionBounces: 0,
+                        Gloss: 0f, F0: 0f, LightIntensity: 0f);
+                    var view = new Parsec.Rendering.DeepZoom.DeepZoomView
+                    {
+                        CenterRe = "-0.74364388703715870",
+                        CenterIm = "0.13182590420531197",
+                        Radius   = 1e-6,
+                        Formula  = 0,
+                    };
+                    using var r = new MetalDeepZoomRenderer();
+                    var px = r.Render(view, w, h, palette, bg, dzSettings);
+                    rendered.Add(("deepzoom_mandelbrot", Sha256Hex(px)));
+                }
+                Console.WriteLine($"  deepzoom_mandelbrot     done ({rendered[^1].hash[..12]}…)");
+
+                Console.WriteLine();
+
+                if (generate)
+                {
+                    var lines = rendered.Select(e => $"{e.name}  {e.hash}");
+                    File.WriteAllLines(hashFile, lines);
+                    Console.WriteLine($"Wrote {rendered.Count} baselines → {hashFile}");
+                    Console.WriteLine("metal-golden baselines generated.");
+                    return 0;
+                }
+
+                // Compare against stored baselines
+                if (!File.Exists(hashFile))
+                {
+                    Console.Error.WriteLine($"Baseline file not found: {hashFile}");
+                    Console.Error.WriteLine("Run with --generate to create baselines.");
+                    return 1;
+                }
+
+                var baselines = File.ReadAllLines(hashFile)
+                    .Where(l => !string.IsNullOrWhiteSpace(l))
+                    .Select(l => l.Split(new char[]{' ', '\t'}, StringSplitOptions.RemoveEmptyEntries))
+                    .Where(p => p.Length >= 2)
+                    .ToDictionary(p => p[0], p => p[1]);
+
+                int pass = 0, fail = 0;
+                foreach (var (name, hash) in rendered)
+                {
+                    if (!baselines.TryGetValue(name, out var expected))
+                    {
+                        Console.WriteLine($"  {name,-28} MISSING BASELINE");
+                        fail++;
+                    }
+                    else if (hash == expected)
+                    {
+                        Console.WriteLine($"  {name,-28} PASS");
+                        pass++;
+                    }
+                    else
+                    {
+                        Console.WriteLine($"  {name,-28} FAIL (got {hash[..12]}… expected {expected[..12]}…)");
+                        fail++;
+                    }
+                }
+                Console.WriteLine($"\n  {pass} passed, {fail} failed");
+                return fail == 0 ? 0 : 1;
+            }
+            catch (Exception ex) { Console.Error.WriteLine($"metal-golden FAILED: {ex.Message}\n{ex.StackTrace}"); return 1; }
+        }
+
         // metal-attractor-smoke [w] [h]
         // Verify the MetalAttractorRenderer compiles and renders non-background pixels.
         if (args[0] == "metal-attractor-smoke")
@@ -6974,6 +7140,7 @@ public static class Program
         Console.WriteLine("  parsec metal-hybrid-smoke [w] [h]    Metal Hybrid smoke test (macOS only)");
         Console.WriteLine("  parsec metal-orbit-gif [frames] [w] [h] [out.gif]  Orbiting Mandelbulb GIF (macOS only)");
         Console.WriteLine("  parsec metal-attractor-smoke [w] [h]  Metal Attractor spatial-hash tube smoke test (macOS only)");
+        Console.WriteLine("  parsec metal-golden [--generate]     Golden-frame regression (5 scenarios, SHA-256 hash compare)");
         Console.WriteLine("  parsec m7a-check              JI/temperament quantizer self-check");
         Console.WriteLine("  parsec help           Show this help");
         Console.WriteLine();

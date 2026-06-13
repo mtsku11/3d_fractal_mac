@@ -990,6 +990,14 @@ Apple M4 Pro (12,958/76,800 px changed at blend 0.85). **`MTLBuffer.Contents` *i
 this host** — the smoke reads back its `uint[]` fine; an earlier "non-mappable Contents / readback
 seam" theory was wrong, masked by the injector crash that aborted before readback was ever reached.
 
+## Golden-frame regression harness (2026-06-13)
+
+`metal-golden` renders 5 deterministic 64×64 frames (HeroSamples=1, phase=0, warp off, texture off)
+and compares SHA-256 hashes against `tests/golden/hashes.txt`. Run `metal-golden --generate` once
+after intentional shader or injector changes to update baselines; `metal-golden` is the daily CI
+check. Scenarios: plain Mandelbox, Mandelbulb, BurningShip orbit-trap, Mandelbox domain-warp,
+Seahorse Valley deep-zoom. Requires macOS.
+
 ## Stale-DLL trap with two agents in one working tree (2026-06-12)
 
 When a second agent (Codex) is building in the same checkout, `dotnet build Parsec.sln` can
