@@ -77,7 +77,7 @@ float3x3 eulerRotation(float3 r) {
     return rz * ry * rx;
 }
 
-float estimateFull(float3 p, constant FoldParams& fp, thread float4& outTrap) {
+float estimateFull(float3 p, constant FoldParams& fp, thread float4& outTrap, thread float2& outTrapUv) {
     float scale  = fp.boxParams.x;
     float minR   = fp.boxParams.z;
     float fixedR = fp.boxParams.w;
@@ -94,6 +94,8 @@ float estimateFull(float3 p, constant FoldParams& fp, thread float4& outTrap) {
     float3 z = p;
     float dr = 1.0f;
     outTrap = float4(1e20f);
+    outTrapUv = float2(0.5f);
+    float _minOD = 1e20f;
     const float BAILOUT2 = 1000.0f;
 
     for (int i = 0; i < fp.iterations; i++) {
@@ -110,6 +112,8 @@ float estimateFull(float3 p, constant FoldParams& fp, thread float4& outTrap) {
         outTrap.z = min(outTrap.z, length(z.xy));
         outTrap.w = min(outTrap.w, abs(rz - 1.0f));
 
+        if (rz < _minOD) { _minOD = rz; outTrapUv = z.xy / 4.0f; }
+
         if (dot(z, z) > BAILOUT2) break;
     }
 
@@ -117,8 +121,8 @@ float estimateFull(float3 p, constant FoldParams& fp, thread float4& outTrap) {
 }
 
 float estimate(float3 p, constant FoldParams& fp) {
-    float4 dummy;
-    return estimateFull(p, fp, dummy);
+    float4 dummy; float2 dummyUv;
+    return estimateFull(p, fp, dummy, dummyUv);
 }
 
 // ============================================================================

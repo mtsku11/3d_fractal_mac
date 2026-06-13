@@ -52,7 +52,7 @@ struct RenderParams {
 // polar from +Z, phi azimuthal). Log-space derivative accumulation prevents
 // fp32 overflow at high iteration counts (direct dr overflows near iter 43).
 
-float estimateFull(float3 p, constant FoldParams& fp, thread float4& outTrap) {
+float estimateFull(float3 p, constant FoldParams& fp, thread float4& outTrap, thread float2& outTrapUv) {
     float power   = fp.boxParams.x;
     float bailout = fp.boxParams.y;
 
@@ -60,6 +60,8 @@ float estimateFull(float3 p, constant FoldParams& fp, thread float4& outTrap) {
     float  ldr = 0.0f;  // log of running derivative; true dr = exp(ldr)
     float  r   = 0.0f;
     outTrap = float4(1e20f);
+    outTrapUv = float2(0.5f);
+    float _minOD = 1e20f;
 
     for (int i = 0; i < fp.iterations; i++) {
         r = length(z);
@@ -79,10 +81,13 @@ float estimateFull(float3 p, constant FoldParams& fp, thread float4& outTrap) {
                         sin(theta) * sin(phi),
                         cos(theta)) + p;
 
-        outTrap.x = min(outTrap.x, length(z));
+        float _od = length(z);
+        outTrap.x = min(outTrap.x, _od);
         outTrap.y = min(outTrap.y, abs(z.x));
         outTrap.z = min(outTrap.z, length(z.xy));
-        outTrap.w = min(outTrap.w, abs(length(z) - 1.0f));
+        outTrap.w = min(outTrap.w, abs(_od - 1.0f));
+
+        if (_od < _minOD) { _minOD = _od; outTrapUv = z.xy / max(bailout, 1e-4f); }
     }
 
     // DE = 0.5 * log(r) * r / dr = 0.5 * log(r) * r * exp(-ldr)
@@ -90,8 +95,8 @@ float estimateFull(float3 p, constant FoldParams& fp, thread float4& outTrap) {
 }
 
 float estimate(float3 p, constant FoldParams& fp) {
-    float4 dummy;
-    return estimateFull(p, fp, dummy);
+    float4 dummy; float2 dummyUv;
+    return estimateFull(p, fp, dummy, dummyUv);
 }
 
 // ============================================================================

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading.Tasks;
 using Avalonia.Controls;
 using Avalonia.Input;
@@ -196,6 +197,15 @@ public partial class MainWindow : Window
             {
                 if (e.Property.Name == nameof(Slider.Value) && _view != null)
                     _view.DomainWarpScale = (float)domainWarpScaleSlider.Value;
+            };
+
+        var projectionSelector = this.FindControl<ComboBox>("SurfaceTextureProjectionSelector");
+        if (projectionSelector != null)
+            projectionSelector.SelectionChanged += (_, _) =>
+            {
+                if (_view != null)
+                    _view.SurfaceTextureProjection = projectionSelector.SelectedIndex == 1 ? 1 : 0;
+                UpdateSurfaceTextureUi(_view?.ActiveType ?? FractalType.Kifs);
             };
 
         var surfaceTextureLoadButton = this.FindControl<Button>("SurfaceTextureLoadButton");
@@ -467,6 +477,13 @@ public partial class MainWindow : Window
         if (sourceSelector != null) sourceSelector.IsEnabled = supportsTexture;
         if (imageButtons != null) imageButtons.IsVisible = isImage;
         if (loadVideoButton != null) loadVideoButton.IsVisible = isVideo;
+
+        // Disable Orbit Trap option for fractals that don't support it.
+        if (projectionSelector != null && projectionSelector.ItemCount >= 2)
+        {
+            var orbitTrapItem = projectionSelector.Items.OfType<ComboBoxItem>().Skip(1).FirstOrDefault();
+            if (orbitTrapItem != null) orbitTrapItem.IsEnabled = _view.SupportsOrbitTrap;
+        }
 
         string tip = supportsTexture
             ? "3D preview, hero stills, and video export support image-based triplanar surface colour."

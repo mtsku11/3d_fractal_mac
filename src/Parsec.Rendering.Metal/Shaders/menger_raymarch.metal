@@ -37,7 +37,7 @@ float3x3 mengerEulerRot(float ax, float ay, float az) {
     return Rz * Ry * Rx;
 }
 
-float estimateFull(float3 p, constant FoldParams& fp, thread float4& outTrap) {
+float estimateFull(float3 p, constant FoldParams& fp, thread float4& outTrap, thread float2& outTrapUv) {
     float scale = fp.boxParams.x;
     float3 off  = fp.boxParams.yzw;
     float3x3 R  = mengerEulerRot(fp.surfParams.x, fp.surfParams.y, fp.surfParams.z);
@@ -45,6 +45,8 @@ float estimateFull(float3 p, constant FoldParams& fp, thread float4& outTrap) {
     float3 z  = p;
     float  dr = 1.0f;
     outTrap = float4(1e20f);
+    outTrapUv = float2(0.5f);
+    float _minOD = 1e20f;
 
     for (int i = 0; i < fp.iterations; i++) {
         z = R * z;
@@ -60,10 +62,13 @@ float estimateFull(float3 p, constant FoldParams& fp, thread float4& outTrap) {
             z.z += off.z * (scale - 1.0f);
         dr *= scale;
 
-        outTrap.x = min(outTrap.x, length(z));
+        float _od = length(z);
+        outTrap.x = min(outTrap.x, _od);
         outTrap.y = min(outTrap.y, abs(z.x));
         outTrap.z = min(outTrap.z, length(z.xy));
-        outTrap.w = min(outTrap.w, abs(length(z) - 1.0f));
+        outTrap.w = min(outTrap.w, abs(_od - 1.0f));
+
+        if (_od < _minOD) { _minOD = _od; outTrapUv = z.xy / max(scale, 1e-4f); }
     }
 
     float3 d = max(abs(z) - 1.0f, 0.0f);
@@ -71,8 +76,8 @@ float estimateFull(float3 p, constant FoldParams& fp, thread float4& outTrap) {
 }
 
 float estimate(float3 p, constant FoldParams& fp) {
-    float4 dummy;
-    return estimateFull(p, fp, dummy);
+    float4 dummy; float2 dummyUv;
+    return estimateFull(p, fp, dummy, dummyUv);
 }
 
 // ============================================================================

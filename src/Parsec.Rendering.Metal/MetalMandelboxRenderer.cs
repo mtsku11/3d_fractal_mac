@@ -42,7 +42,7 @@ public sealed class MetalMandelboxRenderer : IThreeDimensionalRenderBackend
         try
         {
             var dev = MTLDevice.CreateSystemDefaultDevice();
-            var src = MetalSurfaceTextureShaderInjector.Inject(LoadEmbeddedMsl("mandelbox_raymarch.metal"));
+            var src = MetalSurfaceTextureShaderInjector.InjectOrbitTrap(LoadEmbeddedMsl("mandelbox_raymarch.metal"));
             NSError libError = default;
             var library = dev.NewLibrary(NSString.String(src), new MTLCompileOptions(), ref libError);
             var function = library.NewFunction(NSString.String("mandelbox_raymarch"));

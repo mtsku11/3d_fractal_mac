@@ -158,6 +158,7 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
     private readonly DeepZoomView _mandelbrotZoomDeepView = new();
     private List<(byte[] bytes, int w, int h, int rowBytes)>? _videoFrames;
     private int _videoFrameIndex;
+    private int _surfaceTextureProjection; // 0 = triplanar, 1 = orbit trap
     private bool _domainWarpEnabled;
     private float _domainWarpStrength = 0.15f;
     private float _domainWarpScale = 1.5f;
@@ -208,6 +209,22 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
             MarkDirty();
         }
     }
+
+    // 0 = triplanar, 1 = orbit trap (only for fractals with InjectOrbitTrap)
+    public int SurfaceTextureProjection
+    {
+        get => _surfaceTextureProjection;
+        set
+        {
+            _surfaceTextureProjection = value;
+            SyncSurfaceTextureState();
+            MarkDirty();
+        }
+    }
+
+    // Orbit trap is only supported for fractals whose shaders run InjectOrbitTrap.
+    public bool SupportsOrbitTrap => ActiveType is FractalType.BurningShip or FractalType.Mandelbox
+        or FractalType.Mandelbulb or FractalType.Kifs or FractalType.Menger;
 
     public bool DomainWarpEnabled
     {
@@ -314,10 +331,12 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
             SurfaceTextureSource.Video        => _videoFrames?.Count > 0,
             _                                 => false,
         };
+        int mode = (SupportsOrbitTrap && _surfaceTextureProjection == 1) ? 1 : 0;
         MetalSurfaceTextureManager.SetControls(
             enabled: supportsTexture && hasTexture,
             blend: _surfaceTextureBlend,
-            scale: _surfaceTextureScale);
+            scale: _surfaceTextureScale,
+            mode: mode);
         GpuSurfaceTextureManager.SetControls(
             enabled: supportsTexture && _textureSource == SurfaceTextureSource.Image && HasSurfaceTextureImage,
             blend: _surfaceTextureBlend,

@@ -152,8 +152,9 @@
             <Slider Name="SurfaceTextureScaleSlider" Minimum="0.1" Maximum="8" Value="1.25"
                     TickFrequency="0.05" IsSnapToTickEnabled="False" />
             <TextBlock Text="Projection" FontSize="11" />
-            <ComboBox Name="SurfaceTextureProjectionSelector" SelectedIndex="0">
+            <ComboBox Name="SurfaceTextureProjectionSelector" SelectedIndex="0" HorizontalAlignment="Stretch">
               <ComboBoxItem>Triplanar</ComboBoxItem>
+              <ComboBoxItem>Orbit Trap</ComboBoxItem>
             </ComboBox>
           </StackPanel>
           <StackPanel Margin="0,10,0,0" Spacing="4">

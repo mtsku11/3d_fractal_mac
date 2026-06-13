@@ -166,30 +166,45 @@ float3 applySurfaceTexture(float3 baseAlbedo, float3 pos, float3 normal,
             return InjectDomainWarp(src);
 
         // Capture trapUv alongside gTrap at the hit point.
+        // Inline form (Menger, BurningShip): "float4 gTrap; estimateFull(hitPoint, fp, gTrap);"
         src = src.Replace(
             "float4 gTrap; estimateFull(hitPoint, fp, gTrap);",
             "float4 gTrap; float2 trapUv; estimateFull(hitPoint, fp, gTrap, trapUv);");
+        // Split form (Mandelbox, Mandelbulb, KIFS): gTrap declaration on its own line.
+        src = src.Replace(
+            "    float4 gTrap;\n    estimateFull(hitPoint, fp, gTrap);",
+            "    float4 gTrap; float2 trapUv; estimateFull(hitPoint, fp, gTrap, trapUv);");
 
         // traceRay signature — same anchor as Inject(), uniquely identifies traceRay.
         src = src.Replace(
             "int maxSteps,\n             constant FoldParams& fp, constant RenderParams& rp)",
             "int maxSteps,\n             constant FoldParams& fp, constant RenderParams& rp, texture2d<float> surfaceTexture)");
 
-        // traceRay call site in the kernel.
+        // traceRay call site in the kernel (local-variable form).
         src = src.Replace(
             "traceRay(ro, rd, hitEps, maxDist, normalEps, maxSteps, fp, rp)",
             "traceRay(ro, rd, hitEps, maxDist, normalEps, maxSteps, fp, rp, surfaceTexture)");
+
+        // menger_raymarch.metal calls traceRay with inline RenderParams fields rather than
+        // local variables, so the standard call-site patch above misses it.
+        src = src.Replace(
+            "traceRay(ro, rd, rp.marchA.x, rp.marchA.y, rp.marchA.z, rp.marchI0, fp, rp)",
+            "traceRay(ro, rd, rp.marchA.x, rp.marchA.y, rp.marchA.z, rp.marchI0, fp, rp, surfaceTexture)");
 
         // Texture binding in the kernel signature.
         src = src.Replace(
             "output [[buffer(2)]],",
             "output [[buffer(2)]],\n    texture2d<float>    surfaceTexture [[texture(0)]],");
 
-        // Albedo assignment: pass trap UV when in orbit-trap mode, world hit point otherwise.
-        // The ternary runs on the GPU — zero overhead when triplanar mode is active.
+        // Albedo assignment — two forms depending on which shader pattern is in use.
+        // Form 1: albedo via local variable (Mandelbox, Mandelbulb, KIFS, BurningShip).
         src = src.Replace(
             "h.albedo = albedo;",
             "h.albedo = applySurfaceTexture(albedo, rp.background.w >= 1.5f ? float3(trapUv.x, trapUv.y, 0.0f) : hitPoint, normal, rp, surfaceTexture);");
+        // Form 2: albedo via trapAlbedo inline (Menger). Uses h.normal (set on the line above).
+        src = src.Replace(
+            "h.albedo = trapAlbedo(gTrap, rp);",
+            "h.albedo = applySurfaceTexture(trapAlbedo(gTrap, rp), rp.background.w >= 1.5f ? float3(trapUv.x, trapUv.y, 0.0f) : hitPoint, h.normal, rp, surfaceTexture);");
 
         int envIndex = src.IndexOf("float3 envGradient(", StringComparison.Ordinal);
         if (envIndex >= 0)

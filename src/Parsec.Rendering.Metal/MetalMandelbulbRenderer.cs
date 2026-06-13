@@ -36,7 +36,7 @@ public sealed class MetalMandelbulbRenderer : IDisposable
         try
         {
             var dev = MTLDevice.CreateSystemDefaultDevice();
-            var src = MetalSurfaceTextureShaderInjector.Inject(LoadEmbeddedMsl("mandelbulb_raymarch.metal"));
+            var src = MetalSurfaceTextureShaderInjector.InjectOrbitTrap(LoadEmbeddedMsl("mandelbulb_raymarch.metal"));
             NSError libError = default;
             var library = dev.NewLibrary(NSString.String(src), new MTLCompileOptions(), ref libError);
             var function = library.NewFunction(NSString.String("mandelbulb_raymarch"));

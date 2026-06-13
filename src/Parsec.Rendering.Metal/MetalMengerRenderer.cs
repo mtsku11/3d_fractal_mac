@@ -21,7 +21,7 @@ public sealed class MetalMengerRenderer : IDisposable
     {
         try {
             var dev = MTLDevice.CreateSystemDefaultDevice();
-            var src = MetalSurfaceTextureShaderInjector.Inject(LoadEmbeddedMsl("menger_raymarch.metal"));
+            var src = MetalSurfaceTextureShaderInjector.InjectOrbitTrap(LoadEmbeddedMsl("menger_raymarch.metal"));
             NSError le = default; var lib = dev.NewLibrary(NSString.String(src), new MTLCompileOptions(), ref le);
             var fn = lib.NewFunction(NSString.String("menger_raymarch"));
             NSError pe = default; _pso = dev.NewComputePipelineState(fn, ref pe);

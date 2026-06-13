@@ -31,7 +31,7 @@ public sealed class MetalKifsRenderer : IDisposable
         try
         {
             var dev = MTLDevice.CreateSystemDefaultDevice();
-            var src = MetalSurfaceTextureShaderInjector.Inject(LoadEmbeddedMsl("kifs_raymarch.metal"));
+            var src = MetalSurfaceTextureShaderInjector.InjectOrbitTrap(LoadEmbeddedMsl("kifs_raymarch.metal"));
             NSError libError = default;
             var library = dev.NewLibrary(NSString.String(src), new MTLCompileOptions(), ref libError);
             var function = library.NewFunction(NSString.String("kifs_raymarch"));
