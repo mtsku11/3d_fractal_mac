@@ -477,6 +477,7 @@ public partial class MainWindow : Window
         if (sourceSelector != null) sourceSelector.IsEnabled = supportsTexture;
         if (imageButtons != null) imageButtons.IsVisible = isImage;
         if (loadVideoButton != null) loadVideoButton.IsVisible = isVideo;
+        if (projectionSelector != null) projectionSelector.IsEnabled = supportsTexture;
 
         // Disable Orbit Trap option for fractals that don't support it.
         if (projectionSelector != null && projectionSelector.ItemCount >= 2)
@@ -485,6 +486,11 @@ public partial class MainWindow : Window
             if (orbitTrapItem != null) orbitTrapItem.IsEnabled = _view.SupportsOrbitTrap;
         }
 
+        // Domain warp only applies to 3D Metal fractals.
+        if (domainWarpToggle != null) domainWarpToggle.IsEnabled = supportsTexture;
+        if (domainWarpStrength != null) domainWarpStrength.IsEnabled = supportsTexture;
+        if (domainWarpScale != null) domainWarpScale.IsEnabled = supportsTexture;
+
         string tip = supportsTexture
             ? "3D preview, hero stills, and video export support image-based triplanar surface colour."
             : "Surface texture projection is unavailable for Deep Zoom and Attractor.";
@@ -492,8 +498,8 @@ public partial class MainWindow : Window
         if (sourceSelector != null) ToolTip.SetTip(sourceSelector, tip);
         if (blendSlider != null) ToolTip.SetTip(blendSlider, "0 = fractal palette only, 1 = image colour only.");
         if (scaleSlider != null) ToolTip.SetTip(scaleSlider, "Higher values repeat the image more densely across the fractal.");
-        if (projectionSelector != null) ToolTip.SetTip(projectionSelector, "First pass is object-space triplanar projection.");
-        if (domainWarpToggle != null) ToolTip.SetTip(domainWarpToggle, "Procedurally bends the 3D sample space before fractal evaluation.");
+        if (projectionSelector != null) ToolTip.SetTip(projectionSelector, "Triplanar: world-space mapping stable under camera motion. Orbit Trap: UV follows fractal iteration path — deforms with parameters. Orbit Trap available on Mandelbox, Mandelbulb, KIFS, Menger, and BurningShip.");
+        if (domainWarpToggle != null) ToolTip.SetTip(domainWarpToggle, "Procedurally bends the 3D sample space before fractal evaluation. Not available for Deep Zoom or Attractor.");
         if (domainWarpStrength != null) ToolTip.SetTip(domainWarpStrength, "Higher values distort the fractal geometry more strongly.");
         if (domainWarpScale != null) ToolTip.SetTip(domainWarpScale, "Lower values bend large forms; higher values create denser tearing.");
     }

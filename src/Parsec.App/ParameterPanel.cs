@@ -57,6 +57,24 @@ public sealed class ParameterPanel : UserControl
 
     private Control BuildRow(ParamDescriptor p)
     {
+        if (p.IsToggle)
+        {
+            var cb = new CheckBox
+            {
+                Content = p.Label,
+                IsChecked = p.Get() >= 0.5,
+                Foreground = new SolidColorBrush(Color.FromRgb(0xd0, 0xd0, 0xd8)),
+                FontSize = 12,
+                Margin = new Thickness(0, 4, 0, 4),
+            };
+            cb.IsCheckedChanged += (_, _) =>
+            {
+                p.Set(cb.IsChecked == true ? 1.0 : 0.0);
+                OnChanged?.Invoke();
+            };
+            return cb;
+        }
+
         var container = new StackPanel { Spacing = 2, Margin = new Thickness(0, 4, 0, 4) };
 
         // Label + numeric readout on one line.

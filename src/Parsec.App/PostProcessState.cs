@@ -45,6 +45,10 @@ public sealed class PostProcessState
                 Label = "Gamma", Group = "Post: grade",
                 Min = 0.1, Max = 4.0, Decimals = 2,
                 Get = () => Gamma, Set = v => Gamma = (float)v },
+            new ParamDescriptor {
+                Label = "HDR Tone-map (tanh)", Group = "Post: grade",
+                Min = 0.0, Max = 1.0, Decimals = 0, IsToggle = true,
+                Get = () => HdrEnabled ? 1.0 : 0.0, Set = v => HdrEnabled = v >= 0.5 },
         },
     };
 }

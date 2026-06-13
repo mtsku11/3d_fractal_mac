@@ -17,6 +17,8 @@ public sealed class ParamDescriptor
     public int Decimals { get; init; } = 2;
     public required Func<double> Get { get; init; }
     public required Action<double> Set { get; init; }
+    /// <summary>When true, the panel renders a CheckBox (0 = false, 1 = true) instead of a slider.</summary>
+    public bool IsToggle { get; init; }
 }
 
 /// <summary>
