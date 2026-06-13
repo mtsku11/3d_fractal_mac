@@ -60,15 +60,16 @@ vec3 domainWarp(vec3 p) {
     if (strength <= 0.0) return p;
 
     float scale = max(rp.subpixelJitter.w, 1e-4);
+    float phase = rp.trapMix.w;   // animation phase packed by DomainWarpState.GetPhase()
     vec3 q = p * scale;
     vec3 w1 = vec3(
-        sin(q.y + sin(q.z * 1.37)),
-        sin(q.z + sin(q.x * 1.21)),
-        sin(q.x + sin(q.y * 1.11)));
+        sin(q.y + sin(q.z * 1.37) + phase),
+        sin(q.z + sin(q.x * 1.21) + phase * 1.13),
+        sin(q.x + sin(q.y * 1.11) + phase * 0.87));
     vec3 w2 = vec3(
-        cos(q.z * 0.73 + q.y),
-        cos(q.x * 0.67 + q.z),
-        cos(q.y * 0.79 + q.x));
+        cos(q.z * 0.73 + q.y + phase * 0.71),
+        cos(q.x * 0.67 + q.z + phase),
+        cos(q.y * 0.79 + q.x + phase * 1.27));
     return p + strength * (0.75 * w1 + 0.25 * w2);
 }
 

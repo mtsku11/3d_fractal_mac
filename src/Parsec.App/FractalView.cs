@@ -1084,6 +1084,9 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
                 return;
             }
 
+            if (_domainWarpEnabled)
+                DomainWarpState.SetPhase((float)_sonicClock.Elapsed.TotalSeconds * 0.25f);
+
             var sw = System.Diagnostics.Stopwatch.StartNew();
             var camera = _cam.ToCamera(PreviewWidth, PreviewHeight);
             int rw = PreviewWidth, rh = PreviewHeight;
@@ -1125,6 +1128,9 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
             }
             _texW = rw; _texH = rh;
             _dirty = false;
+
+            if (_domainWarpEnabled)
+                MarkDirty();
 
             if (_softBitmap == null
                 || _softBitmap.PixelSize.Width != rw

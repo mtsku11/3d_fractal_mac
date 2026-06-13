@@ -246,7 +246,7 @@ public sealed class MetalBurningShipRenderer : IDisposable
             PalBase  = new Vector4(palette.Base,  palette.Frequency),
             PalAmp   = new Vector4(palette.Amp,   palette.TrapScale),
             PalPhase = new Vector4(palette.Phase, palette.ShellMix),
-            TrapMix  = new Vector4(palette.TrapMix, 0f),
+            TrapMix  = new Vector4(palette.TrapMix, DomainWarpState.GetPhase()),
             SubpixelJitter = DomainWarpState.EncodeSubpixelJitter(subpixelJitter),
             ReflectParams  = new Vector4(s.EnableReflections ? 1f : 0f, s.ReflectionBounces, s.Gloss, s.F0),
         };

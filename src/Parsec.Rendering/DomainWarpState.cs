@@ -8,6 +8,7 @@ public static class DomainWarpState
     private static bool _enabled;
     private static float _strength = 0.15f;
     private static float _scale = 1.5f;
+    private static float _phase;
 
     public static void SetControls(bool enabled, float strength, float scale)
     {
@@ -17,6 +18,16 @@ public static class DomainWarpState
             _strength = Math.Clamp(strength, 0f, 0.75f);
             _scale = Math.Clamp(scale, 0.05f, 12f);
         }
+    }
+
+    public static void SetPhase(float phase)
+    {
+        lock (Gate) { _phase = phase; }
+    }
+
+    public static float GetPhase()
+    {
+        lock (Gate) { return _phase; }
     }
 
     public static Vector4 EncodeSubpixelJitter(Vector2 jitter)

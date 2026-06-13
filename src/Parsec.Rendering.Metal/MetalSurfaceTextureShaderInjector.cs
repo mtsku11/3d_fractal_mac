@@ -8,15 +8,16 @@ float3 domainWarp(float3 p, constant RenderParams& rp) {
     if (strength <= 0.0f) return p;
 
     float scale = max(rp.subpixelJitter.w, 1e-4f);
+    float phase = rp.trapMix.w;   // animation phase packed by DomainWarpState.GetPhase()
     float3 q = p * scale;
     float3 w1 = float3(
-        sin(q.y + sin(q.z * 1.37f)),
-        sin(q.z + sin(q.x * 1.21f)),
-        sin(q.x + sin(q.y * 1.11f)));
+        sin(q.y + sin(q.z * 1.37f) + phase),
+        sin(q.z + sin(q.x * 1.21f) + phase * 1.13f),
+        sin(q.x + sin(q.y * 1.11f) + phase * 0.87f));
     float3 w2 = float3(
-        cos(q.z * 0.73f + q.y),
-        cos(q.x * 0.67f + q.z),
-        cos(q.y * 0.79f + q.x));
+        cos(q.z * 0.73f + q.y + phase * 0.71f),
+        cos(q.x * 0.67f + q.z + phase),
+        cos(q.y * 0.79f + q.x + phase * 1.27f));
     return p + strength * (0.75f * w1 + 0.25f * w2);
 }
 
