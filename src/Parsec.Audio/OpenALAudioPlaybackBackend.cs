@@ -14,14 +14,20 @@ public sealed class OpenALAudioPlaybackBackend : IAudioPlaybackBackend
         if (OperatingSystem.IsMacOS() && Environment.OSVersion.Version.Major >= 15
             && !_overrideInstalled)
         {
+            // Prefer a libopenal.dylib bundled alongside this assembly (packaged .app),
+            // then fall back to the Homebrew install for development builds.
+            string exeDir = Path.GetDirectoryName(
+                System.Reflection.Assembly.GetExecutingAssembly().Location) ?? ".";
             var cellarVersions = Directory.Exists("/opt/homebrew/Cellar/openal-soft")
                 ? Directory.GetDirectories("/opt/homebrew/Cellar/openal-soft")
                     .Select(v => Path.Combine(v, "lib", "libopenal.dylib"))
                 : [];
             string[] softPaths =
             [
+                Path.Combine(exeDir, "libopenal.dylib"),           // bundled inside .app
                 ..cellarVersions,
                 "/opt/homebrew/lib/libopenal.dylib",
+                "/opt/homebrew/opt/openal-soft/lib/libopenal.dylib",
                 "/usr/local/Cellar/openal-soft/1.25.2/lib/libopenal.dylib",
                 "/usr/local/lib/libopenal.dylib",
             ];

@@ -27,16 +27,16 @@ When you finish a phase, tick it here and update the cross-referenced doc.
 
 ### Unfinished, thin, or inconsistent — this plan closes these
 
-| # | Gap | Evidence | Phase |
-|---|-----|----------|-------|
-| 1 | **Projection ComboBox is a stub** — 1 item, not wired to `mode`; orbit trap unreachable in-app | `MainWindow.axaml:146`, `MainWindow.axaml.cs:451` (tooltip only) | 3 |
-| 2 | **Orbit trap stranded on BurningShip** — only shader with `outTrapUv` | `grep outTrapUv` → 1 file | 3 |
-| 3 | **Texture-source sprawl** — 6 overlapping CLI-only demos; app exposes only Image + Feedback | `metal-{oracle,closeup-hq,closeup-oracle,cross-fractal-texture,fractal-feedback,burning-video-texture}` | 2 |
-| 4 | **Domain warp uncommitted**; Metal warps primary march + normal only, **not** shadow/AO (OpenGL does) | working tree; `MetalSurfaceTextureShaderInjector.cs:205–227` vs `raymarch_main.glsl:93,108` | 1 |
-| 5 | **HDR tanh toggle not in UI** — `HdrEnabled` is a field only | `PostProcessState.cs:17` | 4 |
-| 6 | **Attractor has no Metal renderer** — dark placeholder on macOS | no `MetalAttractor*`; `HasMetalPreviewRenderer` false | 5 |
-| 7 | **No golden-frame regression** anywhere | — | 6 |
-| 8 | **M11 packaging / notarization** not started | — | 7 |
+| # | Gap | Evidence | Phase | Status |
+|---|-----|----------|-------|--------|
+| 1 | **Projection ComboBox is a stub** — 1 item, not wired to `mode`; orbit trap unreachable in-app | `MainWindow.axaml:146`, `MainWindow.axaml.cs:451` (tooltip only) | 3 | ✅ Done |
+| 2 | **Orbit trap stranded on BurningShip** — only shader with `outTrapUv` | `grep outTrapUv` → 1 file | 3 | ✅ Done (14 shaders) |
+| 3 | **Texture-source sprawl** — 6 overlapping CLI-only demos; app exposes only Image + Feedback | `metal-{oracle,closeup-hq,closeup-oracle,cross-fractal-texture,fractal-feedback,burning-video-texture}` | 2 | ✅ Done |
+| 4 | **Domain warp uncommitted**; Metal warps primary march + normal only, **not** shadow/AO (OpenGL does) | working tree; `MetalSurfaceTextureShaderInjector.cs:205–227` vs `raymarch_main.glsl:93,108` | 1 | ✅ Done |
+| 5 | **HDR tanh toggle not in UI** — `HdrEnabled` is a field only | `PostProcessState.cs:17` | 4 | ✅ Done |
+| 6 | **Attractor has no Metal renderer** — dark placeholder on macOS | no `MetalAttractor*`; `HasMetalPreviewRenderer` false | 5 | ✅ Done |
+| 7 | **No golden-frame regression** anywhere | — | 6 | ✅ Done (metal-golden, 5 scenarios) |
+| 8 | **M11 packaging / notarization** not started | — | 7 | ✅ Done (packaging/build-app.sh) |
 
 ### Organizing insight
 

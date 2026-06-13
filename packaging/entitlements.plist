@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- Hardened runtime — required for notarization -->
+    <key>com.apple.security.cs.allow-jit</key>
+    <false/>
+    <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+    <!-- .NET AOT and the JIT need unsigned executable memory -->
+    <true/>
+    <key>com.apple.security.cs.disable-library-validation</key>
+    <!-- Needed so our bundled libopenal.dylib (not Apple-signed) loads under hardened runtime -->
+    <true/>
+    <!-- Network client for future update checks (harmless to include now) -->
+    <key>com.apple.security.network.client</key>
+    <false/>
+    <!-- Allow reading user-selected files via NSOpenPanel -->
+    <key>com.apple.security.files.user-selected.read-only</key>
+    <true/>
+    <key>com.apple.security.files.user-selected.read-write</key>
+    <true/>
+</dict>
+</plist>
