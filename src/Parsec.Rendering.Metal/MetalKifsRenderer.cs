@@ -274,7 +274,7 @@ public sealed class MetalKifsRenderer : IDisposable
             CamForward  = new Vector4(fwd,   0f),
             CamRight    = new Vector4(right, 0f),
             CamUp       = new Vector4(up,    0f),
-            TanFov      = new Vector4(tanX, tanY, 0f, 0f),
+            TanFov      = GlowState.EncodeTanFov(tanX, tanY),
             LightDir    = new Vector4(lightDir, s.LightIntensity),
             Background = MetalSurfaceTextureManager.EncodeBackground(background),
             Surface = MetalSurfaceTextureManager.EncodeSurface(surface),

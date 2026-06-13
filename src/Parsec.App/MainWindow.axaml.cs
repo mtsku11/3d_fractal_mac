@@ -199,6 +199,30 @@ public partial class MainWindow : Window
                     _view.DomainWarpScale = (float)domainWarpScaleSlider.Value;
             };
 
+        var glowEnableCheckBox = this.FindControl<CheckBox>("GlowEnableCheckBox");
+        if (glowEnableCheckBox != null)
+            glowEnableCheckBox.IsCheckedChanged += (_, _) =>
+            {
+                if (_view != null)
+                    _view.GlowEnabled = glowEnableCheckBox.IsChecked == true;
+            };
+
+        var glowStrengthSlider = this.FindControl<Slider>("GlowStrengthSlider");
+        if (glowStrengthSlider != null)
+            glowStrengthSlider.PropertyChanged += (_, e) =>
+            {
+                if (e.Property.Name == nameof(Slider.Value) && _view != null)
+                    _view.GlowStrength = (float)glowStrengthSlider.Value;
+            };
+
+        var glowFalloffSlider = this.FindControl<Slider>("GlowFalloffSlider");
+        if (glowFalloffSlider != null)
+            glowFalloffSlider.PropertyChanged += (_, e) =>
+            {
+                if (e.Property.Name == nameof(Slider.Value) && _view != null)
+                    _view.GlowFalloff = (float)glowFalloffSlider.Value;
+            };
+
         var projectionSelector = this.FindControl<ComboBox>("SurfaceTextureProjectionSelector");
         if (projectionSelector != null)
             projectionSelector.SelectionChanged += (_, _) =>
@@ -468,6 +492,9 @@ public partial class MainWindow : Window
         var domainWarpToggle = this.FindControl<CheckBox>("DomainWarpEnableCheckBox");
         var domainWarpStrength = this.FindControl<Slider>("DomainWarpStrengthSlider");
         var domainWarpScale = this.FindControl<Slider>("DomainWarpScaleSlider");
+        var glowToggle = this.FindControl<CheckBox>("GlowEnableCheckBox");
+        var glowStrength = this.FindControl<Slider>("GlowStrengthSlider");
+        var glowFalloff = this.FindControl<Slider>("GlowFalloffSlider");
         if (_view == null) return;
 
         bool supportsTexture = _view.SupportsSurfaceTexture;
@@ -491,6 +518,12 @@ public partial class MainWindow : Window
         if (domainWarpStrength != null) domainWarpStrength.IsEnabled = supportsTexture;
         if (domainWarpScale != null) domainWarpScale.IsEnabled = supportsTexture;
 
+        // Step-glow is implemented on the flagship raymarch shaders only.
+        bool supportsGlow = _view.SupportsGlow;
+        if (glowToggle != null) glowToggle.IsEnabled = supportsGlow;
+        if (glowStrength != null) glowStrength.IsEnabled = supportsGlow;
+        if (glowFalloff != null) glowFalloff.IsEnabled = supportsGlow;
+
         string tip = supportsTexture
             ? "3D preview, hero stills, and video export support image-based triplanar surface colour."
             : "Surface texture projection is unavailable for Deep Zoom and Attractor.";
@@ -502,6 +535,9 @@ public partial class MainWindow : Window
         if (domainWarpToggle != null) ToolTip.SetTip(domainWarpToggle, "Procedurally bends the 3D sample space before fractal evaluation. Not available for Deep Zoom or Attractor.");
         if (domainWarpStrength != null) ToolTip.SetTip(domainWarpStrength, "Higher values distort the fractal geometry more strongly.");
         if (domainWarpScale != null) ToolTip.SetTip(domainWarpScale, "Lower values bend large forms; higher values create denser tearing.");
+        if (glowToggle != null) ToolTip.SetTip(glowToggle, "Fake-volumetric glow: rays grazing the surface emit light, so filaments and edges shine. Available on Mandelbox, Mandelbulb, Kleinian, BurningShip, KIFS, and Menger.");
+        if (glowStrength != null) ToolTip.SetTip(glowStrength, "Overall glow brightness. Glow is tinted by the active palette's bright colour.");
+        if (glowFalloff != null) ToolTip.SetTip(glowFalloff, "Low = wide soft halo; high = tight glow hugging the surface.");
     }
 
     private void RefreshSurfaceTexturePathText()

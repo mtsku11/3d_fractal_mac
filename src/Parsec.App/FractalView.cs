@@ -163,6 +163,9 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
     private bool _domainWarpEnabled;
     private float _domainWarpStrength = 0.15f;
     private float _domainWarpScale = 1.5f;
+    private bool _glowEnabled;
+    private float _glowStrength = 2.5f;
+    private float _glowFalloff = 12f;
 
     public bool SurfaceTextureEnabled => _textureSource != SurfaceTextureSource.None;
 
@@ -260,6 +263,29 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
         }
     }
 
+    public bool GlowEnabled
+    {
+        get => _glowEnabled;
+        set { _glowEnabled = value; SyncGlowState(); MarkDirty(); }
+    }
+
+    public float GlowStrength
+    {
+        get => _glowStrength;
+        set { _glowStrength = Math.Clamp(value, 0f, 8f); SyncGlowState(); MarkDirty(); }
+    }
+
+    public float GlowFalloff
+    {
+        get => _glowFalloff;
+        set { _glowFalloff = Math.Clamp(value, 0.1f, 500f); SyncGlowState(); MarkDirty(); }
+    }
+
+    // Step-glow is implemented in the flagship raymarch shaders (same set as orbit
+    // trap). Other 3D fractals ignore the glow lanes until their kernels are updated.
+    public bool SupportsGlow => ActiveType is FractalType.Mandelbox or FractalType.Mandelbulb
+        or FractalType.Kleinian or FractalType.BurningShip or FractalType.Kifs or FractalType.Menger;
+
     public bool SupportsSurfaceTexture => ActiveType != FractalType.DeepZoom && ActiveType != FractalType.Attractor;
 
     public string SurfaceTextureLabel => _surfaceTexturePath is { Length: > 0 }
@@ -273,6 +299,7 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
         ActiveType = type;
         SyncSurfaceTextureState();
         SyncDomainWarpState();
+        SyncGlowState();
         MarkDirty();
     }
 
@@ -350,6 +377,14 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
             enabled: ActiveType != FractalType.DeepZoom && ActiveType != FractalType.Attractor && _domainWarpEnabled,
             strength: _domainWarpStrength,
             scale: _domainWarpScale);
+    }
+
+    private void SyncGlowState()
+    {
+        GlowState.SetControls(
+            enabled: SupportsGlow && _glowEnabled,
+            strength: _glowStrength,
+            falloff: _glowFalloff);
     }
 
     private void UpdateFeedbackTexture(uint[] pixels, int rw, int rh)

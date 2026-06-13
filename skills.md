@@ -990,6 +990,20 @@ Apple M4 Pro (12,958/76,800 px changed at blend 0.85). **`MTLBuffer.Contents` *i
 this host** — the smoke reads back its `uint[]` fine; an earlier "non-mappable Contents / readback
 seam" theory was wrong, masked by the injector crash that aborted before readback was ever reached.
 
+## Step-glow (fake volumetric glow) (2026-06-13)
+
+Per-march glow: each ray accumulates `1/(1+d²·falloff)` over its DE steps, so near-misses to
+the surface emit light (luminous filaments + energy halo). Packed into the free `tanFov.z`
+(strength) / `tanFov.w` (falloff) lanes via `GlowState.EncodeTanFov(tanX, tanY)` — a global
+mirroring `DomainWarpState`. Per shader: add `float glow;` to `Hit`, accumulate `glowAccum`
+in the march loop, set `h.glow = glowAccum/maxSteps` before both returns, then in the kernel
+`glowTotal += dot(throughput,0.3333)*h.glow` and `color += glowTotal*tanFov.z*clamp(palBase+palAmp)`.
+Glow hue tracks the palette's bright end. **Strength 0 ⇒ identical output** (golden-safe; default off).
+Implemented on the 6 flagship shaders (Mandelbox, Mandelbulb, Kleinian, BurningShip, KIFS, Menger);
+`FractalView.SupportsGlow` gates the UI to that set. Verify: `metal-glow-smoke [strength] [falloff]`
+(A/B luma delta + PNGs). **Gotcha:** pack and read the SAME lanes — first cut packed `tanFov.z/w`
+but read `marchB.z/w` (texture scale/aspect = 1.0), silently forcing glow on and breaking golden.
+
 ## Golden-frame regression harness (2026-06-13)
 
 `metal-golden` renders 5 deterministic 64×64 frames (HeroSamples=1, phase=0, warp off, texture off)

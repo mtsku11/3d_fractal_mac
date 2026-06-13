@@ -6922,6 +6922,86 @@ public static class Program
             catch (Exception ex) { Console.Error.WriteLine($"metal-golden FAILED: {ex.Message}\n{ex.StackTrace}"); return 1; }
         }
 
+        // metal-glow-smoke [strength] [falloff] [outDir]
+        // A/B render of Mandelbox with step-glow off vs on. Verifies the glow path
+        // compiles, raises luminance, and changes pixels. Writes both PNGs.
+        if (args[0] == "metal-glow-smoke")
+        {
+            if (!OperatingSystem.IsMacOS()) { Console.Error.WriteLine("metal-glow-smoke requires macOS."); return 1; }
+            try
+            {
+                float strength = args.Length > 1 && float.TryParse(args[1], out var gs) ? gs : 2.5f;
+                float falloff  = args.Length > 2 && float.TryParse(args[2], out var gf) ? gf : 12f;
+                string outDir  = args.Length > 3 ? args[3] : Path.Combine(Path.GetTempPath(), "parsec-glow");
+                Directory.CreateDirectory(outDir);
+
+                const int w = 320, h = 240;
+                var camera   = new Camera3D(new Vector3(0f, 1f, 5f), Vector3.Zero, Vector3.UnitY, MathF.PI / 4f, (float)w / h);
+                var settings = new RaymarchSettings(
+                    MaxSteps: 160, HitEpsilon: 4e-4f, MaxDistance: 30f, NormalEpsilon: 5e-4f,
+                    EnableSoftShadows: true, ShadowSteps: 48, ShadowSoftness: 10f,
+                    EnableAmbientOcclusion: true, AOSamples: 5, AOStepDistance: 0.04f, AOIntensity: 0.4f,
+                    HeroSamples: 1, EnableReflections: false, ReflectionBounces: 0,
+                    Gloss: 0f, F0: 0f, LightIntensity: 2.0f);
+                // Saturated palette so the glow tint reads clearly.
+                var palette = new PaletteParams
+                {
+                    Base = new Vector3(0.30f, 0.35f, 0.55f), Amp = new Vector3(0.55f, 0.45f, 0.45f),
+                    Frequency = 1.4f, Phase = new Vector3(0.0f, 0.30f, 0.62f), TrapScale = 0.9f,
+                    TrapMix = new Vector3(0.6f, 0.4f, 0.3f), ShellMix = 0.25f,
+                };
+                var bg    = new Color(0.02f, 0.03f, 0.07f);
+                var surf  = Color.Rgb(200, 200, 210);
+                var light = Vector3.Normalize(new Vector3(1f, 2f, 1.5f));
+
+                void WritePng(uint[] px, string name)
+                {
+                    var info  = new SKImageInfo(w, h, SKColorType.Rgba8888, SKAlphaType.Premul);
+                    var bmp   = new SKBitmap(info);
+                    var bytes = new byte[px.Length * 4];
+                    Buffer.BlockCopy(px, 0, bytes, 0, bytes.Length);
+                    Marshal.Copy(bytes, 0, bmp.GetPixels(), bytes.Length);
+                    ImageOutput.SavePng(bmp, Path.Combine(outDir, name));
+                }
+                static double MeanLuma(uint[] px)
+                {
+                    double sum = 0;
+                    foreach (var p in px)
+                    {
+                        double r = (p & 0xFF), g = ((p >> 8) & 0xFF), b = ((p >> 16) & 0xFF);
+                        sum += 0.299 * r + 0.587 * g + 0.114 * b;
+                    }
+                    return sum / px.Length;
+                }
+
+                using var r = new MetalMandelboxRenderer();
+                if (!r.IsAvailable) { Console.Error.WriteLine("Metal backend unavailable."); return 1; }
+
+                GlowState.SetControls(enabled: false, strength: 0f, falloff: falloff);
+                var off = r.RenderMandelbox(new MandelboxParams(), camera, w, h, settings, bg, surf, light, palette);
+                WritePng(off, "glow_off.png");
+
+                GlowState.SetControls(enabled: true, strength: strength, falloff: falloff);
+                var on = r.RenderMandelbox(new MandelboxParams(), camera, w, h, settings, bg, surf, light, palette);
+                WritePng(on, "glow_on.png");
+                GlowState.SetControls(enabled: false, strength: 0f, falloff: falloff); // reset
+
+                int changed = 0;
+                for (int i = 0; i < off.Length; i++) if (off[i] != on[i]) changed++;
+                double lumaOff = MeanLuma(off), lumaOn = MeanLuma(on);
+
+                Console.WriteLine($"metal-glow-smoke — strength={strength} falloff={falloff}, {w}×{h}");
+                Console.WriteLine($"  mean luma  off={lumaOff:F2}  on={lumaOn:F2}  (+{lumaOn - lumaOff:F2})");
+                Console.WriteLine($"  changed pixels: {changed}/{off.Length} ({100.0 * changed / off.Length:F1}%)");
+                Console.WriteLine($"  PNGs: {Path.Combine(outDir, "glow_off.png")} , glow_on.png");
+
+                bool pass = lumaOn > lumaOff + 0.5 && changed > off.Length / 20;
+                Console.WriteLine(pass ? "metal-glow-smoke PASS" : "metal-glow-smoke FAIL (glow had no/low effect)");
+                return pass ? 0 : 1;
+            }
+            catch (Exception ex) { Console.Error.WriteLine($"metal-glow-smoke FAILED: {ex.Message}\n{ex.StackTrace}"); return 1; }
+        }
+
         // metal-attractor-smoke [w] [h]
         // Verify the MetalAttractorRenderer compiles and renders non-background pixels.
         if (args[0] == "metal-attractor-smoke")
@@ -7141,6 +7221,7 @@ public static class Program
         Console.WriteLine("  parsec metal-orbit-gif [frames] [w] [h] [out.gif]  Orbiting Mandelbulb GIF (macOS only)");
         Console.WriteLine("  parsec metal-attractor-smoke [w] [h]  Metal Attractor spatial-hash tube smoke test (macOS only)");
         Console.WriteLine("  parsec metal-golden [--generate]     Golden-frame regression (5 scenarios, SHA-256 hash compare)");
+        Console.WriteLine("  parsec metal-glow-smoke [strength] [falloff] [outDir]  Mandelbox step-glow A/B render (macOS only)");
         Console.WriteLine("  parsec m7a-check              JI/temperament quantizer self-check");
         Console.WriteLine("  parsec help           Show this help");
         Console.WriteLine();

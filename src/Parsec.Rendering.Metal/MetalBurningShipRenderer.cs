@@ -236,7 +236,7 @@ public sealed class MetalBurningShipRenderer : IDisposable
             ImageWidth = width, ImageHeight = height, RowOffset = 0, RowCount = height,
             CamPos = new Vector4(camera.Position, 0f), CamForward = new Vector4(fwd, 0f),
             CamRight = new Vector4(right, 0f), CamUp = new Vector4(up, 0f),
-            TanFov = new Vector4(tanX, tanY, 0f, 0f),
+            TanFov = GlowState.EncodeTanFov(tanX, tanY),
             LightDir = new Vector4(lightDir, s.LightIntensity),
             Background = MetalSurfaceTextureManager.EncodeBackground(background),
             Surface = MetalSurfaceTextureManager.EncodeSurface(surface),

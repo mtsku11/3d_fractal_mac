@@ -152,23 +152,26 @@ float3 envGradient(float3 rd, constant RenderParams& rp) {
     return env + float3(0.60f, 0.50f, 0.40f) * pow(sun, 48.0f) * intensity;
 }
 
-struct Hit { bool hit; float3 pos; float3 normal; float3 albedo; float t; };
+struct Hit { bool hit; float3 pos; float3 normal; float3 albedo; float t; float glow; };
 
 Hit traceRay(float3 ro, float3 rd,
              float hitEps, float maxDist, float normalEps, int maxSteps,
              constant FoldParams& fp, constant RenderParams& rp) {
-    Hit h; h.hit = false; h.pos = float3(0); h.normal = float3(0); h.albedo = float3(0); h.t = maxDist;
+    Hit h; h.hit = false; h.pos = float3(0); h.normal = float3(0); h.albedo = float3(0); h.t = maxDist; h.glow = 0.0f;
     float tEnter;
     if (!intersectSphereForward(ro, rd, fp.boundSphere.xyz, fp.boundSphere.w, tEnter)) return h;
     float t = max(0.0f, tEnter);
     bool didHit = false; float fudge = fp.rot.w; int i = 0; float lastD = 1e9f;
+    float glowFalloff = max(rp.tanFov.w, 1e-4f); float glowAccum = 0.0f;
     for (i = 0; i < maxSteps; i++) {
         float d = estimate(ro + rd * t, fp) * fudge;
         float effectiveEps = max(hitEps, 0.5f * (2.0f * rp.tanFov.y / float(rp.imageHeight)) * t);
         if (d < effectiveEps) { didHit = true; break; }
+        glowAccum += 1.0f / (1.0f + d * d * glowFalloff);
         lastD = d; t += d;
         if (t > maxDist) break;
     }
+    h.glow = glowAccum / float(maxSteps);
     if (!didHit && i >= maxSteps && t <= maxDist && lastD < hitEps * 4.0f) didHit = true;
     if (!didHit) return h;
     float3 hitPoint = ro + rd * t;
@@ -214,9 +217,10 @@ kernel void menger_raymarch(
     bool reflectOn = rp.reflectParams.x > 0.5f;
     int maxBounces = int(rp.reflectParams.y);
     float gloss = rp.reflectParams.z; float F0 = rp.reflectParams.w;
-    float3 color = float3(0); float3 throughput = float3(1);
+    float3 color = float3(0); float3 throughput = float3(1); float glowTotal = 0.0f;
     for (int bounce = 0; bounce <= maxBounces; bounce++) {
         Hit h = traceRay(ro, rd, rp.marchA.x, rp.marchA.y, rp.marchA.z, rp.marchI0, fp, rp);
+        glowTotal += dot(throughput, float3(0.3333f)) * h.glow;
         if (!h.hit) { color += throughput * (bounce == 0 ? rp.background.xyz : envGradient(rd, rp)); break; }
         float3 direct = shadeDirect(h, rp.marchA.x, rp.marchA.y, fp, rp);
         if (!reflectOn || bounce == maxBounces) { color += throughput * direct; break; }
@@ -229,6 +233,9 @@ kernel void menger_raymarch(
         rd = reflect(rd, h.normal);
         if (max(throughput.r, max(throughput.g, throughput.b)) < 0.01f) break;
     }
+    float glowStrength = rp.tanFov.z;
+    float3 glowColor = clamp(rp.palBase.xyz + rp.palAmp.xyz, 0.0f, 2.0f);
+    color += glowTotal * glowStrength * glowColor;
     int idx = py * rp.imageWidth + px;
     output[idx] = float4(color, 1.0f);
 }

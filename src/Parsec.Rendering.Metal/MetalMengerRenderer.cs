@@ -194,7 +194,7 @@ public sealed class MetalMengerRenderer : IDisposable
         int flags=(s.EnableSoftShadows?1:0)|(s.EnableAmbientOcclusion?2:0);
         return new MetalRenderParams { ImageWidth=width,ImageHeight=height,RowOffset=0,RowCount=height,
             CamPos=new Vector4(camera.Position,0f),CamForward=new Vector4(fwd,0f),CamRight=new Vector4(right,0f),CamUp=new Vector4(up,0f),
-            TanFov=new Vector4(tanX,tanY,0f,0f),LightDir=new Vector4(ld,s.LightIntensity),
+            TanFov=GlowState.EncodeTanFov(tanX,tanY),LightDir=new Vector4(ld,s.LightIntensity),
             Background = MetalSurfaceTextureManager.EncodeBackground(background),Surface = MetalSurfaceTextureManager.EncodeSurface(surface),
             MarchA=new Vector4(s.HitEpsilon,s.MaxDistance,s.NormalEpsilon,s.ShadowSoftness),MarchB = MetalSurfaceTextureManager.EncodeMarchB(s.AOStepDistance, s.AOIntensity),
             MarchI0=s.MaxSteps,MarchI1=s.ShadowSteps,MarchI2=s.AOSamples,MarchI3=flags,

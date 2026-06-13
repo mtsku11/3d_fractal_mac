@@ -167,6 +167,16 @@
             <Slider Name="DomainWarpScaleSlider" Minimum="0.1" Maximum="8" Value="1.5"
                     TickFrequency="0.05" IsSnapToTickEnabled="False" />
           </StackPanel>
+          <StackPanel Margin="0,10,0,0" Spacing="4">
+            <TextBlock Text="GLOW" Foreground="#9a9ab0" FontSize="11" FontWeight="SemiBold" />
+            <CheckBox Name="GlowEnableCheckBox" Content="Enable Step Glow" />
+            <TextBlock Text="Strength" FontSize="11" />
+            <Slider Name="GlowStrengthSlider" Minimum="0" Maximum="8" Value="2.5"
+                    TickFrequency="0.1" IsSnapToTickEnabled="False" />
+            <TextBlock Text="Falloff (softer ← → tighter)" FontSize="11" />
+            <Slider Name="GlowFalloffSlider" Minimum="1" Maximum="200" Value="12"
+                    TickFrequency="1" IsSnapToTickEnabled="False" />
+          </StackPanel>
         </StackPanel>
       </Grid>
       <Border Name="PanelHost" Grid.Row="1" Margin="12,8,12,12" />
