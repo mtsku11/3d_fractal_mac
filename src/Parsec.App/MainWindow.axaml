@@ -124,9 +124,15 @@
           </StackPanel>
           <StackPanel Margin="0,10,0,0" Spacing="4">
             <TextBlock Text="SURFACE TEXTURE" Foreground="#9a9ab0" FontSize="11" FontWeight="SemiBold" />
-            <CheckBox Name="SurfaceTextureEnableCheckBox" Content="Enable Image Projection" />
-            <CheckBox Name="TextureFeedbackCheckBox" Content="Feedback Loop" />
-            <Grid ColumnDefinitions="*,*" Margin="0,2,0,0">
+            <TextBlock Text="Source" FontSize="11" />
+            <ComboBox Name="SurfaceTextureSourceSelector" SelectedIndex="0" HorizontalAlignment="Stretch">
+              <ComboBoxItem>None</ComboBoxItem>
+              <ComboBoxItem>Image</ComboBoxItem>
+              <ComboBoxItem>Feedback</ComboBoxItem>
+              <ComboBoxItem>Mandelbrot Zoom</ComboBoxItem>
+              <ComboBoxItem>Video</ComboBoxItem>
+            </ComboBox>
+            <Grid ColumnDefinitions="*,*" Margin="0,2,0,0" Name="SurfaceTextureImageButtons">
               <Button Name="SurfaceTextureLoadButton" Grid.Column="0"
                       HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
                       Margin="0,0,2,0" Content="Load Image" />
@@ -134,6 +140,9 @@
                       HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
                       Margin="2,0,0,0" Content="Clear" />
             </Grid>
+            <Button Name="SurfaceTextureLoadVideoButton"
+                    HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
+                    IsVisible="False" Content="Load Video" />
             <TextBlock Name="SurfaceTexturePathText" Text="No image selected"
                        Foreground="#bfc0cf" FontSize="11" TextTrimming="CharacterEllipsis" />
             <TextBlock Text="Blend" FontSize="11" />

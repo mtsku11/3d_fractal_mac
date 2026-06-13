@@ -16,6 +16,8 @@ using Parsec.Rendering.Raymarching;
 
 namespace Parsec.App;
 
+public enum SurfaceTextureSource { None, Image, Feedback, MandelbrotZoom, Video }
+
 /// <summary>
 /// Stage 2: a live free-fly view of the AmazingBox. WASD moves (with Q/E for
 /// vertical), hold left-drag to mouse-look. Movement speed scales with the
@@ -146,23 +148,40 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
     /// the UI; preview always renders at 1x regardless of this value.</summary>
     public int HeroSampleCount { get; set; } = 1;
 
-    private bool _surfaceTextureEnabled;
+    private SurfaceTextureSource _textureSource = SurfaceTextureSource.None;
     private float _surfaceTextureBlend = 0.7f;
     private float _surfaceTextureScale = 1.25f;
     private string? _surfaceTexturePath;
-    private bool _textureFeedbackEnabled;
     private bool _feedbackBootstrapped;
     private byte[]? _feedbackBytes;
+    private byte[]? _mandelbrotZoomBytes;
+    private readonly DeepZoomView _mandelbrotZoomDeepView = new();
+    private List<(byte[] bytes, int w, int h, int rowBytes)>? _videoFrames;
+    private int _videoFrameIndex;
     private bool _domainWarpEnabled;
     private float _domainWarpStrength = 0.15f;
     private float _domainWarpScale = 1.5f;
 
-    public bool SurfaceTextureEnabled
+    public bool SurfaceTextureEnabled => _textureSource != SurfaceTextureSource.None;
+
+    public SurfaceTextureSource TextureSource
     {
-        get => _surfaceTextureEnabled;
+        get => _textureSource;
         set
         {
-            _surfaceTextureEnabled = value;
+            if (_textureSource == value) return;
+            if (_textureSource == SurfaceTextureSource.Feedback)
+            {
+                _feedbackBootstrapped = false;
+                _feedbackBytes = null;
+                if (!HasSurfaceTextureImage) MetalSurfaceTextureManager.ClearImage();
+            }
+            else if (_textureSource is SurfaceTextureSource.MandelbrotZoom or SurfaceTextureSource.Video)
+            {
+                _mandelbrotZoomBytes = null;
+                if (!HasSurfaceTextureImage) MetalSurfaceTextureManager.ClearImage();
+            }
+            _textureSource = value;
             SyncSurfaceTextureState();
             MarkDirty();
         }
@@ -186,24 +205,6 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
         {
             _surfaceTextureScale = Math.Clamp(value, 0.05f, 16f);
             SyncSurfaceTextureState();
-            MarkDirty();
-        }
-    }
-
-    public bool TextureFeedbackEnabled
-    {
-        get => _textureFeedbackEnabled;
-        set
-        {
-            _textureFeedbackEnabled = value;
-            if (!value)
-            {
-                _feedbackBootstrapped = false;
-                _feedbackBytes = null;
-                if (!HasSurfaceTextureImage)
-                    MetalSurfaceTextureManager.ClearImage();
-                SyncSurfaceTextureState();
-            }
             MarkDirty();
         }
     }
@@ -304,13 +305,21 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
 
     private void SyncSurfaceTextureState()
     {
-        bool hasTexture = HasSurfaceTextureImage || _feedbackBootstrapped;
+        bool supportsTexture = SupportsSurfaceTexture;
+        bool hasTexture = _textureSource switch
+        {
+            SurfaceTextureSource.Image        => HasSurfaceTextureImage,
+            SurfaceTextureSource.Feedback     => _feedbackBootstrapped,
+            SurfaceTextureSource.MandelbrotZoom => _mandelbrotZoomBytes != null,
+            SurfaceTextureSource.Video        => _videoFrames?.Count > 0,
+            _                                 => false,
+        };
         MetalSurfaceTextureManager.SetControls(
-            enabled: SupportsSurfaceTexture && _surfaceTextureEnabled && hasTexture,
+            enabled: supportsTexture && hasTexture,
             blend: _surfaceTextureBlend,
             scale: _surfaceTextureScale);
         GpuSurfaceTextureManager.SetControls(
-            enabled: ActiveType != FractalType.DeepZoom && ActiveType != FractalType.Attractor && _surfaceTextureEnabled && HasSurfaceTextureImage,
+            enabled: supportsTexture && _textureSource == SurfaceTextureSource.Image && HasSurfaceTextureImage,
             blend: _surfaceTextureBlend,
             scale: _surfaceTextureScale);
     }
@@ -321,6 +330,107 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
             enabled: ActiveType != FractalType.DeepZoom && ActiveType != FractalType.Attractor && _domainWarpEnabled,
             strength: _domainWarpStrength,
             scale: _domainWarpScale);
+    }
+
+    private void UpdateFeedbackTexture(uint[] pixels, int rw, int rh)
+    {
+        int rowBytes = rw * 4;
+        int byteLen = pixels.Length * 4;
+        if (_feedbackBytes is null || _feedbackBytes.Length != byteLen)
+            _feedbackBytes = new byte[byteLen];
+        Buffer.BlockCopy(pixels, 0, _feedbackBytes, 0, byteLen);
+        if (!_feedbackBootstrapped)
+        {
+            MetalSurfaceTextureManager.SetImage(_feedbackBytes, rw, rh, rowBytes);
+            _feedbackBootstrapped = true;
+            SyncSurfaceTextureState();
+        }
+        else
+        {
+            MetalSurfaceTextureManager.UpdateImage(_feedbackBytes, rw, rh, rowBytes);
+        }
+    }
+
+    private void UpdateMandelbrotZoomTexture()
+    {
+        if (_metalDeepZoomRenderer?.IsAvailable != true) return;
+        const int tw = 128, th = 128;
+        _mandelbrotZoomDeepView.ZoomTowardPixel(0.992, tw / 2.0, th / 2.0, tw, th);
+        try
+        {
+            var pixels = _metalDeepZoomRenderer.Render(
+                _mandelbrotZoomDeepView, tw, th,
+                Palette.ToParams(), new Color(0.02f, 0.03f, 0.07f),
+                PreviewSettings(), interactive: true);
+            int rowBytes = tw * 4;
+            int byteLen = pixels.Length * 4;
+            if (_mandelbrotZoomBytes is null || _mandelbrotZoomBytes.Length != byteLen)
+                _mandelbrotZoomBytes = new byte[byteLen];
+            Buffer.BlockCopy(pixels, 0, _mandelbrotZoomBytes, 0, byteLen);
+            MetalSurfaceTextureManager.SetImage(_mandelbrotZoomBytes, tw, th, rowBytes);
+            SyncSurfaceTextureState();
+        }
+        catch { /* best-effort */ }
+    }
+
+    private void UpdateVideoTexture()
+    {
+        if (_videoFrames == null || _videoFrames.Count == 0) return;
+        var (bytes, w, h, rowBytes) = _videoFrames[_videoFrameIndex];
+        _videoFrameIndex = (_videoFrameIndex + 1) % _videoFrames.Count;
+        MetalSurfaceTextureManager.SetImage(bytes, w, h, rowBytes);
+        SyncSurfaceTextureState();
+    }
+
+    public string? LoadVideo(string path)
+    {
+        string tempDir = System.IO.Path.Combine(
+            System.IO.Path.GetTempPath(), $"parsec_vid_{System.Guid.NewGuid():N}");
+        System.IO.Directory.CreateDirectory(tempDir);
+        try
+        {
+            var psi = new System.Diagnostics.ProcessStartInfo("ffmpeg",
+                $"-i \"{path}\" -vf \"fps=12,scale=128:128\" \"{tempDir}/frame%05d.png\" -y")
+            {
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+            };
+            using var proc = System.Diagnostics.Process.Start(psi);
+            proc?.WaitForExit(30_000);
+
+            var frames = new List<(byte[], int, int, int)>();
+            foreach (var file in System.IO.Directory.EnumerateFiles(tempDir, "*.png")
+                         .OrderBy(f => f))
+            {
+                using var codec = SkiaSharp.SKCodec.Create(file);
+                if (codec == null) continue;
+                var info = new SkiaSharp.SKImageInfo(codec.Info.Width, codec.Info.Height,
+                    SkiaSharp.SKColorType.Rgba8888, SkiaSharp.SKAlphaType.Unpremul);
+                using var bmp = new SkiaSharp.SKBitmap(info);
+                if (codec.GetPixels(info, bmp.GetPixels()) != SkiaSharp.SKCodecResult.Success) continue;
+                int rowBytes = bmp.Width * 4;
+                var bytes = new byte[rowBytes * bmp.Height];
+                Marshal.Copy(bmp.GetPixels(), bytes, 0, bytes.Length);
+                frames.Add((bytes, bmp.Width, bmp.Height, rowBytes));
+            }
+
+            if (frames.Count == 0)
+                return "No frames extracted from video.";
+
+            _videoFrames = frames;
+            _videoFrameIndex = 0;
+            SyncSurfaceTextureState();
+            return null;
+        }
+        catch (Exception ex)
+        {
+            return $"Video load failed: {ex.Message}";
+        }
+        finally
+        {
+            try { System.IO.Directory.Delete(tempDir, recursive: true); } catch { }
+        }
     }
 
     /// <summary>
@@ -1104,27 +1214,25 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
             }
             _totalFrameMs = sw.ElapsedMilliseconds;
 
-            // Texture feedback: prime next frame's texture with this frame's output.
-            // Only Metal; bootstraps itself on first frame so no image file is needed.
-            if (_textureFeedbackEnabled && _surfaceTextureEnabled && SupportsSurfaceTexture
+            // Update texture from live source (Feedback / MandelbrotZoom / Video).
+            if (_textureSource != SurfaceTextureSource.None && SupportsSurfaceTexture
                 && OperatingSystem.IsMacOS() && renderedPreview)
             {
-                int fbRowBytes = rw * 4;
-                int fbLen = pixels.Length * 4;
-                if (_feedbackBytes is null || _feedbackBytes.Length != fbLen)
-                    _feedbackBytes = new byte[fbLen];
-                Buffer.BlockCopy(pixels, 0, _feedbackBytes, 0, fbLen);
-                if (!_feedbackBootstrapped)
+                switch (_textureSource)
                 {
-                    MetalSurfaceTextureManager.SetImage(_feedbackBytes, rw, rh, fbRowBytes);
-                    _feedbackBootstrapped = true;
-                    SyncSurfaceTextureState();
+                    case SurfaceTextureSource.Feedback:
+                        UpdateFeedbackTexture(pixels, rw, rh);
+                        MarkDirty();
+                        break;
+                    case SurfaceTextureSource.MandelbrotZoom:
+                        UpdateMandelbrotZoomTexture();
+                        MarkDirty();
+                        break;
+                    case SurfaceTextureSource.Video:
+                        UpdateVideoTexture();
+                        MarkDirty();
+                        break;
                 }
-                else
-                {
-                    MetalSurfaceTextureManager.UpdateImage(_feedbackBytes, rw, rh, fbRowBytes);
-                }
-                MarkDirty();
             }
             _texW = rw; _texH = rh;
             _dirty = false;

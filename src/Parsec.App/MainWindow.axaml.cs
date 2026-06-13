@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Threading.Tasks;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Interactivity;
@@ -141,20 +142,20 @@ public partial class MainWindow : Window
                     _droneStream.TemperamentCeiling = (float)(double)e.NewValue!;
             };
 
-        var surfaceTextureEnableCheckBox = this.FindControl<CheckBox>("SurfaceTextureEnableCheckBox");
-        if (surfaceTextureEnableCheckBox != null)
-            surfaceTextureEnableCheckBox.IsCheckedChanged += (_, _) =>
+        var surfaceTextureSourceSelector = this.FindControl<ComboBox>("SurfaceTextureSourceSelector");
+        if (surfaceTextureSourceSelector != null)
+            surfaceTextureSourceSelector.SelectionChanged += (_, _) =>
             {
                 if (_view != null)
-                    _view.SurfaceTextureEnabled = surfaceTextureEnableCheckBox.IsChecked == true;
-            };
-
-        var textureFeedbackCheckBox = this.FindControl<CheckBox>("TextureFeedbackCheckBox");
-        if (textureFeedbackCheckBox != null)
-            textureFeedbackCheckBox.IsCheckedChanged += (_, _) =>
-            {
-                if (_view != null)
-                    _view.TextureFeedbackEnabled = textureFeedbackCheckBox.IsChecked == true;
+                    _view.TextureSource = surfaceTextureSourceSelector.SelectedIndex switch
+                    {
+                        1 => SurfaceTextureSource.Image,
+                        2 => SurfaceTextureSource.Feedback,
+                        3 => SurfaceTextureSource.MandelbrotZoom,
+                        4 => SurfaceTextureSource.Video,
+                        _ => SurfaceTextureSource.None,
+                    };
+                UpdateSurfaceTextureUi(_view?.ActiveType ?? FractalType.Kifs);
             };
 
         var surfaceTextureBlendSlider = this.FindControl<Slider>("SurfaceTextureBlendSlider");
@@ -204,6 +205,10 @@ public partial class MainWindow : Window
         var surfaceTextureClearButton = this.FindControl<Button>("SurfaceTextureClearButton");
         if (surfaceTextureClearButton != null)
             surfaceTextureClearButton.Click += OnSurfaceTextureClearClick;
+
+        var surfaceTextureLoadVideoButton = this.FindControl<Button>("SurfaceTextureLoadVideoButton");
+        if (surfaceTextureLoadVideoButton != null)
+            surfaceTextureLoadVideoButton.Click += OnSurfaceTextureLoadVideoClick;
 
         if (_view != null && status != null)
         {
@@ -444,8 +449,9 @@ public partial class MainWindow : Window
 
     private void UpdateSurfaceTextureUi(FractalType type)
     {
-        var enabledToggle = this.FindControl<CheckBox>("SurfaceTextureEnableCheckBox");
-        var loadButton = this.FindControl<Button>("SurfaceTextureLoadButton");
+        var sourceSelector = this.FindControl<ComboBox>("SurfaceTextureSourceSelector");
+        var imageButtons = this.FindControl<Grid>("SurfaceTextureImageButtons");
+        var loadVideoButton = this.FindControl<Button>("SurfaceTextureLoadVideoButton");
         var blendSlider = this.FindControl<Slider>("SurfaceTextureBlendSlider");
         var scaleSlider = this.FindControl<Slider>("SurfaceTextureScaleSlider");
         var projectionSelector = this.FindControl<ComboBox>("SurfaceTextureProjectionSelector");
@@ -454,12 +460,19 @@ public partial class MainWindow : Window
         var domainWarpScale = this.FindControl<Slider>("DomainWarpScaleSlider");
         if (_view == null) return;
 
-        string tip = _view.SupportsSurfaceTexture
+        bool supportsTexture = _view.SupportsSurfaceTexture;
+        bool isImage = _view.TextureSource == SurfaceTextureSource.Image;
+        bool isVideo = _view.TextureSource == SurfaceTextureSource.Video;
+
+        if (sourceSelector != null) sourceSelector.IsEnabled = supportsTexture;
+        if (imageButtons != null) imageButtons.IsVisible = isImage;
+        if (loadVideoButton != null) loadVideoButton.IsVisible = isVideo;
+
+        string tip = supportsTexture
             ? "3D preview, hero stills, and video export support image-based triplanar surface colour."
             : "Surface texture projection is unavailable for Deep Zoom and Attractor.";
 
-        if (enabledToggle != null) ToolTip.SetTip(enabledToggle, tip);
-        if (loadButton != null) ToolTip.SetTip(loadButton, tip);
+        if (sourceSelector != null) ToolTip.SetTip(sourceSelector, tip);
         if (blendSlider != null) ToolTip.SetTip(blendSlider, "0 = fractal palette only, 1 = image colour only.");
         if (scaleSlider != null) ToolTip.SetTip(scaleSlider, "Higher values repeat the image more densely across the fractal.");
         if (projectionSelector != null) ToolTip.SetTip(projectionSelector, "First pass is object-space triplanar projection.");
@@ -511,6 +524,37 @@ public partial class MainWindow : Window
         _view?.ClearSurfaceTextureImage();
         RefreshSurfaceTexturePathText();
         SetStatus("Surface texture cleared.");
+    }
+
+    private async void OnSurfaceTextureLoadVideoClick(object? sender, RoutedEventArgs e)
+    {
+        if (_view == null) return;
+        var storageProvider = TopLevel.GetTopLevel(this)?.StorageProvider;
+        if (storageProvider == null) return;
+
+        var files = await storageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
+        {
+            Title = "Select video for texture",
+            AllowMultiple = false,
+            FileTypeFilter =
+            [
+                new FilePickerFileType("Video Files")
+                {
+                    Patterns = ["*.mp4", "*.mov", "*.avi", "*.mkv", "*.webm"],
+                    MimeTypes = ["video/mp4", "video/quicktime", "video/x-msvideo", "video/x-matroska", "video/webm"],
+                },
+            ],
+        });
+        if (files.Count != 1 || files[0].Path is not { } source) return;
+
+        string path = source.LocalPath;
+        if (string.IsNullOrWhiteSpace(path)) return;
+
+        SetStatus($"Loading video frames from {System.IO.Path.GetFileName(path)}...");
+        string? error = await Task.Run(() => _view.LoadVideo(path));
+        SetStatus(error == null
+            ? $"Loaded video texture: {System.IO.Path.GetFileName(path)}"
+            : error);
     }
 
     private void RebuildPanel()
