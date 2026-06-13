@@ -144,16 +144,23 @@ Both lived in `MetalSurfaceTextureShaderInjector.Inject()`:
 
 See `skills.md` → "Shader-injection gotchas" and "`computeFunction must not be nil`…".
 
-### Remaining work (priority order)
-1. **Wire `SurfaceTextureProjectionSelector` ComboBox** to `mode` parameter: Triplanar=0, Orbit
-   Trap=1. Disable Orbit Trap option for non-BurningShip fractals (only BurningShip has `outTrapUv`).
-2. **Verify the in-app preview on a real Mac:** load an image, toggle Enable, confirm both modes
-   are stable under camera motion.
-3. **Extend orbit trap to more shaders** (Mandelbox, Mandelbulb, etc.) — see "Extending orbit trap"
-   above. Each requires a ~10-line `estimateFull` change + switching `Inject` → `InjectOrbitTrap`.
-4. **Finish the `MetalBufferIO.RequireContents` rollout** to remaining direct `buf.Contents` readers.
-5. **Capture a golden frame** from the smoke output for regression.
-6. Resolve headless GL startup stall if OpenGL CI verification is wanted (lower priority).
+### Remaining work — now tracked in `docs/app-completion-plan.md`
+
+The surface-texture gaps are folded into the app-wide completion roadmap. Current status of each:
+
+1. **Texture feedback loop is now in-app** (committed `d998ffe`): `FractalView.TextureFeedbackEnabled`
+   primes the next frame's texture with the current render via `UpdateImage`. The in-app path uses
+   the preview resolution for both render and texture, so it has no resolution-mismatch (unlike the
+   `metal-fractal-feedback` CLI demo, which tiles when sizes differ). → Completion-plan **Phase 2**
+   generalizes this into a `SurfaceTextureSource` dropdown (None/Image/Video/MandelbrotZoom/Feedback).
+2. **`SurfaceTextureProjectionSelector` is still a stub** — 1 ComboBox item ("Triplanar"), wired to a
+   tooltip only, NOT to `mode`. Orbit trap remains unreachable from the app. → **Phase 3**.
+3. **Orbit trap is still BurningShip-only** — it is the one shader emitting `outTrapUv`. → **Phase 3**
+   rolls it out to Mandelbox/Mandelbulb/KIFS/Menger first.
+4. **`MetalBufferIO.RequireContents` rollout is effectively complete** — all renderers route shared
+   buffers through `MetalBufferIO`; `.Contents` is read directly only inside `MetalBufferIO.cs` itself.
+5. **No golden-frame regression yet.** → completion-plan **Phase 6** (`metal-golden`).
+6. Headless GL startup stall for `gpu-surface-texture-smoke` — unchanged, low priority.
 
 ### Gotchas
 - **`background.w` is now a 3-state enum** (0/1/2), not a bool. Any code that checks

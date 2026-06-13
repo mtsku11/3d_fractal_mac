@@ -2,6 +2,10 @@
 
 ## Direction
 
+> **For the path to a *completely finished* app, see `docs/app-completion-plan.md`** — the
+> authoritative phased roadmap (audited 2026-06-13). This document remains the per-feature
+> mechanics reference for the render track; the completion plan is the prioritized to-do.
+
 The current priority is a macOS-native 3D-only build. The first milestone is one existing fp32 3D raymarched fractal rendered through Metal and shown in Avalonia. Deep zoom, audio reactivity, full shader parity, and packaging polish are later work.
 
 The existing OpenGL compute renderer is the source implementation. The Metal work should add a parallel backend path, not destabilize `Parsec.Rendering.Gpu`.
@@ -80,15 +84,54 @@ Bugs fixed (2026-06-12) — both in `MetalSurfaceTextureShaderInjector.Inject()`
 
 Diagnosed with a standalone SharpMetal probe (`/tmp/metalprobe`) that compiled a trivial kernel (host fine) then the real injected shaders (printed the actual `program_source` compile error). `MTLBuffer.Contents` is mappable here — the smoke reads back its `uint[]` fine.
 
-Still pending:
+Still pending — **now tracked in `docs/app-completion-plan.md`** (audited 2026-06-13):
 
-1. Capture the Metal smoke output as a golden regression frame (it now renders deterministically).
-2. Eyeball the in-app preview on a real Mac (Load image → Enable; confirm triplanar is stable under camera motion) and tune Blend/Scale defaults.
-3. Finish the `MetalBufferIO.RequireContents` rollout anywhere Metal still reads `buf.Contents` directly, especially telemetry-only readback helpers.
-4. Wire the `Projection` ComboBox to real modes (axis-locked planar, normal-weighted) or hide it — the shaders are triplanar-only today.
-5. Resolve the headless OpenGL context startup stall for `gpu-surface-texture-smoke` only if OpenGL CI verification is wanted.
+1. Golden regression frame → completion-plan **Phase 6** (`metal-golden`).
+2. In-app preview eyeball + Blend/Scale defaults → folded into **Phase 2** (unified Texture Source).
+3. `MetalBufferIO.RequireContents` rollout → effectively complete (all renderers route through
+   `MetalBufferIO`; `.Contents` read directly only inside `MetalBufferIO.cs`).
+4. Wire the `Projection` ComboBox to real modes (Triplanar / Orbit Trap) → completion-plan **Phase 3**;
+   the ComboBox is currently a 1-item stub wired to a tooltip only, and orbit trap is BurningShip-only.
+5. Headless OpenGL startup stall for `gpu-surface-texture-smoke` — unchanged, low priority.
 
-First-pass constraints:
+The texture **feedback loop** is now an in-app feature (commit `d998ffe`), and a family of CLI
+texture-source demos exist (`metal-cross-fractal-texture`, `metal-burning-video-texture`,
+`metal-oracle`, `metal-closeup-hq`, `metal-closeup-oracle`). Completion-plan Phase 2 unifies these
+CLI-proven sources into one in-app `SurfaceTextureSource` dropdown.
+
+## Render Feature: Domain Warp
+
+The first experimental domain-warp pass is implemented for the desktop 3D render path. It is designed to produce more abstract footage by bending the 3D sample coordinates before the distance estimator evaluates the fractal, instead of only changing surface colour after the hit.
+
+Implemented (2026-06-13):
+
+1. Added `DOMAIN WARP` controls in `MainWindow` / `FractalView`: `Enable`, `Strength`, and `Scale`.
+2. Added `DomainWarpState`, which encodes warp strength/scale into the unused `.z/.w` lanes of `subpixelJitter`; no Metal/OpenGL render-param layout change required.
+3. Added a clamped procedural nested sine/cosine warp field. Low scale bends broad masses; high scale creates denser tearing/striation.
+4. OpenGL shared raymarch path applies the warp to primary marching, normal estimation, soft shadows, AO, and orbit-trap colour capture.
+5. Metal raymarch path injects `domainWarp()` through `MetalSurfaceTextureShaderInjector`; first pass applies it to primary marching plus hit-point trap/normal sampling across the Metal 3D raymarchers, including the BurningShip orbit-trap texture mode.
+6. Deep Zoom and Attractor are excluded because they do not use the same fp32 3D DE raymarch path.
+7. Added `metal-domain-warp-mp4 [duration] [out.mp4] [w] [h]`, a deterministic CLI verifier that renders a Mandelbox domain-warp clip and reports baseline-vs-warp changed-pixel count on frame 0.
+
+Verification:
+
+- `dotnet build src/Parsec.App/Parsec.App.csproj --no-restore -m:1 /nodeReuse:false -v minimal` passes with the existing nullable warnings in `FractalView.cs`.
+- `dotnet build src/Parsec.Cli/Parsec.Cli.csproj --no-restore -m:1 /nodeReuse:false -v minimal` passes cleanly.
+- Sandboxed Metal commands can return a nil SharpMetal device wrapper (`NativePtr=0`, `RegistryID=0`), which then fails at `MTLBuffer.Contents`. Running the CLI outside the sandbox gives real Metal access: `metal-smoke 64 48` renders successfully.
+- `dotnet src/Parsec.Cli/bin/Debug/net9.0/parsec.dll metal-domain-warp-mp4 4 artifacts/domain_warp/domain_warp_phone_bright_verify.mp4 720 406` renders a verified H.264 clip: 4.0s, 96 frames, 720x406, 12 MB. Baseline vs first warped frame: 290,686/292,320 pixels changed (99.44%). First-frame average luma (`signalstats.YAVG`) is 44.63, materially brighter than the earlier dark test render.
+
+Next steps — **now tracked in `docs/app-completion-plan.md` Phase 1** (audited 2026-06-13):
+
+1. **Commit the feature** — it is currently uncommitted in the working tree (builds clean).
+2. **Make Metal shadow/AO march the warped DE** — the Metal injector today patches only the 3
+   primary-march `estimate()` sites + `estimateNormal` (`MetalSurfaceTextureShaderInjector.cs:205–227`);
+   the OpenGL path already warps shadow/AO (`raymarch_main.glsl:93,108`). This asymmetry is the main
+   correctness gap.
+3. Add a time/phase input for flowing animated warp.
+4. Eyeball in-app preview on a real Mac; tune default `Strength` / `Scale`.
+5. Golden frames → completion-plan **Phase 6**. Image/video-driven warp source → optional, after Phase 2.
+
+Surface-texture first-pass constraints:
 
 - No per-fractal UV authoring or unwrapping.
 - No texture-driven displacement or geometry modification.
