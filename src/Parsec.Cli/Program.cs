@@ -6936,17 +6936,20 @@ public static class Program
                 Directory.CreateDirectory(outDir);
 
                 const int w = 320, h = 240;
-                var camera   = new Camera3D(new Vector3(0f, 1f, 5f), Vector3.Zero, Vector3.UnitY, MathF.PI / 4f, (float)w / h);
+                // Pull the camera back so the fractal is a compact object against dark
+                // negative space — glow is a silhouette/gap halo, so it only reads against
+                // sky, not on a frame-filling surface.
+                var camera   = new Camera3D(new Vector3(0f, 2f, 11f), Vector3.Zero, Vector3.UnitY, MathF.PI / 4f, (float)w / h);
                 var settings = new RaymarchSettings(
-                    MaxSteps: 160, HitEpsilon: 4e-4f, MaxDistance: 30f, NormalEpsilon: 5e-4f,
+                    MaxSteps: 160, HitEpsilon: 4e-4f, MaxDistance: 40f, NormalEpsilon: 5e-4f,
                     EnableSoftShadows: true, ShadowSteps: 48, ShadowSoftness: 10f,
                     EnableAmbientOcclusion: true, AOSamples: 5, AOStepDistance: 0.04f, AOIntensity: 0.4f,
                     HeroSamples: 1, EnableReflections: false, ReflectionBounces: 0,
-                    Gloss: 0f, F0: 0f, LightIntensity: 2.0f);
-                // Saturated palette so the glow tint reads clearly.
+                    Gloss: 0f, F0: 0f, LightIntensity: 1.6f);
+                // Dark palette with headroom so the glow halo stands out against shadow.
                 var palette = new PaletteParams
                 {
-                    Base = new Vector3(0.30f, 0.35f, 0.55f), Amp = new Vector3(0.55f, 0.45f, 0.45f),
+                    Base = new Vector3(0.10f, 0.13f, 0.22f), Amp = new Vector3(0.45f, 0.40f, 0.55f),
                     Frequency = 1.4f, Phase = new Vector3(0.0f, 0.30f, 0.62f), TrapScale = 0.9f,
                     TrapMix = new Vector3(0.6f, 0.4f, 0.3f), ShellMix = 0.25f,
                 };
@@ -7000,6 +7003,91 @@ public static class Program
                 return pass ? 0 : 1;
             }
             catch (Exception ex) { Console.Error.WriteLine($"metal-glow-smoke FAILED: {ex.Message}\n{ex.StackTrace}"); return 1; }
+        }
+
+        // metal-bloom-smoke [intensity] [threshold] [outDir]
+        // A/B render of a frame-filling Mandelbox with screen-space bloom off vs on.
+        // Bloom is the case march-glow fails: a busy close-up where bright detail should
+        // bleed light into its surroundings. Writes both PNGs.
+        if (args[0] == "metal-bloom-smoke")
+        {
+            if (!OperatingSystem.IsMacOS()) { Console.Error.WriteLine("metal-bloom-smoke requires macOS."); return 1; }
+            try
+            {
+                float intensity = args.Length > 1 && float.TryParse(args[1], out var bi) ? bi : 1.0f;
+                float threshold = args.Length > 2 && float.TryParse(args[2], out var bt) ? bt : 0.6f;
+                string outDir   = args.Length > 3 ? args[3] : Path.Combine(Path.GetTempPath(), "parsec-bloom");
+                Directory.CreateDirectory(outDir);
+
+                const int w = 320, h = 240;
+                // Frame-filling close-up — the common view, and where march-glow degraded
+                // to a flat lift. Bloom should still read here.
+                var camera   = new Camera3D(new Vector3(0f, 1f, 5f), Vector3.Zero, Vector3.UnitY, MathF.PI / 4f, (float)w / h);
+                var settings = new RaymarchSettings(
+                    MaxSteps: 160, HitEpsilon: 4e-4f, MaxDistance: 30f, NormalEpsilon: 5e-4f,
+                    EnableSoftShadows: true, ShadowSteps: 48, ShadowSoftness: 10f,
+                    EnableAmbientOcclusion: true, AOSamples: 5, AOStepDistance: 0.04f, AOIntensity: 0.4f,
+                    HeroSamples: 1, EnableReflections: false, ReflectionBounces: 0,
+                    Gloss: 0f, F0: 0f, LightIntensity: 2.2f);
+                // High-contrast dark palette: deep crevices, bright ridges — so bloom has
+                // isolated highlights to bleed and shadow to bleed into. A flat-bright
+                // rainbow palette has no contrast and neither glow nor bloom can read on it.
+                var palette = new PaletteParams
+                {
+                    Base = new Vector3(0.04f, 0.05f, 0.10f), Amp = new Vector3(0.70f, 0.60f, 0.55f),
+                    Frequency = 1.1f, Phase = new Vector3(0.0f, 0.18f, 0.42f), TrapScale = 0.8f,
+                    TrapMix = new Vector3(0.6f, 0.4f, 0.3f), ShellMix = 0.30f,
+                };
+                var bg    = new Color(0.01f, 0.01f, 0.03f);
+                var surf  = Color.Rgb(200, 200, 210);
+                var light = Vector3.Normalize(new Vector3(1f, 2f, 1.5f));
+
+                void WritePng(uint[] px, string name)
+                {
+                    var info  = new SKImageInfo(w, h, SKColorType.Rgba8888, SKAlphaType.Premul);
+                    var bmp   = new SKBitmap(info);
+                    var bytes = new byte[px.Length * 4];
+                    Buffer.BlockCopy(px, 0, bytes, 0, bytes.Length);
+                    Marshal.Copy(bytes, 0, bmp.GetPixels(), bytes.Length);
+                    ImageOutput.SavePng(bmp, Path.Combine(outDir, name));
+                }
+                static double MeanLuma(uint[] px)
+                {
+                    double sum = 0;
+                    foreach (var p in px)
+                    {
+                        double r = (p & 0xFF), g = ((p >> 8) & 0xFF), b = ((p >> 16) & 0xFF);
+                        sum += 0.299 * r + 0.587 * g + 0.114 * b;
+                    }
+                    return sum / px.Length;
+                }
+
+                using var r = new MetalMandelboxRenderer();
+                if (!r.IsAvailable) { Console.Error.WriteLine("Metal backend unavailable."); return 1; }
+
+                var postOff = new PostProcessParams { Brightness = 1f, Contrast = 1f, Gamma = 1f, Saturation = 1f, BloomEnabled = false };
+                var postOn  = new PostProcessParams { Brightness = 1f, Contrast = 1f, Gamma = 1f, Saturation = 1f,
+                                                      BloomEnabled = true, BloomThreshold = threshold, BloomIntensity = intensity, BloomRadius = 1.0f };
+
+                var off = r.RenderMandelbox(new MandelboxParams(), camera, w, h, settings, bg, surf, light, palette, postOff);
+                WritePng(off, "bloom_off.png");
+                var on = r.RenderMandelbox(new MandelboxParams(), camera, w, h, settings, bg, surf, light, palette, postOn);
+                WritePng(on, "bloom_on.png");
+
+                int changed = 0;
+                for (int i = 0; i < off.Length; i++) if (off[i] != on[i]) changed++;
+                double lumaOff = MeanLuma(off), lumaOn = MeanLuma(on);
+
+                Console.WriteLine($"metal-bloom-smoke — intensity={intensity} threshold={threshold}, {w}×{h}");
+                Console.WriteLine($"  mean luma  off={lumaOff:F2}  on={lumaOn:F2}  (+{lumaOn - lumaOff:F2})");
+                Console.WriteLine($"  changed pixels: {changed}/{off.Length} ({100.0 * changed / off.Length:F1}%)");
+                Console.WriteLine($"  PNGs: {Path.Combine(outDir, "bloom_off.png")} , bloom_on.png");
+
+                bool pass = lumaOn > lumaOff + 0.5 && changed > off.Length / 20;
+                Console.WriteLine(pass ? "metal-bloom-smoke PASS" : "metal-bloom-smoke FAIL (bloom had no/low effect)");
+                return pass ? 0 : 1;
+            }
+            catch (Exception ex) { Console.Error.WriteLine($"metal-bloom-smoke FAILED: {ex.Message}\n{ex.StackTrace}"); return 1; }
         }
 
         // metal-attractor-smoke [w] [h]
@@ -7222,6 +7310,7 @@ public static class Program
         Console.WriteLine("  parsec metal-attractor-smoke [w] [h]  Metal Attractor spatial-hash tube smoke test (macOS only)");
         Console.WriteLine("  parsec metal-golden [--generate]     Golden-frame regression (5 scenarios, SHA-256 hash compare)");
         Console.WriteLine("  parsec metal-glow-smoke [strength] [falloff] [outDir]  Mandelbox step-glow A/B render (macOS only)");
+        Console.WriteLine("  parsec metal-bloom-smoke [intensity] [threshold] [outDir]  Mandelbox screen-space bloom A/B render (macOS only)");
         Console.WriteLine("  parsec m7a-check              JI/temperament quantizer self-check");
         Console.WriteLine("  parsec help           Show this help");
         Console.WriteLine();

@@ -990,6 +990,23 @@ Apple M4 Pro (12,958/76,800 px changed at blend 0.85). **`MTLBuffer.Contents` *i
 this host** — the smoke reads back its `uint[]` fine; an earlier "non-mappable Contents / readback
 seam" theory was wrong, masked by the injector crash that aborted before readback was ever reached.
 
+## Screen-space bloom (2026-06-13)
+
+Post-process bloom in `postprocess.metal`: `bloom_brightpass` (keep over-threshold energy,
+hue-preserving) → `bloom_blur` separable gaussian (run H then V, radius scales with min image
+dim) → the grade kernel adds the blurred bright buffer in linear HDR before grading (so it
+tonemaps). Works on **all 20 fractals + deep zoom** via the one shared post pass — no per-shader
+edits. `MetalPostProcess.Apply` runs the 3 extra passes only when `BloomEnabled && BloomIntensity>0`;
+when off it binds the HDR buffer itself as buffer(3) with intensity 0 → bit-identical (golden-safe).
+UI: 4 `Post: bloom` schema entries (toggle + threshold/intensity/size). Verify: `metal-bloom-smoke
+[intensity] [threshold]`.
+
+**Critical lesson (both glow + bloom):** these are **contrast effects**. A flat fully-saturated
+rainbow palette has no isolated highlights and no dark space, so neither glow nor bloom can read on
+it — the result is a near-uniform luminance lift that looks identical to no effect. Demonstrate/tune
+on a **high-contrast dark palette** (low Base, high Amp) and set bloom threshold *below* the scene's
+HDR highlight level or almost nothing blooms. Don't trust the +luma number — judge the image.
+
 ## Step-glow (fake volumetric glow) (2026-06-13)
 
 Per-march glow: each ray accumulates `1/(1+d²·falloff)` over its DE steps, so near-misses to
