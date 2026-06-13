@@ -52,6 +52,7 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
     private MetalAnisotropicRenderer?     _metalAnisotropicRenderer;
     private MetalOrbitHybridRenderer?     _metalOrbitHybridRenderer;
     private MetalDeepZoomRenderer?        _metalDeepZoomRenderer;
+    private MetalAttractorRenderer?       _metalAttractorRenderer;
     private long _metalComputeMs;
     private long _metalReadbackMs;
     private long _texUploadMs;
@@ -898,6 +899,7 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
             _metalAnisotropicRenderer = new MetalAnisotropicRenderer();
             _metalOrbitHybridRenderer = new MetalOrbitHybridRenderer();
             _metalDeepZoomRenderer = new MetalDeepZoomRenderer();
+            _metalAttractorRenderer = new MetalAttractorRenderer();
             Status("Metal renderers ready (software blit)");
         }
         catch (Exception ex)
@@ -1427,7 +1429,8 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
                 var ap = Attractor.ToParams();
                 var traj = Parsec.Core.Attractors.ThomasAttractor.Generate(ap);
                 _attractorHash = Parsec.Core.Attractors.AttractorHash.Build(traj, gridSize: 96);
-                _attractorRenderer.SetAttractor(_attractorHash);
+                _attractorRenderer?.SetAttractor(_attractorHash);
+                _metalAttractorRenderer?.SetAttractor(_attractorHash);
 
                 // Frame the camera to the cloud bounds on (re)generation so the
                 // new shape is in view; the user can then fly around freely.
@@ -1773,10 +1776,13 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
             PreviewWidth, PreviewHeight, PreviewSettings(),
             background: new Color(0.02f, 0.03f, 0.07f), surface: Color.Rgb(220, 180, 140),
             lightDirection: Light.ToDirection(), palette: Palette.ToParams(), tileRows: 64),
-        FractalType.Attractor => _attractorRenderer!.RenderToBuffer(Attractor.ToRenderParams(), camera,
+        FractalType.Attractor when _metalAttractorRenderer?.IsAvailable == true && _attractorHash != null =>
+            RenderWithMetalAttractor(camera, rw, rh),
+        FractalType.Attractor when _attractorRenderer != null => _attractorRenderer.RenderToBuffer(Attractor.ToRenderParams(), camera,
             PreviewWidth, PreviewHeight, PreviewSettings(),
             background: new Color(0.02f, 0.03f, 0.07f), surface: Color.Rgb(230, 120, 70),
             lightDirection: Light.ToDirection(), palette: Palette.ToParams(), tileRows: 64),
+        FractalType.Attractor => SolidPixels(rw, rh, new Color(0.02f, 0.03f, 0.07f)),
         FractalType.Kleinian when _metalKleinianRenderer?.IsAvailable == true =>
             RenderWithMetalKleinian(camera, rw, rh),
         FractalType.Kleinian => _kleinianRenderer!.RenderToBuffer(Kleinian.ToParams(), camera,
@@ -1863,6 +1869,7 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
         FractalType.Anisotropic => _metalAnisotropicRenderer?.IsAvailable == true,
         FractalType.OrbitHybrid => _metalOrbitHybridRenderer?.IsAvailable == true,
         FractalType.AmazingBox or FractalType.Mandelbox => _metalRenderer?.IsAvailable == true,
+        FractalType.Attractor => _metalAttractorRenderer?.IsAvailable == true && _attractorHash != null,
         _ => false,
     };
 
@@ -1874,6 +1881,22 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
         uint packed = (255u << 24) | (b << 16) | (g << 8) | r;
         var pixels = new uint[width * height];
         Array.Fill(pixels, packed);
+        return pixels;
+    }
+
+    private uint[] RenderWithMetalAttractor(Camera3D camera, int width, int height)
+    {
+        var pixels = _metalAttractorRenderer!.Render(
+            Attractor.ToRenderParams(), camera, width, height,
+            PreviewSettings(),
+            background: new Color(0.02f, 0.03f, 0.07f),
+            surface: Color.Rgb(230, 120, 70),
+            lightDirection: Light.ToDirection(),
+            palette: Palette.ToParams(),
+            hash: _attractorHash!,
+            postProcess: PostProcess.ToParams());
+        _metalComputeMs  = _metalAttractorRenderer!.LastComputeMs;
+        _metalReadbackMs = _metalAttractorRenderer!.LastReadbackMs;
         return pixels;
     }
 

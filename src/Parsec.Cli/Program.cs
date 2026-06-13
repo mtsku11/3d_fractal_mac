@@ -6756,6 +6756,63 @@ public static class Program
             catch (Exception ex) { Console.Error.WriteLine($"metal-m9d-check FAILED: {ex.Message}\n{ex.StackTrace}"); return 1; }
         }
 
+        // metal-attractor-smoke [w] [h]
+        // Verify the MetalAttractorRenderer compiles and renders non-background pixels.
+        if (args[0] == "metal-attractor-smoke")
+        {
+            if (!OperatingSystem.IsMacOS()) { Console.Error.WriteLine("metal-attractor-smoke requires macOS."); return 1; }
+            try
+            {
+                int w = args.Length > 1 && int.TryParse(args[1], out var aw) ? aw : 64;
+                int h = args.Length > 2 && int.TryParse(args[2], out var ah) ? ah : 48;
+
+                using var renderer = new MetalAttractorRenderer();
+                if (!renderer.IsAvailable)
+                {
+                    Console.Error.WriteLine("metal-attractor-smoke: Metal backend unavailable.");
+                    return 1;
+                }
+
+                Console.WriteLine($"metal-attractor-smoke — {w}×{h}, generating trajectory...");
+
+                // Generate a small canonical Thomas attractor trajectory + hash.
+                var ap = new Parsec.Core.Attractors.AttractorParams { NumSteps = 50_000 };
+                var traj = Parsec.Core.Attractors.ThomasAttractor.Generate(ap);
+                var hash = Parsec.Core.Attractors.AttractorHash.Build(traj, gridSize: 64);
+                Console.WriteLine($"  trajectory: {traj.Count} pts, bounds [{hash.BoundsMin.X:F2},{hash.BoundsMax.X:F2}]×[{hash.BoundsMin.Y:F2},{hash.BoundsMax.Y:F2}]×[{hash.BoundsMin.Z:F2},{hash.BoundsMax.Z:F2}]");
+
+                renderer.SetAttractor(hash);
+
+                // Camera positioned to see the full attractor cloud.
+                var center = (hash.BoundsMin + hash.BoundsMax) * 0.5f;
+                float span  = (hash.BoundsMax - hash.BoundsMin).Length();
+                var camPos  = center + new Vector3(0f, 0.3f, 1f) * span * 0.9f;
+                var camera  = new Camera3D(camPos, center, Vector3.UnitY, MathF.PI / 4f, (float)w / h);
+
+                var rp     = new Parsec.Rendering.Gpu.AttractorRenderParams { TubeRadius = 0.06f, Fudge = 0.45f };
+                var bg     = new Color(0.02f, 0.03f, 0.07f);
+                var surf   = new Color(0.9f, 0.47f, 0.27f);
+                var light  = Vector3.Normalize(new Vector3(1f, 2f, 1.5f));
+                var pal    = PaletteParams.Default;
+                var settings = new RaymarchSettings();
+
+                var sw = System.Diagnostics.Stopwatch.StartNew();
+                var pixels = renderer.Render(rp, camera, w, h, settings, bg, surf, light, pal, hash);
+                sw.Stop();
+
+                uint bgR = (uint)(bg.R * 255 + 0.5f), bgG = (uint)(bg.G * 255 + 0.5f), bgB = (uint)(bg.B * 255 + 0.5f);
+                uint bgPacked = (255u << 24) | (bgB << 16) | (bgG << 8) | bgR;
+                int nonBg = pixels.Count(p => p != bgPacked);
+                Console.WriteLine($"  compute {renderer.LastComputeMs} ms, readback {renderer.LastReadbackMs} ms, total {sw.ElapsedMilliseconds} ms");
+                Console.WriteLine($"  {w * h} pixels, {nonBg} non-background");
+
+                bool pass = nonBg > 0;
+                Console.WriteLine(pass ? "metal-attractor-smoke PASS" : "metal-attractor-smoke FAIL (all background)");
+                return pass ? 0 : 1;
+            }
+            catch (Exception ex) { Console.Error.WriteLine($"metal-attractor-smoke FAILED: {ex.Message}\n{ex.StackTrace}"); return 1; }
+        }
+
         var matches = examples.Where(e => e.Name == args[0]).ToList();
         if (matches.Count == 0)
         {
@@ -6916,6 +6973,7 @@ public static class Program
         Console.WriteLine("  parsec metal-kleinian-smoke [w] [h]  Metal Kleinian smoke test (macOS only)");
         Console.WriteLine("  parsec metal-hybrid-smoke [w] [h]    Metal Hybrid smoke test (macOS only)");
         Console.WriteLine("  parsec metal-orbit-gif [frames] [w] [h] [out.gif]  Orbiting Mandelbulb GIF (macOS only)");
+        Console.WriteLine("  parsec metal-attractor-smoke [w] [h]  Metal Attractor spatial-hash tube smoke test (macOS only)");
         Console.WriteLine("  parsec m7a-check              JI/temperament quantizer self-check");
         Console.WriteLine("  parsec help           Show this help");
         Console.WriteLine();
