@@ -153,6 +153,9 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
     private bool _textureFeedbackEnabled;
     private bool _feedbackBootstrapped;
     private byte[]? _feedbackBytes;
+    private bool _domainWarpEnabled;
+    private float _domainWarpStrength = 0.15f;
+    private float _domainWarpScale = 1.5f;
 
     public bool SurfaceTextureEnabled
     {
@@ -205,6 +208,39 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
         }
     }
 
+    public bool DomainWarpEnabled
+    {
+        get => _domainWarpEnabled;
+        set
+        {
+            _domainWarpEnabled = value;
+            SyncDomainWarpState();
+            MarkDirty();
+        }
+    }
+
+    public float DomainWarpStrength
+    {
+        get => _domainWarpStrength;
+        set
+        {
+            _domainWarpStrength = Math.Clamp(value, 0f, 0.75f);
+            SyncDomainWarpState();
+            MarkDirty();
+        }
+    }
+
+    public float DomainWarpScale
+    {
+        get => _domainWarpScale;
+        set
+        {
+            _domainWarpScale = Math.Clamp(value, 0.05f, 12f);
+            SyncDomainWarpState();
+            MarkDirty();
+        }
+    }
+
     public bool SupportsSurfaceTexture => ActiveType != FractalType.DeepZoom && ActiveType != FractalType.Attractor;
 
     public string SurfaceTextureLabel => _surfaceTexturePath is { Length: > 0 }
@@ -217,6 +253,7 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
     {
         ActiveType = type;
         SyncSurfaceTextureState();
+        SyncDomainWarpState();
         MarkDirty();
     }
 
@@ -276,6 +313,14 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
             enabled: ActiveType != FractalType.DeepZoom && ActiveType != FractalType.Attractor && _surfaceTextureEnabled && HasSurfaceTextureImage,
             blend: _surfaceTextureBlend,
             scale: _surfaceTextureScale);
+    }
+
+    private void SyncDomainWarpState()
+    {
+        DomainWarpState.SetControls(
+            enabled: ActiveType != FractalType.DeepZoom && ActiveType != FractalType.Attractor && _domainWarpEnabled,
+            strength: _domainWarpStrength,
+            scale: _domainWarpScale);
     }
 
     /// <summary>

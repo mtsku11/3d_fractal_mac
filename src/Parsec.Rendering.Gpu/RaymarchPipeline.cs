@@ -183,7 +183,7 @@ public sealed class RaymarchPipeline : IDisposable
             PalAmp = new Vector4(palette.Amp, palette.TrapScale),
             PalPhase = new Vector4(palette.Phase, palette.ShellMix),
             TrapMix = new Vector4(palette.TrapMix, 0f),
-            SubpixelJitter = new Vector4(jitter.X, jitter.Y, 0, 0),
+            SubpixelJitter = DomainWarpState.EncodeSubpixelJitter(jitter),
             ReflectParams = new Vector4(
                 s.EnableReflections ? 1f : 0f,
                 s.ReflectionBounces,

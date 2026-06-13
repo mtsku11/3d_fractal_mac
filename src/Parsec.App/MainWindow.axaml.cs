@@ -173,6 +173,30 @@ public partial class MainWindow : Window
                     _view.SurfaceTextureScale = (float)surfaceTextureScaleSlider.Value;
             };
 
+        var domainWarpEnableCheckBox = this.FindControl<CheckBox>("DomainWarpEnableCheckBox");
+        if (domainWarpEnableCheckBox != null)
+            domainWarpEnableCheckBox.IsCheckedChanged += (_, _) =>
+            {
+                if (_view != null)
+                    _view.DomainWarpEnabled = domainWarpEnableCheckBox.IsChecked == true;
+            };
+
+        var domainWarpStrengthSlider = this.FindControl<Slider>("DomainWarpStrengthSlider");
+        if (domainWarpStrengthSlider != null)
+            domainWarpStrengthSlider.PropertyChanged += (_, e) =>
+            {
+                if (e.Property.Name == nameof(Slider.Value) && _view != null)
+                    _view.DomainWarpStrength = (float)domainWarpStrengthSlider.Value;
+            };
+
+        var domainWarpScaleSlider = this.FindControl<Slider>("DomainWarpScaleSlider");
+        if (domainWarpScaleSlider != null)
+            domainWarpScaleSlider.PropertyChanged += (_, e) =>
+            {
+                if (e.Property.Name == nameof(Slider.Value) && _view != null)
+                    _view.DomainWarpScale = (float)domainWarpScaleSlider.Value;
+            };
+
         var surfaceTextureLoadButton = this.FindControl<Button>("SurfaceTextureLoadButton");
         if (surfaceTextureLoadButton != null)
             surfaceTextureLoadButton.Click += OnSurfaceTextureLoadClick;
@@ -425,6 +449,9 @@ public partial class MainWindow : Window
         var blendSlider = this.FindControl<Slider>("SurfaceTextureBlendSlider");
         var scaleSlider = this.FindControl<Slider>("SurfaceTextureScaleSlider");
         var projectionSelector = this.FindControl<ComboBox>("SurfaceTextureProjectionSelector");
+        var domainWarpToggle = this.FindControl<CheckBox>("DomainWarpEnableCheckBox");
+        var domainWarpStrength = this.FindControl<Slider>("DomainWarpStrengthSlider");
+        var domainWarpScale = this.FindControl<Slider>("DomainWarpScaleSlider");
         if (_view == null) return;
 
         string tip = _view.SupportsSurfaceTexture
@@ -436,6 +463,9 @@ public partial class MainWindow : Window
         if (blendSlider != null) ToolTip.SetTip(blendSlider, "0 = fractal palette only, 1 = image colour only.");
         if (scaleSlider != null) ToolTip.SetTip(scaleSlider, "Higher values repeat the image more densely across the fractal.");
         if (projectionSelector != null) ToolTip.SetTip(projectionSelector, "First pass is object-space triplanar projection.");
+        if (domainWarpToggle != null) ToolTip.SetTip(domainWarpToggle, "Procedurally bends the 3D sample space before fractal evaluation.");
+        if (domainWarpStrength != null) ToolTip.SetTip(domainWarpStrength, "Higher values distort the fractal geometry more strongly.");
+        if (domainWarpScale != null) ToolTip.SetTip(domainWarpScale, "Lower values bend large forms; higher values create denser tearing.");
     }
 
     private void RefreshSurfaceTexturePathText()

@@ -199,7 +199,7 @@ public sealed class MetalMengerRenderer : IDisposable
             MarchA=new Vector4(s.HitEpsilon,s.MaxDistance,s.NormalEpsilon,s.ShadowSoftness),MarchB = MetalSurfaceTextureManager.EncodeMarchB(s.AOStepDistance, s.AOIntensity),
             MarchI0=s.MaxSteps,MarchI1=s.ShadowSteps,MarchI2=s.AOSamples,MarchI3=flags,
             PalBase=new Vector4(palette.Base,palette.Frequency),PalAmp=new Vector4(palette.Amp,palette.TrapScale),PalPhase=new Vector4(palette.Phase,palette.ShellMix),TrapMix=new Vector4(palette.TrapMix,0f),
-            SubpixelJitter=new Vector4(subpixelJitter.X,subpixelJitter.Y,0f,0f),ReflectParams=new Vector4(s.EnableReflections?1f:0f,s.ReflectionBounces,s.Gloss,s.F0) };
+            SubpixelJitter = DomainWarpState.EncodeSubpixelJitter(subpixelJitter),ReflectParams=new Vector4(s.EnableReflections?1f:0f,s.ReflectionBounces,s.Gloss,s.F0) };
     }
 
     private static MTLBuffer UploadStruct<T>(MTLDevice device, T value) where T : struct => MetalBufferIO.UploadStruct(device, value);

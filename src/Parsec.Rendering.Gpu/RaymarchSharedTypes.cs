@@ -48,7 +48,7 @@ internal struct RenderParamsGpu
     public Vector4 MarchA, MarchB;
     public int MarchI0, MarchI1, MarchI2, MarchI3;
     public Vector4 PalBase, PalAmp, PalPhase, TrapMix;
-    public Vector4 SubpixelJitter;   // (jx, jy, _, _) in [-0.5, 0.5]
+    public Vector4 SubpixelJitter;   // (jx, jy, domainWarpStrength, domainWarpScale)
     public Vector4 ReflectParams;    // (enable, maxBounces, gloss, F0)
 }
 

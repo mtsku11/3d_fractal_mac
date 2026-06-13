@@ -2,6 +2,26 @@ namespace Parsec.Rendering.Metal;
 
 internal static class MetalSurfaceTextureShaderInjector
 {
+    private const string DomainWarpHelpers = """
+float3 domainWarp(float3 p, constant RenderParams& rp) {
+    float strength = max(rp.subpixelJitter.z, 0.0f);
+    if (strength <= 0.0f) return p;
+
+    float scale = max(rp.subpixelJitter.w, 1e-4f);
+    float3 q = p * scale;
+    float3 w1 = float3(
+        sin(q.y + sin(q.z * 1.37f)),
+        sin(q.z + sin(q.x * 1.21f)),
+        sin(q.x + sin(q.y * 1.11f)));
+    float3 w2 = float3(
+        cos(q.z * 0.73f + q.y),
+        cos(q.x * 0.67f + q.z),
+        cos(q.y * 0.79f + q.x));
+    return p + strength * (0.75f * w1 + 0.25f * w2);
+}
+
+""";
+
     // Helpers for orbit-trap + triplanar combined injection (BurningShip only for now).
     // background.w: 0 = disabled, 1 = triplanar, 2 = orbit trap.
     // posOrTrapUv: world hit point in triplanar mode; orbit-trap UV packed in .xy in orbit mode.
@@ -90,6 +110,8 @@ float3 applySurfaceTexture(float3 baseAlbedo, float3 pos, float3 normal,
 
     public static string Inject(string src)
     {
+        src = InjectDomainWarp(src);
+
         if (src.Contains("applySurfaceTexture("))
             return src;
 
@@ -140,7 +162,7 @@ float3 applySurfaceTexture(float3 baseAlbedo, float3 pos, float3 normal,
     public static string InjectOrbitTrap(string src)
     {
         if (src.Contains("applySurfaceTexture("))
-            return src;
+            return InjectDomainWarp(src);
 
         // Capture trapUv alongside gTrap at the hit point.
         src = src.Replace(
@@ -171,6 +193,72 @@ float3 applySurfaceTexture(float3 baseAlbedo, float3 pos, float3 normal,
         int envIndex = src.IndexOf("float3 envGradient(", StringComparison.Ordinal);
         if (envIndex >= 0)
             src = src.Insert(envIndex, OrbitTrapHelpers);
+
+        return InjectDomainWarp(src);
+    }
+
+    private static string InjectDomainWarp(string src)
+    {
+        if (src.Contains("domainWarp("))
+            return src;
+
+        // Insert helper before estimateNormal definition
+        int normalIndex = src.IndexOf("float3 estimateNormal(", StringComparison.Ordinal);
+        if (normalIndex >= 0)
+            src = src.Insert(normalIndex, DomainWarpHelpers);
+
+        // --- Primary march ---
+        src = src.Replace(
+            "float d = estimate(p, fp) * fudge;",
+            "float d = estimate(domainWarp(p, rp), fp) * fudge;");
+        src = src.Replace(
+            "float d = estimate(pt, fp) * fudge;",
+            "float d = estimate(domainWarp(pt, rp), fp) * fudge;");
+        src = src.Replace(
+            "float d = estimate(ro + rd * t, fp) * fudge;",
+            "float d = estimate(domainWarp(ro + rd * t, rp), fp) * fudge;");
+
+        // --- estimateFull at hit point ---
+        src = src.Replace(
+            "estimateFull(hitPoint, fp, gTrap);",
+            "estimateFull(domainWarp(hitPoint, rp), fp, gTrap);");
+        src = src.Replace(
+            "estimateFull(hitPoint, fp, gTrap, trapUv);",
+            "estimateFull(domainWarp(hitPoint, rp), fp, gTrap, trapUv);");
+
+        // --- estimateNormal: add rp so it can warp each stencil point ---
+        src = src.Replace(
+            "float3 estimateNormal(float3 p, float eps, float3 viewDir, thread bool& degenerate,\n                      constant FoldParams& fp) {",
+            "float3 estimateNormal(float3 p, float eps, float3 viewDir, thread bool& degenerate,\n                      constant FoldParams& fp, constant RenderParams& rp) {");
+        src = src.Replace(
+            "        k.xyy * estimate(p + k.xyy * eps, fp) +\n        k.yyx * estimate(p + k.yyx * eps, fp) +\n        k.yxy * estimate(p + k.yxy * eps, fp) +\n        k.xxx * estimate(p + k.xxx * eps, fp);",
+            "        k.xyy * estimate(domainWarp(p + k.xyy * eps, rp), fp) +\n        k.yyx * estimate(domainWarp(p + k.yyx * eps, rp), fp) +\n        k.yxy * estimate(domainWarp(p + k.yxy * eps, rp), fp) +\n        k.xxx * estimate(domainWarp(p + k.xxx * eps, rp), fp);");
+        // Patch call site — just add rp, do NOT pre-warp hitPoint (warping happens per-stencil inside)
+        src = src.Replace(
+            "estimateNormal(hitPoint, nEps, rd, degenerate, fp)",
+            "estimateNormal(hitPoint, nEps, rd, degenerate, fp, rp)");
+
+        // --- softShadow: add rp and warp each march step ---
+        src = src.Replace(
+            "float softShadow(float3 origin, float3 dir, float hitEps, float maxDist,\n                 int steps, float softness, constant FoldParams& fp) {",
+            "float softShadow(float3 origin, float3 dir, float hitEps, float maxDist,\n                 int steps, float softness, constant FoldParams& fp, constant RenderParams& rp) {");
+        src = src.Replace(
+            "        float d = estimate(p, fp);\n        if (d < hitEps) return 0.0f;",
+            "        float d = estimate(domainWarp(p, rp), fp);\n        if (d < hitEps) return 0.0f;");
+        // Call-site patches keyed on unique argument endings (covers all shader variants)
+        src = src.Replace("shadowSteps, shadowSoft, fp);", "shadowSteps, shadowSoft, fp, rp);");
+        src = src.Replace("rp.marchA.w, fp);", "rp.marchA.w, fp, rp);");  // Menger inline args
+
+        // --- ambientOcclusion: add rp and warp each sample point ---
+        src = src.Replace(
+            "float ambientOcclusion(float3 p, float3 normal, float stepDist, float intensity,\n                       int samples, constant FoldParams& fp) {",
+            "float ambientOcclusion(float3 p, float3 normal, float stepDist, float intensity,\n                       int samples, constant FoldParams& fp, constant RenderParams& rp) {");
+        src = src.Replace(
+            "        float d = estimate(samplePoint, fp);",
+            "        float d = estimate(domainWarp(samplePoint, rp), fp);");
+        // Call-site patches keyed on unique argument endings
+        src = src.Replace("aoSamples, fp);", "aoSamples, fp, rp);");
+        src = src.Replace("rp.marchI2, fp);", "rp.marchI2, fp, rp);");  // Menger inline args
 
         return src;
     }

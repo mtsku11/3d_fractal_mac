@@ -40,7 +40,7 @@ layout(std430, binding = 4) readonly buffer RenderParams {
     vec4  palPhase;
     vec4  trapMix;
 
-    vec4  subpixelJitter; // (jx, jy, _, _)
+    vec4  subpixelJitter; // (jx, jy, domainWarpStrength, domainWarpScale)
 
     // Glossy reflection controls (hero-only, per-fractal opt-in):
     //   x = enable (0/1), y = max bounces, z = gloss [0,1], w = fresnel F0
@@ -55,13 +55,30 @@ layout(std430, binding = 5) buffer Accum {
 // Shading helpers
 // -----------------------------------------------------------------------------
 
+vec3 domainWarp(vec3 p) {
+    float strength = max(rp.subpixelJitter.z, 0.0);
+    if (strength <= 0.0) return p;
+
+    float scale = max(rp.subpixelJitter.w, 1e-4);
+    vec3 q = p * scale;
+    vec3 w1 = vec3(
+        sin(q.y + sin(q.z * 1.37)),
+        sin(q.z + sin(q.x * 1.21)),
+        sin(q.x + sin(q.y * 1.11)));
+    vec3 w2 = vec3(
+        cos(q.z * 0.73 + q.y),
+        cos(q.x * 0.67 + q.z),
+        cos(q.y * 0.79 + q.x));
+    return p + strength * (0.75 * w1 + 0.25 * w2);
+}
+
 vec3 estimateNormal(vec3 p, float eps, vec3 viewDir, out bool degenerate) {
     vec2 k = vec2(1.0, -1.0);
     vec3 n =
-        k.xyy * estimate(p + k.xyy * eps) +
-        k.yyx * estimate(p + k.yyx * eps) +
-        k.yxy * estimate(p + k.yxy * eps) +
-        k.xxx * estimate(p + k.xxx * eps);
+        k.xyy * estimate(domainWarp(p + k.xyy * eps)) +
+        k.yyx * estimate(domainWarp(p + k.yyx * eps)) +
+        k.yxy * estimate(domainWarp(p + k.yxy * eps)) +
+        k.xxx * estimate(domainWarp(p + k.xxx * eps));
     float len = length(n);
     degenerate = !(len > 1e-6);
     return degenerate ? -viewDir : n / len;
@@ -73,7 +90,7 @@ float softShadow(vec3 origin, vec3 dir, float hitEps, float maxDist,
     float t = hitEps * 4.0;
     for (int i = 0; i < steps; i++) {
         vec3 p = origin + dir * t;
-        float d = estimate(p);
+        float d = estimate(domainWarp(p));
         if (d < hitEps) return 0.0;
         result = min(result, softness * d / t);
         t += d;
@@ -88,7 +105,7 @@ float ambientOcclusion(vec3 p, vec3 normal, float stepDist, float intensity, int
     for (int i = 1; i <= samples; i++) {
         float stepLen = float(i) * stepDist;
         vec3 samplePoint = p + normal * stepLen;
-        float d = estimate(samplePoint);
+        float d = estimate(domainWarp(samplePoint));
         occ += (stepLen - d) * weight;
         weight *= 0.5;
     }
@@ -209,7 +226,7 @@ Hit traceRay(vec3 ro, vec3 rd, float hitEps, float maxDist, float normalEps, int
     float lastD = 1e9;
     for (i = 0; i < maxSteps; i++) {
         vec3 p = ro + rd * t;
-        float d = estimate(p) * fudge;
+        float d = estimate(domainWarp(p)) * fudge;
         // Cone-scaled hit epsilon: stop when the surface is within ~half a
         // pixel's world-size at this distance, so detail resolves with
         // resolution/zoom instead of a fixed world threshold. hitEps acts as a
@@ -228,7 +245,7 @@ Hit traceRay(vec3 ro, vec3 rd, float hitEps, float maxDist, float normalEps, int
     vec3 hitPoint = ro + rd * t;
     // Capture the orbit trap at the hit BEFORE normal estimation (which calls
     // estimate() four times and clobbers gTrap).
-    estimate(hitPoint);
+    estimate(domainWarp(hitPoint));
     bool degenerate;
     // Match the normal sampling radius to the pixel footprint at the hit, so
     // relief finer than a fixed normalEps isn't averaged away at deep zoom.

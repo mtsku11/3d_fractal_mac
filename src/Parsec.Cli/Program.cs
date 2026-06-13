@@ -769,6 +769,153 @@ public static class Program
             catch (Exception ex) { Console.Error.WriteLine($"metal-morph-mp4 FAILED: {ex.Message}\n{ex.StackTrace}"); return 1; }
         }
 
+        if (args[0] is "metal-domain-warp-mp4")
+        {
+            if (!OperatingSystem.IsMacOS()) { Console.Error.WriteLine("metal-domain-warp-mp4 requires macOS."); return 1; }
+            try
+            {
+                double duration = args.Length > 1 && double.TryParse(args[1], out var d) ? d : 4.0;
+                string outMp4 = args.Length > 2 ? args[2] : ResolveOutputPath("domain_warp.mp4");
+                int w = args.Length > 3 && int.TryParse(args[3], out var parsedW) ? parsedW : 720;
+                int h = args.Length > 4 && int.TryParse(args[4], out var parsedH) ? parsedH : 406;
+                if ((w & 1) != 0) w++;
+                if ((h & 1) != 0) h++;
+                const int fps = 24;
+                int frames = Math.Max(1, (int)Math.Ceiling(duration * fps));
+
+                Console.WriteLine($"metal-domain-warp-mp4 - Mandelbox procedural domain warp, {duration:F1}s @ {fps}fps, {w}x{h}");
+                using var renderer = new MetalMandelboxRenderer();
+                if (!renderer.IsAvailable) { Console.Error.WriteLine("Metal backend not available."); return 1; }
+
+                MetalSurfaceTextureManager.ClearImage();
+                MetalSurfaceTextureManager.SetControls(enabled: false, blend: 0f, scale: 1f, mode: 0);
+
+                var settings = new RaymarchSettings(
+                    MaxSteps: 220, HitEpsilon: 4e-4f, MaxDistance: 35f, NormalEpsilon: 5e-4f,
+                    EnableSoftShadows: true, ShadowSteps: 64, ShadowSoftness: 12f,
+                    EnableAmbientOcclusion: true, AOSamples: 5, AOStepDistance: 0.04f, AOIntensity: 0.42f,
+                    HeroSamples: 1, EnableReflections: false, ReflectionBounces: 0,
+                    Gloss: 0f, F0: 0f, LightIntensity: 2.2f);
+
+                var palette = new PaletteParams
+                {
+                    Base = new Vector3(0.40f, 0.44f, 0.48f),
+                    Amp = new Vector3(0.55f, 0.42f, 0.34f),
+                    Frequency = 1.65f,
+                    Phase = new Vector3(0.02f, 0.31f, 0.68f),
+                    TrapScale = 0.92f,
+                    TrapMix = new Vector3(0.65f, 0.38f, 0.28f),
+                    ShellMix = 0.28f,
+                };
+
+                var bg = new Color(0.12f, 0.13f, 0.16f);
+                var surface = Color.Rgb(245, 220, 180);
+                var light = Vector3.Normalize(new Vector3(1.4f, 2.1f, 0.9f));
+                var post = new PostProcessParams
+                {
+                    Brightness = 1.85f,
+                    Contrast = 0.96f,
+                    Gamma = 0.72f,
+                    Saturation = 1.75f,
+                    HdrEnabled = true,
+                };
+
+                var frameDir = Path.Combine(Path.GetTempPath(), $"parsec-domain-warp-{Guid.NewGuid():N}");
+                Directory.CreateDirectory(frameDir);
+                Directory.CreateDirectory(Path.GetDirectoryName(outMp4)!);
+
+                uint[]? baseline = null;
+                uint[]? firstWarp = null;
+                var sw = System.Diagnostics.Stopwatch.StartNew();
+                try
+                {
+                    for (int i = 0; i < frames; i++)
+                    {
+                        float tN = frames > 1 ? (float)i / (frames - 1) : 0f;
+                        float orbit = tN * MathF.Tau * 0.72f;
+                        float camR = 3.75f - 0.35f * MathF.Sin(tN * MathF.PI);
+                        var camera = new Camera3D(
+                            new Vector3(camR * MathF.Sin(orbit), 1.15f + 0.45f * MathF.Sin(tN * MathF.Tau), camR * MathF.Cos(orbit)),
+                            new Vector3(0f, 0.12f, 0f),
+                            Vector3.UnitY,
+                            MathF.PI / 4.2f,
+                            (float)w / h);
+
+                        float pulse = 0.5f + 0.5f * MathF.Sin(tN * MathF.Tau * 1.35f);
+                        float strength = 0.16f + 0.24f * pulse;
+                        float scale = 0.85f + 2.8f * tN;
+                        var fractal = new MandelboxParams
+                        {
+                            Scale = 2.05f + 0.18f * MathF.Sin(tN * MathF.Tau * 1.1f),
+                            Iterations = 15,
+                            FoldingLimit = 1.0f,
+                            MinRadius = 0.42f,
+                            FixedRadius = 1.0f,
+                            Fudge = 0.92f,
+                            BoundRadius = 2.4f,
+                        };
+
+                        if (i == 0)
+                        {
+                            DomainWarpState.SetControls(enabled: false, strength: 0f, scale: scale);
+                            baseline = renderer.RenderMandelbox(fractal, camera, w, h, settings, bg, surface, light, palette, post);
+                        }
+
+                        DomainWarpState.SetControls(enabled: true, strength: strength, scale: scale);
+                        uint[] pixels = renderer.RenderMandelbox(fractal, camera, w, h, settings, bg, surface, light, palette, post);
+                        if (i == 0) firstWarp = pixels;
+
+                        var info = new SKImageInfo(w, h, SKColorType.Rgba8888, SKAlphaType.Premul);
+                        using var bmp = new SKBitmap(info);
+                        var bytes = new byte[pixels.Length * 4];
+                        Buffer.BlockCopy(pixels, 0, bytes, 0, bytes.Length);
+                        Marshal.Copy(bytes, 0, bmp.GetPixels(), bytes.Length);
+                        ImageOutput.SavePng(bmp, Path.Combine(frameDir, $"frame_{i:D4}.png"));
+
+                        Console.Write($"\r  frame {i + 1}/{frames} strength={strength:F2} scale={scale:F2} compute={renderer.LastComputeMs}ms   ");
+                    }
+                }
+                finally
+                {
+                    DomainWarpState.SetControls(enabled: false, strength: 0f, scale: 1f);
+                }
+                sw.Stop();
+
+                if (baseline != null && firstWarp != null)
+                {
+                    int changed = 0;
+                    for (int i = 0; i < baseline.Length; i++)
+                        if (baseline[i] != firstWarp[i]) changed++;
+                    Console.WriteLine($"\n  baseline vs first warped frame: {changed}/{baseline.Length} pixels changed ({changed * 100.0 / baseline.Length:F2}%)");
+                }
+
+                Console.WriteLine($"  rendered {frames} frames in {sw.ElapsedMilliseconds} ms ({sw.ElapsedMilliseconds / frames} ms avg)");
+                string ffArgs = $"-y -framerate {fps} -i \"{Path.Combine(frameDir, "frame_%04d.png")}\" " +
+                    $"-c:v libx264 -crf 16 -preset slow -pix_fmt yuv420p \"{outMp4}\"";
+                var proc = System.Diagnostics.Process.Start(
+                    new System.Diagnostics.ProcessStartInfo("ffmpeg", ffArgs)
+                    { RedirectStandardError = true, UseShellExecute = false })!;
+                string ffmpegError = proc.StandardError.ReadToEnd();
+                proc.WaitForExit();
+                if (proc.ExitCode != 0)
+                {
+                    Console.Error.WriteLine("ffmpeg failed.");
+                    Console.Error.WriteLine(ffmpegError);
+                    return 1;
+                }
+                Directory.Delete(frameDir, recursive: true);
+                var fi = new FileInfo(outMp4);
+                Console.WriteLine($"  -> {outMp4} ({fi.Length / 1024} KB)");
+                return 0;
+            }
+            catch (Exception ex)
+            {
+                DomainWarpState.SetControls(enabled: false, strength: 0f, scale: 1f);
+                Console.Error.WriteLine($"metal-domain-warp-mp4 FAILED: {ex.Message}\n{ex.StackTrace}");
+                return 1;
+            }
+        }
+
         if (args[0] is "metal-cinematic-gif")
         {
             if (!OperatingSystem.IsMacOS()) { Console.Error.WriteLine("metal-cinematic-gif requires macOS."); return 1; }
@@ -6762,6 +6909,7 @@ public static class Program
         Console.WriteLine("  parsec metal-closeup-hq [duration] [out.mp4]  Mandelbox close fly-in, 4× SSAA, Mandelbrot texture (macOS)");
         Console.WriteLine("  parsec metal-cross-fractal-texture [duration] [out.mp4]  Mandelbrot zoom projected onto Mandelbox surface (macOS)");;
         Console.WriteLine("  parsec metal-fractal-feedback [duration] [out.mp4]  Mandelbox recursive self-texture feedback loop (macOS)");;
+        Console.WriteLine("  parsec metal-domain-warp-mp4 [duration] [out.mp4] [w] [h]  Mandelbox procedural domain-warp clip (macOS)");
         Console.WriteLine("  parsec metal-bulb-smoke [w] [h]      Metal Mandelbulb smoke test (macOS only)");
         Console.WriteLine("  parsec metal-rotbox-smoke [w] [h]    Metal RotBox smoke test (macOS only)");
         Console.WriteLine("  parsec metal-kifs-smoke [w] [h]      Metal KIFS smoke test (macOS only)");

@@ -147,6 +147,16 @@
               <ComboBoxItem>Triplanar</ComboBoxItem>
             </ComboBox>
           </StackPanel>
+          <StackPanel Margin="0,10,0,0" Spacing="4">
+            <TextBlock Text="DOMAIN WARP" Foreground="#9a9ab0" FontSize="11" FontWeight="SemiBold" />
+            <CheckBox Name="DomainWarpEnableCheckBox" Content="Enable Space Distortion" />
+            <TextBlock Text="Strength" FontSize="11" />
+            <Slider Name="DomainWarpStrengthSlider" Minimum="0" Maximum="0.75" Value="0.15"
+                    TickFrequency="0.01" IsSnapToTickEnabled="False" />
+            <TextBlock Text="Scale" FontSize="11" />
+            <Slider Name="DomainWarpScaleSlider" Minimum="0.1" Maximum="8" Value="1.5"
+                    TickFrequency="0.05" IsSnapToTickEnabled="False" />
+          </StackPanel>
         </StackPanel>
       </Grid>
       <Border Name="PanelHost" Grid.Row="1" Margin="12,8,12,12" />
