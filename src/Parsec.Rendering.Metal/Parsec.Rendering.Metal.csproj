@@ -23,6 +23,16 @@
     <EmbeddedResource Include="Shaders\qjbox_telemetry.metal" />
     <EmbeddedResource Include="Shaders\rotbox_telemetry.metal" />
     <EmbeddedResource Include="Shaders\quaternianjulia_telemetry.metal" />
+    <EmbeddedResource Include="Shaders\hybrid_telemetry.metal" />
+    <EmbeddedResource Include="Shaders\bicomplex_telemetry.metal" />
+    <EmbeddedResource Include="Shaders\phoenix_telemetry.metal" />
+    <EmbeddedResource Include="Shaders\biomorph_telemetry.metal" />
+    <EmbeddedResource Include="Shaders\mosely_telemetry.metal" />
+    <EmbeddedResource Include="Shaders\pseudokleinian4d_telemetry.metal" />
+    <EmbeddedResource Include="Shaders\riemannsphere_telemetry.metal" />
+    <EmbeddedResource Include="Shaders\mandalay_telemetry.metal" />
+    <EmbeddedResource Include="Shaders\anisotropic_telemetry.metal" />
+    <EmbeddedResource Include="Shaders\orbithybrid_telemetry.metal" />
     <EmbeddedResource Include="Shaders\mandelbulb_raymarch.metal" />
     <EmbeddedResource Include="Shaders\rotbox_raymarch.metal" />
     <EmbeddedResource Include="Shaders\kifs_raymarch.metal" />

@@ -5158,6 +5158,39 @@ public static class Program
                                           r.RunTelemetryPass(new QuaternionJuliaParams(), qjClose, settingsM));
                 }
 
+                // Cameras scaled to each fractal's bound radius (far ~6x, close ~2.2x).
+                static Camera3D Cam(float z) => new(new Vector3(0f, z * 0.22f, z), Vector3.Zero, Vector3.UnitY, MathF.PI / 4f, 64f / 36f);
+                using (var r = new MetalHybridRenderer())
+                { if (!r.IsAvailable) { Console.Error.WriteLine("Hybrid Metal unavailable"); return 1; }
+                  Check("Hybrid", r.RunTelemetryPass(new HybridParams(), Cam(24f), settingsM), r.RunTelemetryPass(new HybridParams(), Cam(9f), settingsM)); }
+                using (var r = new MetalBicomplexRenderer())
+                { if (!r.IsAvailable) { Console.Error.WriteLine("Bicomplex Metal unavailable"); return 1; }
+                  Check("Bicomplex", r.RunTelemetryPass(new BicomplexParams(), Cam(24f), settingsM), r.RunTelemetryPass(new BicomplexParams(), Cam(9f), settingsM)); }
+                using (var r = new MetalPhoenixRenderer())
+                { if (!r.IsAvailable) { Console.Error.WriteLine("Phoenix Metal unavailable"); return 1; }
+                  Check("Phoenix", r.RunTelemetryPass(new PhoenixParams(), Cam(24f), settingsM), r.RunTelemetryPass(new PhoenixParams(), Cam(9f), settingsM)); }
+                using (var r = new MetalBiomorphRenderer())
+                { if (!r.IsAvailable) { Console.Error.WriteLine("Biomorph Metal unavailable"); return 1; }
+                  Check("Biomorph", r.RunTelemetryPass(new BiomorphParams(), Cam(18f), settingsM), r.RunTelemetryPass(new BiomorphParams(), Cam(7f), settingsM)); }
+                using (var r = new MetalMoselyRenderer())
+                { if (!r.IsAvailable) { Console.Error.WriteLine("Mosely Metal unavailable"); return 1; }
+                  Check("Mosely", r.RunTelemetryPass(new MoselyParams(), Cam(14f), settingsM), r.RunTelemetryPass(new MoselyParams(), Cam(5f), settingsM)); }
+                using (var r = new MetalPseudoKleinian4DRenderer())
+                { if (!r.IsAvailable) { Console.Error.WriteLine("PseudoKleinian4D Metal unavailable"); return 1; }
+                  Check("PseudoKln4D", r.RunTelemetryPass(new PseudoKleinian4DParams(), Cam(32f), settingsM), r.RunTelemetryPass(new PseudoKleinian4DParams(), Cam(16f), settingsM)); }
+                using (var r = new MetalRiemannSphereRenderer())
+                { if (!r.IsAvailable) { Console.Error.WriteLine("RiemannSphere Metal unavailable"); return 1; }
+                  Check("RiemannSph", r.RunTelemetryPass(new RiemannSphereParams(), Cam(18f), settingsM), r.RunTelemetryPass(new RiemannSphereParams(), Cam(7f), settingsM)); }
+                using (var r = new MetalMandalayRenderer())
+                { if (!r.IsAvailable) { Console.Error.WriteLine("Mandalay Metal unavailable"); return 1; }
+                  Check("Mandalay", r.RunTelemetryPass(new MandalayParams(), Cam(32f), settingsM), r.RunTelemetryPass(new MandalayParams(), Cam(13f), settingsM)); }
+                using (var r = new MetalAnisotropicRenderer())
+                { if (!r.IsAvailable) { Console.Error.WriteLine("Anisotropic Metal unavailable"); return 1; }
+                  Check("Anisotropic", r.RunTelemetryPass(new AnisotropicParams(), Cam(28f), settingsM), r.RunTelemetryPass(new AnisotropicParams(), Cam(11f), settingsM)); }
+                using (var r = new MetalOrbitHybridRenderer())
+                { if (!r.IsAvailable) { Console.Error.WriteLine("OrbitHybrid Metal unavailable"); return 1; }
+                  Check("OrbitHybrid", r.RunTelemetryPass(new OrbitHybridParams(), Cam(24f), settingsM), r.RunTelemetryPass(new OrbitHybridParams(), Cam(9f), settingsM)); }
+
                 if (failures > 0) { Console.Error.WriteLine($"metal-midi-telemetry: {failures} kernel(s) failed."); return 1; }
                 Console.WriteLine("All MIDI-only telemetry kernels compiled and returned valid stats.");
                 return 0;

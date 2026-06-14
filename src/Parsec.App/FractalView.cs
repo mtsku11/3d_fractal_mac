@@ -851,6 +851,26 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
             => _metalRotBoxRenderer.RunTelemetryPass(RotBox.ToParams(), camera, settings),
         FractalType.QuaternionJulia when _metalQuaternionJuliaRenderer?.IsAvailable == true
             => _metalQuaternionJuliaRenderer.RunTelemetryPass(QuaternionJulia.ToParams(), camera, settings),
+        FractalType.Hybrid     when _metalHybridRenderer?.IsAvailable == true
+            => _metalHybridRenderer.RunTelemetryPass(Hybrid.ToParams(), camera, settings),
+        FractalType.Bicomplex  when _metalBicomplexRenderer?.IsAvailable == true
+            => _metalBicomplexRenderer.RunTelemetryPass(Bicomplex.ToParams(), camera, settings),
+        FractalType.Phoenix    when _metalPhoenixRenderer?.IsAvailable == true
+            => _metalPhoenixRenderer.RunTelemetryPass(Phoenix.ToParams(), camera, settings),
+        FractalType.Biomorph   when _metalBiomorphRenderer?.IsAvailable == true
+            => _metalBiomorphRenderer.RunTelemetryPass(Biomorph.ToParams(), camera, settings),
+        FractalType.Mosely     when _metalMoselyRenderer?.IsAvailable == true
+            => _metalMoselyRenderer.RunTelemetryPass(Mosely.ToParams(), camera, settings),
+        FractalType.PseudoKleinian4D when _metalPK4DRenderer?.IsAvailable == true
+            => _metalPK4DRenderer.RunTelemetryPass(PseudoKleinian4D.ToParams(), camera, settings),
+        FractalType.RiemannSphere when _metalRiemannSphereRenderer?.IsAvailable == true
+            => _metalRiemannSphereRenderer.RunTelemetryPass(RiemannSphere.ToParams(), camera, settings),
+        FractalType.Mandalay   when _metalMandalayRenderer?.IsAvailable == true
+            => _metalMandalayRenderer.RunTelemetryPass(Mandalay.ToParams(), camera, settings),
+        FractalType.Anisotropic when _metalAnisotropicRenderer?.IsAvailable == true
+            => _metalAnisotropicRenderer.RunTelemetryPass(Anisotropic.ToParams(), camera, settings),
+        FractalType.OrbitHybrid when _metalOrbitHybridRenderer?.IsAvailable == true
+            => _metalOrbitHybridRenderer.RunTelemetryPass(OrbitHybrid.ToParams(), camera, settings),
         _ => null,
     };
 
