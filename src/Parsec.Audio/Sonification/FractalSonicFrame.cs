@@ -39,4 +39,10 @@ public sealed record class FractalSonicFrame(
     // DirectOrbit profiles: geometry-derived lattice generator (octave-reduced, (1,2)).
     // 0 = no geometry ratio — the synth falls back to the voice profile's default.
     // Kleinian: eigenvalue ratio; Mandelbulb: (power+1)/power. Morphs retune the grid live.
-    float    LatticeRatio = 0f);
+    float    LatticeRatio = 0f,
+    // Improvement 2a: full-resolution (64×36) energy centroid + spread in normalised screen
+    // space ([-1,1]; X: left→right, Y: bottom→top). MIDI position/dispersion CCs prefer these
+    // over the 4×4-derived centroid. 0,0 = centred / no hits.
+    float    CentroidX = 0f,
+    float    CentroidY = 0f,
+    float    Dispersion = 0f);

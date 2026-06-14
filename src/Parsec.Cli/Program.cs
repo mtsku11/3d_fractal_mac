@@ -7090,7 +7090,9 @@ public static class Program
                         TrapMean: new System.Numerics.Vector4(0.5f + 0.5f * tri, 0f, 0f, 0f),
                         TrapVariance: new System.Numerics.Vector4(0.3f * (1f - tri), 0f, 0f, 0f),
                         CameraSpeed: 1.5f * tri, ParameterVelocity: fold,
-                        Cells: cells, ZoomVelocity: 1.2f * MathF.Sin(phase));
+                        Cells: cells, ZoomVelocity: 1.2f * MathF.Sin(phase),
+                        // Improvement 2a: full-res centroid that tracks the orbiting blob → CC30/31/32.
+                        CentroidX: MathF.Cos(ang), CentroidY: -MathF.Sin(ang), Dispersion: 0.2f);
                     // Real on-screen colour path: synthesize a small RGBA8 frame whose colour
                     // cycles (hue wheel + saturation/brightness wobble), then run it through the
                     // same reducer the app uses → CC24 (hue) + CC35 (sat) + CC36 (val).

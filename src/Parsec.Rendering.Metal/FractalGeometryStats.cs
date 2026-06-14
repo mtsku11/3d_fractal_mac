@@ -28,4 +28,10 @@ public readonly record struct FractalGeometryStats(
     float[]? FieldScanWaveformTL = null,
     float[]? FieldScanWaveformTR = null,
     float[]? FieldScanWaveformBL = null,
-    float[]? FieldScanWaveformBR = null);
+    float[]? FieldScanWaveformBR = null,
+    // Improvement 2a: full-resolution (64×36) energy centroid + spread in normalised screen
+    // space ([-1,1]; X: left→right, Y: bottom→top). Sharper than the 4×4-derived centroid.
+    // 0,0 = centred / no hits.
+    float CentroidX = 0f,
+    float CentroidY = 0f,
+    float Dispersion = 0f);

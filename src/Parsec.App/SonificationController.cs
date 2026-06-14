@@ -68,7 +68,10 @@ public sealed class SonificationController
             FieldScanWaveformTR: telemetry?.FieldScanWaveformTR,
             FieldScanWaveformBL: telemetry?.FieldScanWaveformBL,
             FieldScanWaveformBR: telemetry?.FieldScanWaveformBR,
-            LatticeRatio:        latticeRatio);
+            LatticeRatio:        latticeRatio,
+            CentroidX:           telemetry?.CentroidX  ?? 0f,
+            CentroidY:           telemetry?.CentroidY  ?? 0f,
+            Dispersion:          telemetry?.Dispersion ?? 0f);
 
         Volatile.Write(ref _latestFrame, frame);
         return frame;

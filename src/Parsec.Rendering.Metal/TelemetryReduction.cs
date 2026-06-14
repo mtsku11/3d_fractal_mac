@@ -110,8 +110,51 @@ internal static class TelemetryReduction
         var   trapVar   = new Vector4((float)(tvxS / hits), (float)(tvyS / hits),
                                       (float)(tvzS / hits), (float)(tvwS / hits));
 
+        var (fcx, fcy, fdisp) = FullResCentroid(gridW, gridH, maxDist, i => (cells[i].Hit, cells[i].Depth));
+
         return new FractalGeometryStats(hitRatio, meanDepth, depthVar, stepMean, stepP90,
-            normalMean, normalVar, trapMean, trapVar, Cells: spatialCells);
+            normalMean, normalVar, trapMean, trapVar, Cells: spatialCells,
+            CentroidX: fcx, CentroidY: fcy, Dispersion: fdisp);
+    }
+
+    /// <summary>
+    /// Improvement 2a: full-resolution energy centroid + spread over the raw telemetry grid,
+    /// in normalised screen space ([-1,1]; X left→right, Y bottom→top). Energy per cell is
+    /// hit · max(0, 1 − depth/maxDist). Returns (0,0,0) when there are no hits. The accessor
+    /// keeps this independent of the per-fractal cell struct.
+    /// </summary>
+    public static (float cx, float cy, float disp) FullResCentroid(
+        int gridW, int gridH, float maxDist, Func<int, (int hit, float depth)> cell)
+    {
+        int n = gridW * gridH;
+        double ex = 0, ey = 0, ew = 0;
+        for (int i = 0; i < n; i++)
+        {
+            var (hit, depth) = cell(i);
+            if (hit == 0) continue;
+            float e = MathF.Max(0f, 1f - depth / maxDist);
+            if (e <= 0f) continue;
+            int px = i % gridW, py = i / gridW;
+            ex += e * (2f * (px + 0.5f) / gridW - 1f);
+            ey += e * (1f - 2f * (py + 0.5f) / gridH);
+            ew += e;
+        }
+        if (ew <= 1e-6) return (0f, 0f, 0f);
+        float cx = (float)(ex / ew), cy = (float)(ey / ew);
+        double vs = 0;
+        for (int i = 0; i < n; i++)
+        {
+            var (hit, depth) = cell(i);
+            if (hit == 0) continue;
+            float e = MathF.Max(0f, 1f - depth / maxDist);
+            if (e <= 0f) continue;
+            int px = i % gridW, py = i / gridW;
+            float sx = 2f * (px + 0.5f) / gridW - 1f;
+            float sy = 1f - 2f * (py + 0.5f) / gridH;
+            vs += e * ((sx - cx) * (sx - cx) + (sy - cy) * (sy - cy));
+        }
+        float disp = MathF.Min(1f, MathF.Sqrt((float)(vs / ew)) / 1.414f);
+        return (cx, cy, disp);
     }
 
     private static MetalSpatialCell[] ComputeSpatialCells(

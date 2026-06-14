@@ -254,6 +254,12 @@ public sealed class MidiOutputController
             }
         }
 
+        // Improvement 2a: prefer the full-resolution (64×36) centroid/spread when telemetry is
+        // present — much sharper position than the 4×4 aggregate, which stays as the fallback.
+        float posX = haveCells ? f.CentroidX : cx;
+        float posY = haveCells ? f.CentroidY : cy;
+        float disp = haveCells ? f.Dispersion : dispersion;
+
         float haze = Clamp01(f.StepMean / MathF.Max(1f, HazeFullSteps));
         float layering = Clamp01(MathF.Sqrt(MathF.Max(0f, f.DepthVariance)) / MathF.Max(0.01f, f.MeanDepth) * LayeringGain);
 
@@ -262,9 +268,9 @@ public sealed class MidiOutputController
         EmitCc(2, CcVerticality,   Clamp(f.NormalMean.Y * VerticalityGain, -1f, 1f),        true,  a);
         EmitCc(3, CcSpeed,         Clamp01(f.CameraSpeed / MathF.Max(1e-3f, SpeedFull)),    false, a);
         EmitCc(4, CcDolly,         Clamp(f.ZoomVelocity / MathF.Max(1e-3f, DollyFull), -1f, 1f), true, a);
-        EmitCc(5, CcPositionX,     Clamp(cx, -1f, 1f),                                       true,  a);
-        EmitCc(6, CcPositionY,     Clamp(cy, -1f, 1f),                                       true,  a);
-        EmitCc(7, CcDispersion,    dispersion,                                               false, a);
+        EmitCc(5, CcPositionX,     Clamp(posX, -1f, 1f),                                     true,  a);
+        EmitCc(6, CcPositionY,     Clamp(posY, -1f, 1f),                                     true,  a);
+        EmitCc(7, CcDispersion,    Clamp01(disp),                                            false, a);
         EmitCc(8, CcStructure,     Clamp01(f.TrapMean.X / MathF.Max(1e-3f, StructureFull)),  false, a);
         EmitCc(9, CcHeterogeneity, Clamp01(f.TrapVariance.Length() / MathF.Max(1e-3f, HeterogeneityFull)), false, a);
         _ccInit = true;
