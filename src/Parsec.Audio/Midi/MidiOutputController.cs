@@ -1,26 +1,38 @@
+using System.Collections.Generic;
 using Parsec.Audio.Sonification;
 
 namespace Parsec.Audio.Midi;
 
 /// <summary>
-/// Translates a <see cref="FractalSonicFrame"/> into MIDI control changes on a
-/// virtual source. M1 (proof-of-pipe) maps the three core continuous signals:
+/// Translates a <see cref="FractalSonicFrame"/> into MIDI on a virtual source.
 ///
+/// M1 — three core continuous CCs:
 ///   CC20 Size       = HitRatio          (fraction of view filled by the fractal)
 ///   CC21 Proximity  = exp(-MeanDepth/k)  (how close the camera is to the surface)
 ///   CC22 Complexity = NormalVariance·s   (how intricate the surface is)
 ///
-/// Each signal is lightly slewed (one-pole) to suppress jitter, quantised to 0–127,
-/// and only transmitted when its quantised value changes — so the MIDI bus is not
-/// flooded with redundant identical CCs.
+/// M2 — derivative signals (rate of change), as one signed CC plus discrete note
+/// events with hysteresis + refractory so they fire as musical gestures, not noise:
+///   CC23 Expansion  = d(size)/dt, signed   (64 = steady, &gt;64 growing, &lt;64 shrinking)
+///   Note ExpandNote   on a strong positive size-rate   (growing / opening up)
+///   Note ContractNote on a strong negative size-rate   (shrinking / pulling away)
+///   Note FoldNote     on a ParameterVelocity spike      (folding / morphing)
+///   Note SimplifyNote on a strong negative complexity-rate (detail collapsing)
+/// Note velocity carries the event magnitude. Each note is released after a short gate.
+///
+/// Continuous CCs are slewed (one-pole), quantised to 0–127, and only transmitted on
+/// change, so the MIDI bus is not flooded.
 /// </summary>
 public sealed class MidiOutputController
 {
     private readonly MidiOutputSession _midi;
 
+    // M1 continuous CCs
     public const int CcSize = 20;
     public const int CcProximity = 21;
     public const int CcComplexity = 22;
+    // M2 signed expansion-rate CC
+    public const int CcExpansion = 23;
 
     /// <summary>MIDI channel 0–15 (0 = channel 1).</summary>
     public int Channel { get; set; }
@@ -34,12 +46,48 @@ public sealed class MidiOutputController
     /// <summary>One-pole smoothing coefficient (0 = frozen, 1 = no smoothing).</summary>
     public float Smoothing { get; set; } = 0.25f;
 
-    private float _sSize, _sProx, _sComplex;
+    // --- M2 event notes (on Channel) ------------------------------------------
+    public int ExpandNote { get; set; } = 60;    // C4 — growing / opening up
+    public int ContractNote { get; set; } = 62;  // D4 — shrinking / pulling away
+    public int FoldNote { get; set; } = 64;      // E4 — folding / morphing
+    public int SimplifyNote { get; set; } = 65;  // F4 — detail collapsing
+
+    /// <summary>Size-rate (per second) that maps to full CC23 deflection from centre.</summary>
+    public float ExpansionFullScaleRate { get; set; } = 1.0f;
+    /// <summary>How long (s) an event note is held before its Note Off.</summary>
+    public float NoteGateSec { get; set; } = 0.18f;
+    /// <summary>Minimum seconds between successive fires of the same event.</summary>
+    public float Refractory { get; set; } = 0.12f;
+
+    // Hysteresis thresholds (high = fire, low = re-arm), in signal units per second.
+    public float SizeRateHigh { get; set; } = 0.30f;
+    public float SizeRateLow { get; set; } = 0.08f;
+    public float ComplexRateHigh { get; set; } = 0.25f;
+    public float ComplexRateLow { get; set; } = 0.06f;
+    public float FoldHigh { get; set; } = 0.045f;
+    public float FoldLow { get; set; } = 0.015f;
+
+    private float _sSize, _sProx, _sComplex, _sSizeRate;
     private bool _init;
-    private int _lastSize = -1, _lastProx = -1, _lastComplex = -1;
+    private double _prevTime;
+    private float _prevSize, _prevComplex;
+    private int _lastSize = -1, _lastProx = -1, _lastComplex = -1, _lastExpansion = -1;
+
+    // Event arm flags (hysteresis) + last-fire times (refractory).
+    private bool _expandArmed = true, _contractArmed = true, _foldArmed = true, _simplifyArmed = true;
+    private double _expandFired, _contractFired, _foldFired, _simplifyFired;
+
+    // Notes currently sounding, with the time their Note Off is due.
+    private readonly Dictionary<int, double> _noteOffDue = new();
+    private readonly List<int> _offScratch = new();
 
     /// <summary>Human-readable last-sent values, for an on-screen monitor.</summary>
     public string Monitor { get; private set; } = "size – · prox – · cplx –";
+
+    /// <summary>Most recent event tag (e.g. "fold"), for a transient on-screen flash.</summary>
+    public string LastEvent { get; private set; } = "";
+    /// <summary>Time of the most recent event (frame time, seconds).</summary>
+    public double LastEventTime { get; private set; } = double.NegativeInfinity;
 
     public MidiOutputController(MidiOutputSession midi) => _midi = midi;
 
@@ -52,7 +100,12 @@ public sealed class MidiOutputController
         float complexity = Clamp01(f.NormalVariance * ComplexityScale);
 
         float a = Math.Clamp(Smoothing, 0.01f, 1f);
-        if (!_init) { _sSize = size; _sProx = prox; _sComplex = complexity; _init = true; }
+        if (!_init)
+        {
+            _sSize = size; _sProx = prox; _sComplex = complexity;
+            _prevSize = size; _prevComplex = complexity; _prevTime = f.Time;
+            _init = true;
+        }
         else
         {
             _sSize    += (size - _sSize) * a;
@@ -60,23 +113,110 @@ public sealed class MidiOutputController
             _sComplex += (complexity - _sComplex) * a;
         }
 
+        // --- M1 continuous CCs ---
         SendCc(CcSize, _sSize, ref _lastSize);
         SendCc(CcProximity, _sProx, ref _lastProx);
         SendCc(CcComplexity, _sComplex, ref _lastComplex);
 
-        Monitor = $"size {_lastSize,3} · prox {_lastProx,3} · cplx {_lastComplex,3}";
+        // --- M2 derivatives ---
+        double now = f.Time;
+        float dt = (float)(now - _prevTime);
+        // Clamp dt to a sane frame window so a paused/looped clock can't blow up rates.
+        dt = Math.Clamp(dt, 1f / 240f, 0.5f);
+
+        float sizeRate    = (_sSize - _prevSize) / dt;
+        float complexRate = (_sComplex - _prevComplex) / dt;
+        _prevSize = _sSize; _prevComplex = _sComplex; _prevTime = now;
+
+        // Signed expansion CC: slew the rate, map ±FullScaleRate to 0..127 around 64.
+        _sSizeRate += (sizeRate - _sSizeRate) * a;
+        float norm = Math.Clamp(_sSizeRate / MathF.Max(1e-4f, ExpansionFullScaleRate), -1f, 1f);
+        int expQ = 64 + (int)MathF.Round(norm * 63f);
+        SendCcRaw(CcExpansion, Math.Clamp(expQ, 0, 127), ref _lastExpansion);
+
+        // Release any notes whose gate has elapsed.
+        ReleaseDueNotes(now);
+
+        // Expand: strong positive size-rate.
+        DetectEvent(now, sizeRate >= SizeRateHigh, sizeRate <= SizeRateLow,
+                    ExpandNote, sizeRate / MathF.Max(1e-4f, SizeRateHigh * 4f),
+                    ref _expandArmed, ref _expandFired, "expand");
+
+        // Contract: strong negative size-rate.
+        DetectEvent(now, sizeRate <= -SizeRateHigh, sizeRate >= -SizeRateLow,
+                    ContractNote, -sizeRate / MathF.Max(1e-4f, SizeRateHigh * 4f),
+                    ref _contractArmed, ref _contractFired, "contract");
+
+        // Fold: ParameterVelocity spike (morphing the fractal structure).
+        float fold = MathF.Abs(f.ParameterVelocity);
+        DetectEvent(now, fold >= FoldHigh, fold <= FoldLow,
+                    FoldNote, fold / MathF.Max(1e-4f, FoldHigh * 4f),
+                    ref _foldArmed, ref _foldFired, "fold");
+
+        // Simplify: complexity falling fast.
+        DetectEvent(now, complexRate <= -ComplexRateHigh, complexRate >= -ComplexRateLow,
+                    SimplifyNote, -complexRate / MathF.Max(1e-4f, ComplexRateHigh * 4f),
+                    ref _simplifyArmed, ref _simplifyFired, "simplify");
+
+        Monitor = $"size {_lastSize,3} · prox {_lastProx,3} · cplx {_lastComplex,3} · exp {_lastExpansion,3}";
     }
 
-    /// <summary>Resets dedup state so the next Update retransmits all CCs (use on enable).</summary>
+    /// <summary>Resets dedup + event state so the next Update retransmits everything.</summary>
     public void Reset()
     {
         _init = false;
         _lastSize = _lastProx = _lastComplex = -1;
+        _lastExpansion = -1;
+        _sSizeRate = 0f;
+        _expandArmed = _contractArmed = _foldArmed = _simplifyArmed = true;
+        _expandFired = _contractFired = _foldFired = _simplifyFired = 0;
+        // Silence anything still gated.
+        foreach (var note in _noteOffDue.Keys) _midi.SendNoteOff(Channel, note);
+        _noteOffDue.Clear();
+        LastEvent = "";
+        LastEventTime = double.NegativeInfinity;
+    }
+
+    // Fires a note when `over` && armed && past refractory; re-arms when `under`.
+    private void DetectEvent(double now, bool over, bool under, int note, float magnitude01,
+                             ref bool armed, ref double lastFire, string tag)
+    {
+        if (over && armed && (now - lastFire) >= Refractory)
+        {
+            int vel = 1 + (int)MathF.Round(Clamp01(magnitude01) * 126f);
+            // Retrigger cleanly if this note is still gated from a prior fire.
+            if (_noteOffDue.ContainsKey(note)) _midi.SendNoteOff(Channel, note);
+            _midi.SendNoteOn(Channel, note, vel);
+            _noteOffDue[note] = now + NoteGateSec;
+            armed = false;
+            lastFire = now;
+            LastEvent = tag;
+            LastEventTime = now;
+        }
+        else if (under)
+        {
+            armed = true;
+        }
+    }
+
+    private void ReleaseDueNotes(double now)
+    {
+        if (_noteOffDue.Count == 0) return;
+        _offScratch.Clear();
+        foreach (var kv in _noteOffDue)
+            if (now >= kv.Value) _offScratch.Add(kv.Key);
+        foreach (var note in _offScratch)
+        {
+            _midi.SendNoteOff(Channel, note);
+            _noteOffDue.Remove(note);
+        }
     }
 
     private void SendCc(int cc, float v01, ref int last)
+        => SendCcRaw(cc, (int)MathF.Round(Clamp01(v01) * 127f), ref last);
+
+    private void SendCcRaw(int cc, int q, ref int last)
     {
-        int q = (int)MathF.Round(Clamp01(v01) * 127f);
         if (q == last) return;
         if (_midi.SendControlChange(Channel, cc, q)) last = q;
     }

@@ -120,10 +120,23 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
 
     private void EmitMidi(Audio.Sonification.FractalSonicFrame? frame)
     {
-        if (_midiEnabled && frame != null) _midiController?.Update(frame);
+        if (_midiEnabled && frame != null) { _lastSonicTime = frame.Time; _midiController?.Update(frame); }
     }
 
-    private string MidiSuffix() => _midiEnabled && _midiController != null ? $"  ·  MIDI {_midiController.Monitor}" : "";
+    private string MidiSuffix()
+    {
+        if (!_midiEnabled || _midiController == null) return "";
+        // Flash the most recent fold/expand/contract/simplify event for ~0.6 s.
+        string ev = "";
+        if (!string.IsNullOrEmpty(_midiController.LastEvent) &&
+            _midiController.LastEventTime > double.NegativeInfinity)
+        {
+            double age = (_lastSonicTime - _midiController.LastEventTime);
+            if (age >= 0 && age < 0.6) ev = $" ⟪{_midiController.LastEvent}⟫";
+        }
+        return $"  ·  MIDI {_midiController.Monitor}{ev}";
+    }
+    private double _lastSonicTime;
 
     // Software-blit fallback for macOS when the Avalonia compositor runs in
     // Software mode (no GL context for OpenGlControlBase). Metal renderers

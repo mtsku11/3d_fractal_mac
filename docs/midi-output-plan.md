@@ -37,9 +37,9 @@ Metal telemetry → FractalSonicFrame → MidiOutputController → MidiOutputSes
 | small / large | `HitRatio` | CC20 | **M1 done** |
 | how close | `exp(-MeanDepth/k)` | CC21 | **M1 done** |
 | how complex | `NormalVariance·scale` | CC22 | **M1 done** |
-| expanding / contracting | d(size)/dt | CC23 (signed) + note on threshold | M2 |
-| folding | `ParameterVelocity` spike | note (velocity = magnitude) | M2 |
-| simplifying | complexity falling | note / CC | M2 |
+| expanding / contracting | d(size)/dt | CC23 (signed) + Expand/Contract notes | **M2 done** |
+| folding | `ParameterVelocity` spike | Fold note (velocity = magnitude) | **M2 done** |
+| simplifying | complexity falling | Simplify note (velocity = magnitude) | **M2 done** |
 | colour changing | palette phase/base delta | CC24 | M3 |
 
 **Event detection (M2)** is derivative-based: rate-of-change + threshold with hysteresis, not raw
@@ -51,8 +51,15 @@ values, so "fold" / "expand" fire as discrete musical events rather than constan
   CCs (size/proximity/complexity) + in-process loopback self-test. CLI `midi-smoke`: source created,
   loopback 4/4 packets, CC sweep visible to an external monitor. In-app "MIDI OUT" toggle + live
   status monitor; parallel to the synth; golden 5/5 (no render regression).
-- **M2 — events.** Derivative signals: expansion-rate CC + fold/expand/simplify note triggers with
-  hysteresis + refractory periods. Velocity carries event magnitude.
+- **M2 — events (done, verified 2026-06-14).** Derivative signals on top of the M1 CCs.
+  `MidiOutputController` now also emits **CC23** (signed expansion-rate, 64 = steady) and four
+  discrete note events — **Expand** (60), **Contract** (62), **Fold** (64), **Simplify** (65) —
+  each with hysteresis (high fires / low re-arms), a refractory period, and a short note gate
+  (auto Note Off). Velocity carries event magnitude. Size/complexity rates are computed from the
+  smoothed signals with a `dt` clamped to [1/240, 0.5] s so a paused/looped clock can't spike them;
+  fold is `|ParameterVelocity|`. UI status flashes `⟪fold⟫` etc. for ~0.6 s. CLI `midi-smoke`
+  drives a triangle size wave + 1 Hz fold spike and reports event-note count (7 events / 4 s,
+  all four types). Golden 5/5 (no render regression).
 - **M3 — colour + configurability.** Palette-change CC; then an editable mapping panel (signal →
   CC/note/channel/range) modelled on the existing `AudioMappingPanel`.
 - **Later.** MPE / pitch-bend for expressive per-cell voices; MIDI clock / note quantisation to a

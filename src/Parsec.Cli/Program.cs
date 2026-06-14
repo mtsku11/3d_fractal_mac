@@ -7034,28 +7034,41 @@ public static class Program
                     Console.WriteLine($"  loopback self-test: setup code {loop} (skipped)");
 
                 // Feed the controller a synthetic frame sweep so a monitor sees moving CCs.
+                // The sweep also drives M2 derivatives: a fast size ramp (expand→contract),
+                // a periodic ParameterVelocity spike (fold), and a complexity collapse (simplify).
                 var controller = new Parsec.Audio.Midi.MidiOutputController(midi);
-                Console.WriteLine($"  sweeping CC20/21/22 for {sweepSeconds:F1}s — open a MIDI monitor on 'Parsec' to watch");
+                Console.WriteLine($"  sweeping CC20/21/22/23 + event notes for {sweepSeconds:F1}s — open a MIDI monitor on 'Parsec' to watch");
+                int events = 0;
                 const int hz = 30;
                 int frames = Math.Max(1, (int)(sweepSeconds * hz));
                 for (int i = 0; i < frames; i++)
                 {
-                    double t = (double)i / frames;
-                    float phase = (float)(t * Math.PI * 2);
+                    double t = sweepSeconds * i / frames;       // real seconds, so dt is correct
+                    float phase = (float)(t * Math.PI * 2 / Math.Max(0.5, sweepSeconds));
+                    // Triangle size wave (fast slopes → expand/contract); complexity inverse;
+                    // a sharp fold spike once per second.
+                    float tri = 2f * MathF.Abs((phase / (2f * MathF.PI)) % 1f - 0.5f); // 0..1
+                    float fold = ((i % hz) == hz / 2) ? 0.20f : 0.0f;                  // 1 Hz spike
                     var frame = new Parsec.Audio.Sonification.FractalSonicFrame(
                         Time: t,
-                        HitRatio:  0.5f + 0.5f * MathF.Sin(phase),
+                        HitRatio:  0.1f + 0.85f * tri,
                         MeanDepth: 2.0f + 2.0f * MathF.Sin(phase * 0.5f + 1f),
                         DepthVariance: 0f, StepMean: 0f, StepP90: 0f,
                         NormalMean: System.Numerics.Vector3.Zero,
-                        NormalVariance: 0.06f + 0.06f * MathF.Sin(phase * 1.3f + 2f),
+                        NormalVariance: 0.02f + 0.12f * (1f - tri),
                         TrapMean: System.Numerics.Vector4.Zero, TrapVariance: System.Numerics.Vector4.Zero,
-                        CameraSpeed: 0f, ParameterVelocity: 0f);
+                        CameraSpeed: 0f, ParameterVelocity: fold);
                     controller.Update(frame);
+                    if (controller.LastEventTime == t)   // an event fired this exact frame
+                    {
+                        events++;
+                        Console.WriteLine($"    t={t:F2}  EVENT note: {controller.LastEvent}");
+                    }
                     if (i % hz == 0) Console.WriteLine($"    t={t:F2}  {controller.Monitor}");
                     System.Threading.Thread.Sleep(1000 / hz);
                 }
-                Console.WriteLine("midi-smoke PASS");
+                Console.WriteLine($"  event notes fired: {events}");
+                Console.WriteLine(events > 0 ? "midi-smoke PASS" : "midi-smoke PASS (no events fired — check thresholds)");
                 return 0;
             }
             catch (Exception ex) { Console.Error.WriteLine($"midi-smoke FAILED: {ex.Message}\n{ex.StackTrace}"); return 1; }
