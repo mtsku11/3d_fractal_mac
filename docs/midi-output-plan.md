@@ -102,8 +102,9 @@ folding) but only partial for **colour** and **fine detail**, and the telemetry 
 *geometry*, not the rendered *pixels* — so shading/lighting/bloom/grade are not represented. The
 four items below close the largest gaps, in recommended order.
 
-**Progress (2026-06-14):** items 1, 3, and 2a are **done + verified cross-process**; item 4 is
-**in progress** (RotBox ported + verified — 9 of 20 fractals now have telemetry; 11 remaining).
+**Progress (2026-06-15):** items 1, 2a, 3, and **4 are all done + verified**. Telemetry coverage is
+now **20 of 20** Metal fractals. Remaining optional work: 2b (finer region-note grid) and the M3b
+mapping editor — both deferred pending confirmation.
 
 ### 1. Real on-screen colour → CC24 (highest leverage) — DONE (verified 2026-06-14)
 
@@ -186,7 +187,7 @@ Document that the telemetry rate is tied to render framerate and the DAW buffer 
 clean; live slider screenshot blocked by the macOS Software-compositor capture issue (window doesn't
 present to `screencapture`), wiring mirrors the adjacent working sonify sliders.
 
-### 4. Full telemetry coverage (remaining 12 fractals) — IN PROGRESS
+### 4. Full telemetry coverage (remaining 12 fractals) — DONE (20/20, verified 2026-06-15)
 
 **Problem.** Only **8 of 20** fractals have a telemetry kernel (Mandelbox, Mandelbulb, Kleinian,
 BurningShip, Menger, Apollonian, KIFS, QJBox). The other **12** — RotBox, Hybrid, QuaternionJulia,
@@ -216,15 +217,19 @@ pass; `metal-d-telemetry`-style validation per batch.
 4. Switch arm in `FractalView.RunActiveTelemetryPass`.
 5. A line in the `metal-midi-telemetry` CLI validator; run it outside the sandbox on Metal hardware.
 
-**Batches done (verified 2026-06-14 via `metal-midi-telemetry`):**
-- Batch 1: **RotBox** — hitFar 0.019 → hitClose 0.308, 16 cells, centroid finite, PASS.
-- Batch 2: **QuaternionJulia** — hitFar 0.006 → hitClose 0.077, 16 cells, centroid finite, PASS.
+**Complete — all 20 Metal fractals have telemetry (verified via `metal-midi-telemetry`, 12/12 PASS,
+16 cells each, closer→more hits, full-res centroids finite):**
+- Batch 1: RotBox (hitClose 0.308). Batch 2: QuaternionJulia (0.077).
+- Batch 3: Hybrid (0.211), Bicomplex (0.013), Phoenix (0.030), Biomorph (0.030), Mosely (0.068),
+  PseudoKleinian4D (0.682), RiemannSphere (0.051), Mandalay (0.331), Anisotropic (0.569),
+  OrbitHybrid (0.291).
 
-Coverage now **10 of 20**. **Remaining 10:** Hybrid, Bicomplex, Phoenix, Biomorph, Mosely,
-PseudoKleinian4D, RiemannSphere, Mandalay, Anisotropic, OrbitHybrid. (Attractor has no Metal
-renderer — out of scope.) All have dedicated `Metal*Renderer` classes, so each is the 5-step
-pattern above. Do a few per pass; add a line to `metal-midi-telemetry` and run it on Metal hardware
-outside the sandbox per batch.
+Batch 3 was generated mechanically: `tools/build_midi_telemetry.py` lifts each `<f>_raymarch.metal`
+FoldParams struct + DE region verbatim into `<f>_telemetry.metal`; `tools/add_telemetry_pass.py`
+inserts the trimmed `RunTelemetryPass` into the compact-style renderers (Hybrid done by hand). Re-run
+the generators if a DE changes. **Attractor** has no Metal renderer at all (sphere-traces a prebuilt
+`AttractorHash` over SSBOs), so it is out of scope here — that's the only selectable 3D fractal
+without telemetry.
 
 ### Recommended sequence
 
