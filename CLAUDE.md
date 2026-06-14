@@ -149,11 +149,17 @@ are an independent cross-process receiver for verification; `web/midi-monitor.ht
 monitor. Wired into `FractalView.MidiEnabled`/`EmitMidi`, parallel to the synth (mutually exclusive
 with audio-reactive — same feedback hazard). **M1–M4 done + pushed to `main` (2026-06-14):** 15
 continuous CCs (20–34) + gesture notes (60/62/64/65/67/69/71) + 16 spatial "object" notes (36–51),
-all channel 1. **Planned improvements (items 1–4, not started):** (1) real on-screen colour → CC24
-from the rendered frame buffer (currently palette-base hue only); (2) finer spatial resolution
-(2a full-res centroid from the 64×36 grid, 2b optional finer region-note grid); (3) responsiveness/
-smoothing knob; (4) telemetry coverage for the remaining 12 fractals. Full spec, approach, acceptance
-and recommended sequence in `docs/midi-output-plan.md`.
+all channel 1. **Planned improvements (2026-06-14):** items **1, 3, 2a done + verified
+cross-process**; item **4 in progress**. (1, done) real on-screen colour from the rendered frame
+buffer → CC24 hue + CC35 saturation + CC36 brightness (`MidiOutputController.MeanScreenColorHsv`;
+palette-hue fallback for the CLI). (3, done) `MidiResponsivenessSlider` → `FractalView.MidiResponsiveness`
+→ `MidiOutputController.Smoothing`. (2a, done) full-res energy centroid/spread from the 64×36 grid
+(`TelemetryReduction.FullResCentroid`) → `CentroidX/Y/Dispersion` on stats+frame → CC30/31/32 (4×4
+fallback kept; sonification grid untouched). (4, in progress) trimmed MIDI-only telemetry kernels for
+the remaining 12 fractals — **RotBox done** (template `rotbox_telemetry.metal`; validator
+`metal-midi-telemetry`); 11 remaining (Hybrid, QuaternionJulia, Bicomplex, Phoenix, Biomorph, Mosely,
+PseudoKleinian4D, RiemannSphere, Mandalay, Anisotropic, OrbitHybrid). Full spec, the 5-step per-fractal
+pattern, and acceptance in `docs/midi-output-plan.md`.
 
 See `skills.md` for Metal porting recipes and gotchas. See `docs/macos-3d-only-build-plan.md` for the macOS render track, `docs/fractal-sonification-plan.md` for the sonification feature, and `docs/midi-output-plan.md` for the MIDI output feature.
 

@@ -100,9 +100,20 @@ values, so "fold" / "expand" fire as discrete musical events rather than constan
 The M1–M4 map is faithful for **structure and motion** (size, proximity, position, complexity,
 folding) but only partial for **colour** and **fine detail**, and the telemetry measures the DE
 *geometry*, not the rendered *pixels* — so shading/lighting/bloom/grade are not represented. The
-four items below close the largest gaps, in recommended order. None has been started.
+four items below close the largest gaps, in recommended order.
 
-### 1. Real on-screen colour → CC24 (highest leverage)
+**Progress (2026-06-14):** items 1, 3, and 2a are **done + verified cross-process**; item 4 is
+**in progress** (RotBox ported + verified — 9 of 20 fractals now have telemetry; 11 remaining).
+
+### 1. Real on-screen colour → CC24 (highest leverage) — DONE (verified 2026-06-14)
+
+Implemented: `MidiOutputController.MeanScreenColorHsv` reduces the rendered RGBA8 frame buffer to a
+coverage-masked mean colour (background pixels masked, every 4th pixel sampled). `FractalView.EmitMidi`
+passes the live frame buffer; CC24 now carries the real on-screen **hue**, CC35 the **saturation**,
+CC36 the **brightness/value**. CLI/no-buffer callers keep the palette-hue fallback (`Update(frame,hue)`).
+Verified cross-process via `midi-monitor`: CC24/35/36 delivered, 0 undecoded. *Original note below.*
+
+
 
 **Problem.** CC24 is currently `Hue01(PaletteState.Base)` — the palette *base setting*, not the
 colour actually displayed. The visible colour is the cosine palette modulated by orbit traps, then
@@ -127,7 +138,7 @@ buffer `FractalView` uploads via `TexImage2D`). After each render, downsample th
 reads low saturation; `midi-smoke` (no frame buffer) still works via the palette-hue fallback; golden 5/5.
 **Effort:** moderate. **Risk:** low (read-only over an existing buffer; no render change).
 
-### 2. Finer spatial resolution
+### 2. Finer spatial resolution — 2a DONE (verified 2026-06-14), 2b deferred
 
 **Problem.** Position/dispersion CCs and the 16 region notes derive from the **4×4** cell grid, so
 small objects and precise on-screen position are coarse.
@@ -150,7 +161,14 @@ of stable audio code — avoid.
 **Acceptance.** 2a: position CCs track a small off-centre object the 4×4 grid blurs; sonification output
 unchanged (A/B a sonify render). **Effort:** 2a small, 2b moderate. **Risk:** 2a low, 2b medium (note layout).
 
-### 3. Lower latency / responsiveness knob
+**2a status (done, verified 2026-06-14):** `TelemetryReduction.FullResCentroid` computes an
+energy-weighted centroid + spread over the full 64×36 grid (shared via an `(int hit, float depth)`
+accessor between the generic `Reduce` and the Mandelbox path). Surfaced as `CentroidX/Y/Dispersion`
+on `FractalGeometryStats` → `FractalSonicFrame`; `MidiOutputController` prefers these for CC30/31/32
+(the 4×4 aggregate stays as the fallback). The sonification 4×4 grid is untouched. Verified
+cross-process: sharp position sweep (CC30 reaches 3..125), 0 undecoded.
+
+### 3. Lower latency / responsiveness knob — DONE (verified 2026-06-14)
 
 **Problem.** End-to-end lag ≈ telemetry ~30 Hz + one-pole smoothing (`Smoothing = 0.25`, ~100 ms) +
 the DAW's own buffer. Fine for pads, loose for tight rhythmic sync. The DAW buffer is out of our
@@ -163,7 +181,12 @@ Document that the telemetry rate is tied to render framerate and the DAW buffer 
 **Acceptance.** Moving the slider audibly changes CC responsiveness; defaults unchanged at 0.25.
 **Effort:** small. **Risk:** low.
 
-### 4. Full telemetry coverage (remaining 12 fractals)
+**Status (done 2026-06-14):** `FractalView.MidiResponsiveness` maps a new `MidiResponsivenessSlider`
+(0.05→1.0, default 0.25) to `MidiOutputController.Smoothing`, applied live and on (re)create. Builds
+clean; live slider screenshot blocked by the macOS Software-compositor capture issue (window doesn't
+present to `screencapture`), wiring mirrors the adjacent working sonify sliders.
+
+### 4. Full telemetry coverage (remaining 12 fractals) — IN PROGRESS
 
 **Problem.** Only **8 of 20** fractals have a telemetry kernel (Mandelbox, Mandelbulb, Kleinian,
 BurningShip, Menger, Apollonian, KIFS, QJBox). The other **12** — RotBox, Hybrid, QuaternionJulia,
@@ -180,6 +203,24 @@ pass; `metal-d-telemetry`-style validation per batch.
 
 **Acceptance.** Each ported fractal shows non-zero spatial/structure CCs in `midi-monitor`; golden 5/5.
 **Effort:** large but mechanical and incremental. **Risk:** low per fractal (well-trodden port).
+
+**Established trimmed-MIDI pattern (use for each remaining fractal):**
+1. `Shaders/<f>_telemetry.metal` — copy `rotbox_telemetry.metal` (the trimmed template: FoldParams +
+   TelemetryParams + TelemetryCell, the DE lifted **verbatim** from `<f>_raymarch.metal`'s
+   `estimateFull`/`estimate`, `intersectSphereForward`, and the 64×36 march kernel writing only
+   `TelemetryCell[]` to buffer(2)). No wavetable/orbit-trajectory/waveshaper/field-scan buffers.
+2. `<EmbeddedResource>` entry in `Parsec.Rendering.Metal.csproj`.
+3. `RunTelemetryPass(<F>Params, Camera3D, RaymarchSettings)` on `Metal<F>Renderer` — copy the trimmed
+   block added to `MetalRotBoxRenderer` (only fold/tel/output buffers; `TelemetryReduction.Read` +
+   `Reduce`; `_telemetryPso`/`EnsureTelemetryPso`/`BuildTelemetryParams`; dispose the telemetry PSO).
+4. Switch arm in `FractalView.RunActiveTelemetryPass`.
+5. A line in the `metal-midi-telemetry` CLI validator; run it outside the sandbox on Metal hardware.
+
+**Batch 1 (done, verified 2026-06-14):** **RotBox** — `metal-midi-telemetry`: hitFar 0.019 →
+hitClose 0.308, 16 cells, full-res centroid finite, PASS. Coverage now **9 of 20**.
+**Remaining 11:** Hybrid, QuaternionJulia, Bicomplex, Phoenix, Biomorph, Mosely, PseudoKleinian4D,
+RiemannSphere, Mandalay, Anisotropic, OrbitHybrid. (Attractor has no Metal renderer — out of scope.)
+All have dedicated `Metal*Renderer` classes, so each is the 5-step pattern above. Do a few per pass.
 
 ### Recommended sequence
 
