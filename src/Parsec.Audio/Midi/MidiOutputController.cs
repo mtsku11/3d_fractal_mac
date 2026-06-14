@@ -12,7 +12,8 @@ namespace Parsec.Audio.Midi;
 /// Continuous CCs (slewed, quantised, sent only on change):
 ///   M1  CC20 Size       HitRatio              CC21 Proximity  exp(-depth/k)   CC22 Complexity NormalVariance
 ///   M2  CC23 Expansion  d(size)/dt (signed)
-///   M3  CC24 Colour     palette base hue
+///   M3  CC24 Colour     on-screen hue (real frame colour; palette base hue as fallback)
+///   I1  CC35 Saturation on-screen saturation   CC36 Brightness on-screen value/luma
 ///   M4  CC25 Layering   DepthVariance         CC26 Haze       StepMean
 ///       CC27 Verticality NormalMean.y (signed) CC28 Speed     CameraSpeed     CC29 Dolly      ZoomVelocity (signed)
 ///       CC30 PositionX  energy centroid (signed) CC31 PositionY energy centroid (signed)
@@ -44,6 +45,9 @@ public sealed class MidiOutputController
     public const int CcDispersion = 32;
     public const int CcStructure = 33;
     public const int CcHeterogeneity = 34;
+    // Improvement 1 — real on-screen colour (from the rendered frame buffer, not palette base).
+    public const int CcSaturation = 35;
+    public const int CcBrightness = 36;
 
     /// <summary>MIDI channel 0–15 (0 = channel 1).</summary>
     public int Channel { get; set; }
@@ -97,6 +101,10 @@ public sealed class MidiOutputController
     private float _sSize, _sProx, _sComplex, _sSizeRate, _sColor;
     private bool _init, _colorInit;
     private int _lastColor = -1;
+    // Improvement 1 — saturation/brightness of the real on-screen colour.
+    private float _sSat, _sVal;
+    private bool _svInit;
+    private int _lastSat = -1, _lastVal = -1;
     private double _prevTime;
     private float _prevSize, _prevComplex;
     private int _lastSize = -1, _lastProx = -1, _lastComplex = -1, _lastExpansion = -1;
@@ -133,8 +141,12 @@ public sealed class MidiOutputController
         for (int i = 0; i < NCC; i++) _lastCc[i] = -1;
     }
 
-    /// <param name="colorHue01">Optional palette hue (0–1, wraps) → CC24. Null leaves CC24 untouched.</param>
-    public void Update(FractalSonicFrame f, float? colorHue01 = null)
+    /// <param name="colorHue01">Optional colour hue (0–1, wraps) → CC24. When the caller has a
+    /// rendered frame buffer this is the real on-screen hue; otherwise the palette base hue.
+    /// Null leaves CC24 untouched.</param>
+    /// <param name="colorSat01">Optional on-screen saturation (0–1) → CC35. Null leaves it untouched.</param>
+    /// <param name="colorVal01">Optional on-screen brightness/value (0–1) → CC36. Null leaves it untouched.</param>
+    public void Update(FractalSonicFrame f, float? colorHue01 = null, float? colorSat01 = null, float? colorVal01 = null)
     {
         if (_midi is null || !_midi.IsAvailable || f is null) return;
 
@@ -200,6 +212,16 @@ public sealed class MidiOutputController
                 _sColor = Wrap01(_sColor + d * a);
             }
             SendCcRaw(CcColor, (int)MathF.Round(_sColor * 127f), ref _lastColor);
+        }
+
+        // Improvement 1 — real on-screen saturation + brightness (linear slew, not circular).
+        if (colorSat01 is float sat01 && colorVal01 is float val01)
+        {
+            sat01 = Clamp01(sat01); val01 = Clamp01(val01);
+            if (!_svInit) { _sSat = sat01; _sVal = val01; _svInit = true; }
+            else { _sSat += (sat01 - _sSat) * a; _sVal += (val01 - _sVal) * a; }
+            SendCc(CcSaturation, _sSat, ref _lastSat);
+            SendCc(CcBrightness, _sVal, ref _lastVal);
         }
 
         // --- M4 motion / structure / spatial ---
@@ -285,8 +307,9 @@ public sealed class MidiOutputController
     public void Reset()
     {
         _init = false; _colorInit = false; _ccInit = false; _spatialInit = false;
+        _svInit = false;
         _lastSize = _lastProx = _lastComplex = -1;
-        _lastExpansion = -1; _lastColor = -1;
+        _lastExpansion = -1; _lastColor = -1; _lastSat = -1; _lastVal = -1;
         _sSizeRate = 0f; _activeRegions = 0;
         for (int i = 0; i < NCC; i++) { _s[i] = 0f; _lastCc[i] = -1; }
         _expandArmed = _contractArmed = _foldArmed = _simplifyArmed = true;
@@ -360,17 +383,52 @@ public sealed class MidiOutputController
     }
 
     /// <summary>HSV hue (0–1) of an RGB triple — the "what colour is it" scalar for CC24.</summary>
-    public static float Hue01(float r, float g, float b)
+    public static float Hue01(float r, float g, float b) => RgbToHsv(r, g, b).h;
+
+    /// <summary>RGB (0–1) → HSV (hue 0–1 wraps, sat 0–1, val 0–1).</summary>
+    public static (float h, float s, float v) RgbToHsv(float r, float g, float b)
     {
         float max = MathF.Max(r, MathF.Max(g, b));
         float min = MathF.Min(r, MathF.Min(g, b));
         float c = max - min;
-        if (c < 1e-6f) return 0f;
-        float h;
-        if (max == r)      h = ((g - b) / c) % 6f;
-        else if (max == g) h = (b - r) / c + 2f;
-        else               h = (r - g) / c + 4f;
-        h /= 6f;
-        return h < 0f ? h + 1f : h;
+        float h = 0f;
+        if (c >= 1e-6f)
+        {
+            if (max == r)      h = ((g - b) / c) % 6f;
+            else if (max == g) h = (b - r) / c + 2f;
+            else               h = (r - g) / c + 4f;
+            h /= 6f;
+            if (h < 0f) h += 1f;
+        }
+        float s = max <= 1e-6f ? 0f : c / max;
+        return (h, s, max);
+    }
+
+    /// <summary>
+    /// Coverage-masked mean colour of a rendered RGBA8 frame buffer, as HSV. Background pixels
+    /// (all channels below <paramref name="bgThreshold"/>) are skipped so the void doesn't wash
+    /// the average out; the rest are sampled every <paramref name="step"/>th pixel (≪1 ms).
+    /// Returns (0,0,0) when the frame is empty or fully background. uint layout is RGBA
+    /// little-endian (R = low byte), matching the Metal renderers' output.
+    /// </summary>
+    public static (float h, float s, float v) MeanScreenColorHsv(
+        uint[] pixels, int width, int height, int step = 4, int bgThreshold = 12)
+    {
+        if (pixels == null || pixels.Length == 0) return (0f, 0f, 0f);
+        if (step < 1) step = 1;
+        int total = width * height;
+        if (total <= 0 || total > pixels.Length) total = pixels.Length;
+        long sr = 0, sg = 0, sb = 0, n = 0;
+        for (int i = 0; i < total; i += step)
+        {
+            uint p = pixels[i];
+            int r = (int)(p & 0xFF);
+            int g = (int)((p >> 8) & 0xFF);
+            int b = (int)((p >> 16) & 0xFF);
+            if (r < bgThreshold && g < bgThreshold && b < bgThreshold) continue;
+            sr += r; sg += g; sb += b; n++;
+        }
+        if (n == 0) return (0f, 0f, 0f);
+        return RgbToHsv(sr / (255f * n), sg / (255f * n), sb / (255f * n));
     }
 }

@@ -7037,7 +7037,18 @@ public static class Program
                 // The sweep also drives M2 derivatives: a fast size ramp (expand→contract),
                 // a periodic ParameterVelocity spike (fold), and a complexity collapse (simplify).
                 var controller = new Parsec.Audio.Midi.MidiOutputController(midi);
-                Console.WriteLine($"  sweeping CC20–34 + gesture + spatial notes for {sweepSeconds:F1}s — open a MIDI monitor on 'Parsec' to watch");
+                Console.WriteLine($"  sweeping CC20–36 + gesture + spatial notes for {sweepSeconds:F1}s — open a MIDI monitor on 'Parsec' to watch");
+                static (float r, float g, float b) HsvToRgb(float h, float s, float v)
+                {
+                    float i = MathF.Floor(h * 6f);
+                    float f = h * 6f - i;
+                    float p = v * (1f - s), q = v * (1f - f * s), t2 = v * (1f - (1f - f) * s);
+                    return ((int)i % 6) switch
+                    {
+                        0 => (v, t2, p), 1 => (q, v, p), 2 => (p, v, t2),
+                        3 => (p, q, v), 4 => (t2, p, v), _ => (v, p, q),
+                    };
+                }
                 int events = 0;
                 const int hz = 30;
                 int frames = Math.Max(1, (int)(sweepSeconds * hz));
@@ -7080,8 +7091,19 @@ public static class Program
                         TrapVariance: new System.Numerics.Vector4(0.3f * (1f - tri), 0f, 0f, 0f),
                         CameraSpeed: 1.5f * tri, ParameterVelocity: fold,
                         Cells: cells, ZoomVelocity: 1.2f * MathF.Sin(phase));
-                    float hue = (float)((t / Math.Max(0.5, sweepSeconds)) % 1.0);  // colour wheel sweep → CC24
-                    controller.Update(frame, hue);
+                    // Real on-screen colour path: synthesize a small RGBA8 frame whose colour
+                    // cycles (hue wheel + saturation/brightness wobble), then run it through the
+                    // same reducer the app uses → CC24 (hue) + CC35 (sat) + CC36 (val).
+                    float hsweep = (float)((t / Math.Max(0.5, sweepSeconds)) % 1.0);
+                    float ssweep = 0.5f + 0.5f * MathF.Sin(phase);
+                    float vsweep = 0.55f + 0.4f * MathF.Sin(phase * 0.5f);
+                    var (cr, cg, cb) = HsvToRgb(hsweep, ssweep, vsweep);
+                    uint packed = (uint)(cr * 255f) | ((uint)(cg * 255f) << 8) | ((uint)(cb * 255f) << 16) | 0xFF000000u;
+                    var colorBuf = new uint[16 * 16];
+                    for (int p = 0; p < colorBuf.Length; p++)
+                        colorBuf[p] = (p % 4 == 0) ? 0xFF000000u : packed;  // 1/4 background → exercises the mask
+                    var (mh, ms, mv) = Parsec.Audio.Midi.MidiOutputController.MeanScreenColorHsv(colorBuf, 16, 16, 1);
+                    controller.Update(frame, mh, ms, mv);
                     if (controller.LastEventTime == t)   // a gesture event fired this exact frame
                     {
                         events++;
@@ -7118,8 +7140,9 @@ public static class Program
             var ccNames = new Dictionary<int, string> {
                 {20,"Size"},{21,"Proximity"},{22,"Complexity"},{23,"Expansion"},{24,"Colour"},
                 {25,"Layering"},{26,"Haze"},{27,"Verticality"},{28,"Speed"},{29,"Dolly"},
-                {30,"PositionX"},{31,"PositionY"},{32,"Dispersion"},{33,"Structure"},{34,"Heterogeneity"} };
-            for (int cc = 20; cc <= 34; cc++)
+                {30,"PositionX"},{31,"PositionY"},{32,"Dispersion"},{33,"Structure"},{34,"Heterogeneity"},
+                {35,"Saturation"},{36,"Brightness"} };
+            for (int cc = 20; cc <= 36; cc++)
                 if (r.LastCc[cc] >= 0)
                     Console.WriteLine($"    CC{cc} {ccNames[cc],-13} last = {r.LastCc[cc]}");
 

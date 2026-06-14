@@ -118,15 +118,24 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
         ? "MIDI off"
         : _midiSession.IsAvailable ? $"MIDI: Parsec · {_midiController?.Monitor}" : $"MIDI unavailable: {_midiSession.UnavailableReason}";
 
-    private void EmitMidi(Audio.Sonification.FractalSonicFrame? frame)
+    private void EmitMidi(Audio.Sonification.FractalSonicFrame? frame, uint[]? pixels = null, int width = 0, int height = 0)
     {
         if (_midiEnabled && frame != null)
         {
             _lastSonicTime = frame.Time;
-            // Mean palette colour ≈ Base (cosine bands average out), so its hue is the
-            // "what colour is it" reading; CC24 moves whenever the palette shifts.
-            float hue = Parsec.Audio.Midi.MidiOutputController.Hue01(Palette.BaseR, Palette.BaseG, Palette.BaseB);
-            _midiController?.Update(frame, hue);
+            if (pixels != null && width > 0 && height > 0)
+            {
+                // Real on-screen colour: coverage-masked mean of the rendered frame buffer
+                // (palette × orbit traps × lighting × bloom × grade), not just the palette knob.
+                var (h, s, v) = Parsec.Audio.Midi.MidiOutputController.MeanScreenColorHsv(pixels, width, height);
+                _midiController?.Update(frame, h, s, v);
+            }
+            else
+            {
+                // Fallback (e.g. CLI, no frame buffer): mean palette colour ≈ Base.
+                float hue = Parsec.Audio.Midi.MidiOutputController.Hue01(Palette.BaseR, Palette.BaseG, Palette.BaseB);
+                _midiController?.Update(frame, hue);
+            }
         }
     }
 
@@ -1394,7 +1403,7 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
                 }
 
                 var sonicFrame = Sonification?.Update(_sonicClock.Elapsed.TotalSeconds, _cam.Position, _cam.Forward, _cam.UpLocal, _lastTelemetry, ComputeGeometryPitches(), ComputeLatticeRatio());
-                EmitMidi(sonicFrame);
+                EmitMidi(sonicFrame, pixels, rw, rh);
                 Status($"Metal {ActiveType} · {rw}x{rh} · compute {_metalComputeMs} ms · readback {_metalReadbackMs} ms · total {_totalFrameMs} ms  ·  WASD+QE move · drag to look{SonicDebugSuffix(sonicFrame)}{MidiSuffix()}");
             }
         }
@@ -1604,7 +1613,7 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
                 && _deepView.Radius <= DeepZoomView.MinRadius * 1.05;
             {
                 var sonicFrame = Sonification?.Update(_sonicClock.Elapsed.TotalSeconds, _cam.Position, _cam.Forward, _cam.UpLocal, _lastTelemetry, ComputeGeometryPitches(), ComputeLatticeRatio());
-                EmitMidi(sonicFrame);
+                EmitMidi(sonicFrame, pixels, rw, rh);
                 string sonicSuffix = SonicDebugSuffix(sonicFrame);
                 Status(ActiveType == FractalType.DeepZoom
                     ? $"Deep Zoom 2D · {(_deepView.Formula switch { 1 => "Prospector", 2 => "Julia", 3 => "Burning Ship", _ => "Mandelbrot" })} · radius {_deepView.Radius:e2}{(atMaxDepth ? " · max depth" : "")} · {rw}x{rh} · drag pan · scroll zoom"
