@@ -95,6 +95,98 @@ values, so "fold" / "expand" fire as discrete musical events rather than constan
 - **Later.** MPE / pitch-bend for expressive per-cell voices; MIDI clock / note quantisation to a
   musical grid; per-cell spatial mapping to channels.
 
+## Planned improvements — closing the AV-unity gaps (2026-06-14)
+
+The M1–M4 map is faithful for **structure and motion** (size, proximity, position, complexity,
+folding) but only partial for **colour** and **fine detail**, and the telemetry measures the DE
+*geometry*, not the rendered *pixels* — so shading/lighting/bloom/grade are not represented. The
+four items below close the largest gaps, in recommended order. None has been started.
+
+### 1. Real on-screen colour → CC24 (highest leverage)
+
+**Problem.** CC24 is currently `Hue01(PaletteState.Base)` — the palette *base setting*, not the
+colour actually displayed. The visible colour is the cosine palette modulated by orbit traps, then
+lighting, bloom and the HDR grade, and it varies across the frame. So CC24 tracks a knob, not the eye.
+
+**Approach.** Colour is a *shading-stage* property, so it must come from the **rendered image**, not
+the DE telemetry. The Metal renderers already return the displayed frame as an RGBA8 `uint[]` (the
+buffer `FractalView` uploads via `TexImage2D`). After each render, downsample that buffer on the CPU
+(sample every Nth pixel — <1 ms) and compute a coverage-masked mean colour:
+- ignore background pixels (near-black, or reuse the corner-matte logic in `ImageOutput`, or weight
+  by the telemetry hit mask) so the void doesn't wash the average out;
+- convert mean RGB → HSV: **hue → CC24** (now the real colour), and add **saturation → CC35** and
+  **brightness/luma → CC36** (overall how lit/vivid the scene is — both genuinely new signals).
+- Wire: `FractalView` computes the colour from the readback buffer and passes it into
+  `MidiOutputController.Update(frame, hue, sat, val)` (extend the signature; keep palette-hue as a
+  fallback when no frame buffer is available, e.g. the CLI).
+- **Per-region colour (optional follow-on):** partition the rendered image into the spatial grid and
+  compute per-cell mean colour → lets a region's *note velocity or a per-region CC* carry its colour,
+  not just its energy.
+
+**Acceptance.** Changing palette **or** lighting **or** bloom visibly shifts CC24; a grey/unlit scene
+reads low saturation; `midi-smoke` (no frame buffer) still works via the palette-hue fallback; golden 5/5.
+**Effort:** moderate. **Risk:** low (read-only over an existing buffer; no render change).
+
+### 2. Finer spatial resolution
+
+**Problem.** Position/dispersion CCs and the 16 region notes derive from the **4×4** cell grid, so
+small objects and precise on-screen position are coarse.
+
+**Constraint.** The 4×4 grid is **shared with sonification** (16 OpenAL emitters, the DirectOrbit
+Pythagorean 4×4 lattice, fold-chime top-3, etc.). Changing the shared grid would ripple through a lot
+of stable audio code — avoid.
+
+**Approach (decoupled, two tiers):**
+- **2a (low-risk, do first).** Compute a **full-resolution** energy centroid + spread directly from
+  the 64×36 telemetry grid inside `TelemetryReduction.Reduce` (it already has the raw `TelemetryCell[]`),
+  and surface them on `FractalGeometryStats`/`FractalSonicFrame`. MIDI's **CC30/31/32** then use these
+  full-res values instead of the 4×4-derived centroid — much sharper position, **zero** sonification
+  impact.
+- **2b (optional).** A **parallel** finer region-note grid (e.g. 6×6 or 8×8) computed only for MIDI,
+  leaving the sonification 4×4 untouched. Note-range collision must be handled: 36 cells would run
+  36–71 and clash with the gesture notes (60–71) on channel 1 → put spatial notes on their **own
+  channel**, or pick a non-overlapping base. Defer until 2a is in use and the need is confirmed.
+
+**Acceptance.** 2a: position CCs track a small off-centre object the 4×4 grid blurs; sonification output
+unchanged (A/B a sonify render). **Effort:** 2a small, 2b moderate. **Risk:** 2a low, 2b medium (note layout).
+
+### 3. Lower latency / responsiveness knob
+
+**Problem.** End-to-end lag ≈ telemetry ~30 Hz + one-pole smoothing (`Smoothing = 0.25`, ~100 ms) +
+the DAW's own buffer. Fine for pads, loose for tight rhythmic sync. The DAW buffer is out of our
+control; smoothing is the lever we own.
+
+**Approach.** Expose `MidiOutputController.Smoothing` as a **"MIDI responsiveness" slider** in the
+MIDI OUT panel (0.05 = smooth/laggy ↔ 1.0 = instant/jittery). Optionally split CC vs event smoothing.
+Document that the telemetry rate is tied to render framerate and the DAW buffer adds fixed latency.
+
+**Acceptance.** Moving the slider audibly changes CC responsiveness; defaults unchanged at 0.25.
+**Effort:** small. **Risk:** low.
+
+### 4. Full telemetry coverage (remaining 12 fractals)
+
+**Problem.** Only **8 of 20** fractals have a telemetry kernel (Mandelbox, Mandelbulb, Kleinian,
+BurningShip, Menger, Apollonian, KIFS, QJBox). The other **12** — RotBox, Hybrid, QuaternionJulia,
+Bicomplex, Phoenix, Biomorph, Mosely, PseudoKleinian4D, RiemannSphere, Mandalay, Anisotropic,
+OrbitHybrid — emit only the camera-derived CCs (Size/Proximity/Complexity/Expansion/Colour/Speed/Dolly)
+and no spatial/structure data. (Attractor has no Metal renderer at all — out of scope here.)
+
+**Approach.** Per fractal: add a `*_telemetry.metal` kernel (copy an existing one, swap the DE — the
+recipe is in `skills.md` / Track D), add `RunTelemetryPass` to its `Metal*Renderer`, and add a switch
+arm in `FractalView.RunActiveTelemetryPass`. MIDI needs only the geometry stats + 4×4 cells, not the
+sonification wavetables/orbit-trajectory/field-scan buffers, so a *trimmed* telemetry kernel is enough
+for MIDI-only fractals (keeps each port small). Benefits sonification too. Do incrementally, a few per
+pass; `metal-d-telemetry`-style validation per batch.
+
+**Acceptance.** Each ported fractal shows non-zero spatial/structure CCs in `midi-monitor`; golden 5/5.
+**Effort:** large but mechanical and incremental. **Risk:** low per fractal (well-trodden port).
+
+### Recommended sequence
+
+1 (real colour) → 3 (responsiveness knob, quick win) → 2a (full-res position) → 4 (coverage, ongoing)
+→ then optionally 2b (finer region notes) and the deferred M3b mapping editor. Each lands as its own
+verified, committed increment.
+
 ## Testing the output
 
 Three independent ways to confirm the geometry → MIDI stream, in increasing realism:

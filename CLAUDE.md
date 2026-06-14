@@ -140,7 +140,22 @@ The *inverse* of the audio-reactive system above: generate sound *from* the 3D f
 - **Track D — telemetry rollout to Menger/Apollonian/KIFS/QJBox (done, 2026-06-12):** sonification coverage 4 → 8 of 20 fractals. Four new telemetry kernels (`menger/apollonian/kifs/qjbox_telemetry.metal`, copied from the BurningShip template, buffers 0–5) + `RunTelemetryPass` on the four renderers. **DirectOrbit-first scope:** no custom Hybrid voices — new `FractalVoice.Menger/Kifs/QJBox` members fall through to the Mandelbox hybrid fill via existing `default:` arms; distinctness lives in `DirectOrbitProfile` entries (RootDivisor ladder: Menger 0.5 hollow-low, QJBox 1.5 warm 5/4 pad, KIFS 3.0 crystalline 4/3, Apollonian 4.0 glassy 19/16) + `GeometryScale.FoldScaleLatticeRatio(scale)` (octave-reduced |scale|, degenerate → 0 = profile default; Menger scale 3 → 3/2). **Apollonian DirectOrbit enabled** — `canDirect` fallback guards removed from `FractalDroneStream.FillBuffer` and the MainWindow export path; its M7g timer-bell voice stays as its Hybrid identity. Per-fractal orbit escape semantics preserve the stereo gate: Menger/KIFS `dot(z,z)>1000`, QJBox `length(z)>4`, Apollonian "settled" (no inversion applies) = escape. Wired: `FractalView.RunActiveTelemetryPass` arms ×4, `ComputeLatticeRatio` (Menger/Kifs/QJBox), `MainWindow.ActiveTypeToVoice`. CLI: `metal-d-telemetry` (4/4 PASS, 16/16 orbit tiles each), `metal-d-direct [duration] [outDir]` (four palettes distinct: ZCR 797–2639; peaks −10.1 to −25.9 dBFS); regressions `metal-m9b-direct` (default duration — gate is duration-sensitive) and `metal-m9d-check` pass.
 - **Next phase agreed (planned, 2026-06-12):** keep modal resonance **selective** inside `DirectOrbit`, but make it more geometry-conditioned at the *instance* level. Step 1 (`RawOrbit <-> ModalBody` blend) is now done. Remaining priority order: (2) let slow geometry metrics steer deep/long body modes while fast detail metrics excite short bright upper modes, so "large mass + tingly detail" can coexist; (3) extend modal bodies selectively to KIFS and QJBox; (4) strengthen the Shepard layer so it is geometry-owned rather than mainly a zoom glide, potentially by tying its centre/envelope/partial weighting to whole-fractal resonance metrics and/or the active modal body. Detailed rationale and acceptance direction live in `docs/fractal-sonification-plan.md`.
 
-See `skills.md` for Metal porting recipes and gotchas. See `docs/macos-3d-only-build-plan.md` for the macOS render track and `docs/fractal-sonification-plan.md` for the sonification feature.
+**MIDI output feature (geometry → MIDI; NEW, requested 2026-06-14):**
+A sibling of sonification that, instead of synthesising audio internally, emits MIDI to external
+DAWs/VSTs so the fractal becomes an audio-visual control surface. New namespace `Parsec.Audio.Midi`.
+`MidiOutputSession` publishes a virtual CoreMIDI source "Parsec"; `MidiOutputController` maps the
+existing per-frame `FractalSonicFrame` (+ palette hue) to MIDI; `MidiMonitorProbe` + CLI `midi-monitor`
+are an independent cross-process receiver for verification; `web/midi-monitor.html` is a Web MIDI
+monitor. Wired into `FractalView.MidiEnabled`/`EmitMidi`, parallel to the synth (mutually exclusive
+with audio-reactive — same feedback hazard). **M1–M4 done + pushed to `main` (2026-06-14):** 15
+continuous CCs (20–34) + gesture notes (60/62/64/65/67/69/71) + 16 spatial "object" notes (36–51),
+all channel 1. **Planned improvements (items 1–4, not started):** (1) real on-screen colour → CC24
+from the rendered frame buffer (currently palette-base hue only); (2) finer spatial resolution
+(2a full-res centroid from the 64×36 grid, 2b optional finer region-note grid); (3) responsiveness/
+smoothing knob; (4) telemetry coverage for the remaining 12 fractals. Full spec, approach, acceptance
+and recommended sequence in `docs/midi-output-plan.md`.
+
+See `skills.md` for Metal porting recipes and gotchas. See `docs/macos-3d-only-build-plan.md` for the macOS render track, `docs/fractal-sonification-plan.md` for the sonification feature, and `docs/midi-output-plan.md` for the MIDI output feature.
 
 ## Deferred
 
