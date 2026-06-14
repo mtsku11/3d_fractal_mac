@@ -126,6 +126,14 @@ public partial class MainWindow : Window
                     midiEnableCheckBox.IsChecked = false;   // creation failed; revert
             };
 
+        var midiResponsivenessSlider = this.FindControl<Slider>("MidiResponsivenessSlider");
+        if (midiResponsivenessSlider != null)
+            midiResponsivenessSlider.PropertyChanged += (_, e) =>
+            {
+                if (e.Property.Name != nameof(Slider.Value) || _view == null) return;
+                _view.MidiResponsiveness = (float)midiResponsivenessSlider.Value;
+            };
+
         var sonifyBlendSlider = this.FindControl<Slider>("SonifyBlendSlider");
         if (sonifyBlendSlider != null)
             sonifyBlendSlider.PropertyChanged += (_, e) =>

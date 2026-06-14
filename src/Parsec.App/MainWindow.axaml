@@ -127,6 +127,10 @@
             <CheckBox Name="MidiEnableCheckBox" Content="Emit geometry → MIDI (source: Parsec)"
                       ToolTip.Tip="Publishes a virtual MIDI source named 'Parsec'. CC20=size, CC21=proximity, CC22=complexity. Open it as a MIDI input in your DAW or plugin." />
             <TextBlock Name="MidiMonitorText" Text="MIDI off" FontSize="11" Foreground="#8a8a98" />
+            <TextBlock Text="Responsiveness" FontSize="11" Margin="0,4,0,0" />
+            <Slider Name="MidiResponsivenessSlider" Minimum="0.05" Maximum="1" Value="0.25"
+                    TickFrequency="0.01" IsSnapToTickEnabled="False"
+                    ToolTip.Tip="MIDI CC smoothing: low = smooth but laggy, high = instant but jittery. Telemetry runs at ~30 Hz and your DAW buffer adds fixed latency on top." />
           </StackPanel>
           <StackPanel Margin="0,10,0,0" Spacing="4">
             <TextBlock Text="SURFACE TEXTURE" Foreground="#9a9ab0" FontSize="11" FontWeight="SemiBold" />

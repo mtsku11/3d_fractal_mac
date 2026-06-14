@@ -107,9 +107,24 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
             {
                 _midiSession = new Parsec.Audio.Midi.MidiOutputSession("Parsec");
                 _midiController = new Parsec.Audio.Midi.MidiOutputController(_midiSession);
+                _midiController.Smoothing = _midiSmoothing;
             }
             _midiEnabled = value && (_midiSession?.IsAvailable ?? false);
             _midiController?.Reset();
+        }
+    }
+
+    private float _midiSmoothing = 0.25f;
+
+    /// <summary>MIDI responsiveness: one-pole smoothing factor (0.05 = smooth/laggy →
+    /// 1.0 = instant/jittery). Applied live to the controller when present.</summary>
+    public float MidiResponsiveness
+    {
+        get => _midiSmoothing;
+        set
+        {
+            _midiSmoothing = Math.Clamp(value, 0.05f, 1f);
+            if (_midiController != null) _midiController.Smoothing = _midiSmoothing;
         }
     }
 
