@@ -40,7 +40,7 @@ Metal telemetry → FractalSonicFrame → MidiOutputController → MidiOutputSes
 | expanding / contracting | d(size)/dt | CC23 (signed) + Expand/Contract notes | **M2 done** |
 | folding | `ParameterVelocity` spike | Fold note (velocity = magnitude) | **M2 done** |
 | simplifying | complexity falling | Simplify note (velocity = magnitude) | **M2 done** |
-| colour changing | palette phase/base delta | CC24 | M3 |
+| colour changing | palette base hue | CC24 | **M3 done** |
 
 **Event detection (M2)** is derivative-based: rate-of-change + threshold with hysteresis, not raw
 values, so "fold" / "expand" fire as discrete musical events rather than constant noise.
@@ -60,8 +60,15 @@ values, so "fold" / "expand" fire as discrete musical events rather than constan
   fold is `|ParameterVelocity|`. UI status flashes `⟪fold⟫` etc. for ~0.6 s. CLI `midi-smoke`
   drives a triangle size wave + 1 Hz fold spike and reports event-note count (7 events / 4 s,
   all four types). Golden 5/5 (no render regression).
-- **M3 — colour + configurability.** Palette-change CC; then an editable mapping panel (signal →
-  CC/note/channel/range) modelled on the existing `AudioMappingPanel`.
+- **M3 — colour (done, verified 2026-06-14).** Palette-change CC24: the hue of the mean palette
+  colour (≈ `PaletteState.Base`, since the cosine bands average to Base). `MidiOutputController.Hue01`
+  computes it; `FractalView.EmitMidi` passes it into `Update(frame, hue)`. Slewed along the **shortest
+  arc** (hue is circular — 0.98→0.02 must not sweep backwards through the wheel), quantised, dedup'd.
+  CC24 moves whenever the palette shifts (manual, keyframe, or audio-reactive). CLI `midi-smoke`
+  rotates the wheel → CC24 0→29→60→92. Golden 5/5.
+- **M3b — configurability (deferred by the user's "fixed defaults, editor later" choice).** An
+  editable mapping panel (signal → CC/note/channel/range), modelled on the existing
+  `AudioMappingPanel`. Not started — confirm before building.
 - **Later.** MPE / pitch-bend for expressive per-cell voices; MIDI clock / note quantisation to a
   musical grid; per-cell spatial mapping to channels.
 

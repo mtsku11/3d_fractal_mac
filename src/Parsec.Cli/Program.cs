@@ -7037,7 +7037,7 @@ public static class Program
                 // The sweep also drives M2 derivatives: a fast size ramp (expand→contract),
                 // a periodic ParameterVelocity spike (fold), and a complexity collapse (simplify).
                 var controller = new Parsec.Audio.Midi.MidiOutputController(midi);
-                Console.WriteLine($"  sweeping CC20/21/22/23 + event notes for {sweepSeconds:F1}s — open a MIDI monitor on 'Parsec' to watch");
+                Console.WriteLine($"  sweeping CC20/21/22/23/24 + event notes for {sweepSeconds:F1}s — open a MIDI monitor on 'Parsec' to watch");
                 int events = 0;
                 const int hz = 30;
                 int frames = Math.Max(1, (int)(sweepSeconds * hz));
@@ -7058,7 +7058,8 @@ public static class Program
                         NormalVariance: 0.02f + 0.12f * (1f - tri),
                         TrapMean: System.Numerics.Vector4.Zero, TrapVariance: System.Numerics.Vector4.Zero,
                         CameraSpeed: 0f, ParameterVelocity: fold);
-                    controller.Update(frame);
+                    float hue = (float)((t / Math.Max(0.5, sweepSeconds)) % 1.0);  // colour wheel sweep → CC24
+                    controller.Update(frame, hue);
                     if (controller.LastEventTime == t)   // an event fired this exact frame
                     {
                         events++;

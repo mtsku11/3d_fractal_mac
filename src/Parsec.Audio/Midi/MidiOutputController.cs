@@ -33,6 +33,8 @@ public sealed class MidiOutputController
     public const int CcComplexity = 22;
     // M2 signed expansion-rate CC
     public const int CcExpansion = 23;
+    // M3 palette colour (hue) CC — moves when the visible colour changes
+    public const int CcColor = 24;
 
     /// <summary>MIDI channel 0–15 (0 = channel 1).</summary>
     public int Channel { get; set; }
@@ -67,8 +69,9 @@ public sealed class MidiOutputController
     public float FoldHigh { get; set; } = 0.045f;
     public float FoldLow { get; set; } = 0.015f;
 
-    private float _sSize, _sProx, _sComplex, _sSizeRate;
-    private bool _init;
+    private float _sSize, _sProx, _sComplex, _sSizeRate, _sColor;
+    private bool _init, _colorInit;
+    private int _lastColor = -1;
     private double _prevTime;
     private float _prevSize, _prevComplex;
     private int _lastSize = -1, _lastProx = -1, _lastComplex = -1, _lastExpansion = -1;
@@ -91,7 +94,9 @@ public sealed class MidiOutputController
 
     public MidiOutputController(MidiOutputSession midi) => _midi = midi;
 
-    public void Update(FractalSonicFrame f)
+    /// <param name="colorHue01">Optional palette hue (0–1, wraps). When supplied, drives CC24
+    /// so a DAW hears the visible colour shift; pass null to leave CC24 untouched.</param>
+    public void Update(FractalSonicFrame f, float? colorHue01 = null)
     {
         if (_midi is null || !_midi.IsAvailable || f is null) return;
 
@@ -158,15 +163,33 @@ public sealed class MidiOutputController
                     SimplifyNote, -complexRate / MathF.Max(1e-4f, ComplexRateHigh * 4f),
                     ref _simplifyArmed, ref _simplifyFired, "simplify");
 
-        Monitor = $"size {_lastSize,3} · prox {_lastProx,3} · cplx {_lastComplex,3} · exp {_lastExpansion,3}";
+        // --- M3 palette colour (CC24) ---
+        if (colorHue01 is float hue)
+        {
+            hue = Wrap01(hue);
+            if (!_colorInit) { _sColor = hue; _colorInit = true; }
+            else
+            {
+                // Hue is circular — slew along the shortest arc so 0.98→0.02 doesn't
+                // sweep backwards through the whole wheel.
+                float d = hue - _sColor;
+                if (d > 0.5f) d -= 1f; else if (d < -0.5f) d += 1f;
+                _sColor = Wrap01(_sColor + d * a);
+            }
+            SendCcRaw(CcColor, (int)MathF.Round(_sColor * 127f), ref _lastColor);
+        }
+
+        Monitor = $"size {_lastSize,3} · prox {_lastProx,3} · cplx {_lastComplex,3} · exp {_lastExpansion,3} · col {_lastColor,3}";
     }
 
     /// <summary>Resets dedup + event state so the next Update retransmits everything.</summary>
     public void Reset()
     {
         _init = false;
+        _colorInit = false;
         _lastSize = _lastProx = _lastComplex = -1;
         _lastExpansion = -1;
+        _lastColor = -1;
         _sSizeRate = 0f;
         _expandArmed = _contractArmed = _foldArmed = _simplifyArmed = true;
         _expandFired = _contractFired = _foldFired = _simplifyFired = 0;
@@ -222,4 +245,26 @@ public sealed class MidiOutputController
     }
 
     private static float Clamp01(float v) => v < 0f ? 0f : (v > 1f ? 1f : v);
+
+    private static float Wrap01(float v)
+    {
+        v %= 1f;
+        return v < 0f ? v + 1f : v;
+    }
+
+    /// <summary>HSV hue (0–1) of an RGB triple — the "what colour is it" scalar for CC24.
+    /// Grey/black returns 0.</summary>
+    public static float Hue01(float r, float g, float b)
+    {
+        float max = MathF.Max(r, MathF.Max(g, b));
+        float min = MathF.Min(r, MathF.Min(g, b));
+        float c = max - min;
+        if (c < 1e-6f) return 0f;
+        float h;
+        if (max == r)      h = ((g - b) / c) % 6f;
+        else if (max == g) h = (b - r) / c + 2f;
+        else               h = (r - g) / c + 4f;
+        h /= 6f;
+        return h < 0f ? h + 1f : h;
+    }
 }

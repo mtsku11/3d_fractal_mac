@@ -120,7 +120,14 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
 
     private void EmitMidi(Audio.Sonification.FractalSonicFrame? frame)
     {
-        if (_midiEnabled && frame != null) { _lastSonicTime = frame.Time; _midiController?.Update(frame); }
+        if (_midiEnabled && frame != null)
+        {
+            _lastSonicTime = frame.Time;
+            // Mean palette colour ≈ Base (cosine bands average out), so its hue is the
+            // "what colour is it" reading; CC24 moves whenever the palette shifts.
+            float hue = Parsec.Audio.Midi.MidiOutputController.Hue01(Palette.BaseR, Palette.BaseG, Palette.BaseB);
+            _midiController?.Update(frame, hue);
+        }
     }
 
     private string MidiSuffix()
