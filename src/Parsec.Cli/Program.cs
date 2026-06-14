@@ -5113,6 +5113,50 @@ public static class Program
             catch (Exception ex) { Console.Error.WriteLine($"metal-d-telemetry FAILED: {ex.Message}\n{ex.StackTrace}"); return 1; }
         }
 
+        // metal-midi-telemetry — validator for the trimmed MIDI-only telemetry kernels
+        // (improvement 4: geometry stats + 4x4 cells + full-res centroid; no sonification buffers).
+        if (args[0] == "metal-midi-telemetry")
+        {
+            if (!OperatingSystem.IsMacOS()) { Console.Error.WriteLine("metal-midi-telemetry requires macOS."); return 1; }
+            Console.WriteLine("metal-midi-telemetry — trimmed telemetry smoke test (MIDI-only fractals)");
+            var settingsM = new RaymarchSettings(
+                MaxSteps: 128, HitEpsilon: 1.5e-3f, MaxDistance: 40f, NormalEpsilon: 2e-3f,
+                EnableSoftShadows: false, ShadowSteps: 0, ShadowSoftness: 0f,
+                EnableAmbientOcclusion: false, AOSamples: 0, AOStepDistance: 0f, AOIntensity: 0f,
+                HeroSamples: 1, EnableReflections: false, ReflectionBounces: 0,
+                Gloss: 0f, F0: 0f, LightIntensity: 1f);
+            var camFar   = new Camera3D(new Vector3(0f, 5f, 30f), Vector3.Zero, Vector3.UnitY, MathF.PI / 4f, 64f / 36f);
+            var camClose = new Camera3D(new Vector3(0f, 2f,  8f), Vector3.Zero, Vector3.UnitY, MathF.PI / 4f, 64f / 36f);
+            try
+            {
+                int failures = 0;
+                void Check(string name, FractalGeometryStats? far, FractalGeometryStats? close)
+                {
+                    if (far == null || close == null) { Console.Error.WriteLine($"  {name,-12} telemetry returned null"); failures++; return; }
+                    var f = far.Value; var c = close.Value;
+                    bool cells   = c.Cells is { Length: 16 };
+                    bool finite  = float.IsFinite(c.HitRatio) && float.IsFinite(c.MeanDepth)
+                                && float.IsFinite(c.CentroidX) && float.IsFinite(c.CentroidY) && float.IsFinite(c.Dispersion);
+                    bool closer  = c.HitRatio > f.HitRatio || c.HitRatio > 0.95f;
+                    bool ok = cells && finite && closer && c.HitRatio > 0f;
+                    Console.WriteLine($"  {name,-12} hitFar={f.HitRatio:F3} hitClose={c.HitRatio:F3} depth={c.MeanDepth:F2} cells={c.Cells?.Length ?? 0} centroid=({c.CentroidX:+0.00;-0.00},{c.CentroidY:+0.00;-0.00}) disp={c.Dispersion:F2}  {(ok ? "PASS" : "FAIL")}");
+                    if (!ok) failures++;
+                }
+
+                using (var r = new MetalRotBoxRenderer())
+                {
+                    if (!r.IsAvailable) { Console.Error.WriteLine("RotBox Metal unavailable"); return 1; }
+                    Check("RotBox", r.RunTelemetryPass(new RotBoxParams(), camFar, settingsM),
+                                    r.RunTelemetryPass(new RotBoxParams(), camClose, settingsM));
+                }
+
+                if (failures > 0) { Console.Error.WriteLine($"metal-midi-telemetry: {failures} kernel(s) failed."); return 1; }
+                Console.WriteLine("All MIDI-only telemetry kernels compiled and returned valid stats.");
+                return 0;
+            }
+            catch (Exception ex) { Console.Error.WriteLine($"metal-midi-telemetry FAILED: {ex.Message}\n{ex.StackTrace}"); return 1; }
+        }
+
         // metal-d-direct [duration] [outDir]
         // Track D: DirectOrbitSynth listening renders for the four new telemetry fractals,
         // each with its own DirectOrbitProfile + geometry-derived lattice ratio.
