@@ -22,6 +22,7 @@
     <EmbeddedResource Include="Shaders\kifs_telemetry.metal" />
     <EmbeddedResource Include="Shaders\qjbox_telemetry.metal" />
     <EmbeddedResource Include="Shaders\rotbox_telemetry.metal" />
+    <EmbeddedResource Include="Shaders\quaternianjulia_telemetry.metal" />
     <EmbeddedResource Include="Shaders\mandelbulb_raymarch.metal" />
     <EmbeddedResource Include="Shaders\rotbox_raymarch.metal" />
     <EmbeddedResource Include="Shaders\kifs_raymarch.metal" />

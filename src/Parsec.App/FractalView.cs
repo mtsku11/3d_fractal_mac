@@ -849,6 +849,8 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
             => _metalQJBoxRenderer.RunTelemetryPass(QJBox.ToParams(), camera, settings),
         FractalType.RotBox     when _metalRotBoxRenderer?.IsAvailable == true
             => _metalRotBoxRenderer.RunTelemetryPass(RotBox.ToParams(), camera, settings),
+        FractalType.QuaternionJulia when _metalQuaternionJuliaRenderer?.IsAvailable == true
+            => _metalQuaternionJuliaRenderer.RunTelemetryPass(QuaternionJulia.ToParams(), camera, settings),
         _ => null,
     };
 

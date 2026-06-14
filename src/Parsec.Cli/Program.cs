@@ -5149,6 +5149,14 @@ public static class Program
                     Check("RotBox", r.RunTelemetryPass(new RotBoxParams(), camFar, settingsM),
                                     r.RunTelemetryPass(new RotBoxParams(), camClose, settingsM));
                 }
+                using (var r = new MetalQuaternionJuliaRenderer())
+                {
+                    if (!r.IsAvailable) { Console.Error.WriteLine("QuaternionJulia Metal unavailable"); return 1; }
+                    var qjFar   = new Camera3D(new Vector3(0f, 3f, 12f), Vector3.Zero, Vector3.UnitY, MathF.PI / 4f, 64f / 36f);
+                    var qjClose = new Camera3D(new Vector3(0f, 0f, 3.5f), Vector3.Zero, Vector3.UnitY, MathF.PI / 4f, 64f / 36f);
+                    Check("QuaternJulia", r.RunTelemetryPass(new QuaternionJuliaParams(), qjFar, settingsM),
+                                          r.RunTelemetryPass(new QuaternionJuliaParams(), qjClose, settingsM));
+                }
 
                 if (failures > 0) { Console.Error.WriteLine($"metal-midi-telemetry: {failures} kernel(s) failed."); return 1; }
                 Console.WriteLine("All MIDI-only telemetry kernels compiled and returned valid stats.");
