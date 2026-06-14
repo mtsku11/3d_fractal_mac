@@ -113,6 +113,19 @@ public partial class MainWindow : Window
         if (sonifyButton != null)
             sonifyButton.Click += OnSonifyClick;
 
+        var midiEnableCheckBox = this.FindControl<CheckBox>("MidiEnableCheckBox");
+        var midiMonitorText = this.FindControl<TextBlock>("MidiMonitorText");
+        if (midiEnableCheckBox != null)
+            midiEnableCheckBox.IsCheckedChanged += (_, _) =>
+            {
+                if (_view == null) return;
+                _view.MidiEnabled = midiEnableCheckBox.IsChecked == true;
+                // Reflect whether the CoreMIDI source actually came up.
+                if (midiMonitorText != null) midiMonitorText.Text = _view.MidiStatus;
+                if (midiEnableCheckBox.IsChecked == true && !_view.MidiEnabled)
+                    midiEnableCheckBox.IsChecked = false;   // creation failed; revert
+            };
+
         var sonifyBlendSlider = this.FindControl<Slider>("SonifyBlendSlider");
         if (sonifyBlendSlider != null)
             sonifyBlendSlider.PropertyChanged += (_, e) =>

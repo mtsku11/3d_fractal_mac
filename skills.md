@@ -990,6 +990,20 @@ Apple M4 Pro (12,958/76,800 px changed at blend 0.85). **`MTLBuffer.Contents` *i
 this host** — the smoke reads back its `uint[]` fine; an earlier "non-mappable Contents / readback
 seam" theory was wrong, masked by the injector crash that aborted before readback was ever reached.
 
+## MIDI output via virtual CoreMIDI source (2026-06-14)
+
+`Parsec.Audio.Midi.MidiOutputSession` publishes a virtual MIDI source ("Parsec") that appears in
+any DAW/plugin input list with no config. CoreMIDI P/Invoke (`/System/Library/Frameworks/
+CoreMIDI.framework/CoreMIDI`): `MIDIClientCreate` → `MIDISourceCreate` → send via
+`MIDIPacketListInit`/`MIDIPacketListAdd`/`MIDIReceived`. **Use Apple's packet-list helpers** — the
+MIDIPacketList struct alignment is famously wrong if hand-marshalled. MIDIObjectRef = `UInt32`
+typedef (not pointer), marshal as `uint`. `MidiOutputController` maps `FractalSonicFrame` →
+CC20 size / CC21 proximity / CC22 complexity, smoothed + dedup'd (only send on quantised change).
+Wired in `FractalView.MidiEnabled` off the existing per-frame sonicFrame. Verify: `midi-smoke`
+(creates source, in-process loopback 4/4, CC sweep). **Gotcha:** `MIDIReceived` delivery is async
+via MIDIServer — the loopback test sleeps ~150 ms after `MIDIPortConnectSource` or early sends drop.
+Full plan + roadmap (M2 events, M3 colour/config) in `docs/midi-output-plan.md`.
+
 ## Screen-space bloom (2026-06-13)
 
 Post-process bloom in `postprocess.metal`: `bloom_brightpass` (keep over-threshold energy,

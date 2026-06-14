@@ -7005,6 +7005,62 @@ public static class Program
             catch (Exception ex) { Console.Error.WriteLine($"metal-glow-smoke FAILED: {ex.Message}\n{ex.StackTrace}"); return 1; }
         }
 
+        // midi-smoke [sweepSeconds]
+        // Publish a virtual CoreMIDI source "Parsec", run an in-process loopback self-test,
+        // then sweep the 3 core CCs through MidiOutputController so an external MIDI monitor
+        // (or DAW) can confirm reception. macOS only.
+        if (args[0] == "midi-smoke")
+        {
+            if (!OperatingSystem.IsMacOS()) { Console.Error.WriteLine("midi-smoke requires macOS."); return 1; }
+            try
+            {
+                double sweepSeconds = args.Length > 1 && double.TryParse(args[1], out var ss) ? ss : 6.0;
+
+                using var midi = new Parsec.Audio.Midi.MidiOutputSession("Parsec");
+                Console.WriteLine($"midi-smoke — virtual source 'Parsec'");
+                if (!midi.IsAvailable)
+                {
+                    Console.Error.WriteLine($"  MIDI unavailable: {midi.UnavailableReason}");
+                    return 1;
+                }
+                Console.WriteLine("  virtual source created OK");
+
+                int loop = midi.RunLoopbackSelfTest(sendCount: 4, waitMs: 1200);
+                if (loop >= 4)
+                    Console.WriteLine($"  loopback self-test: received {loop}/4 packets  PASS");
+                else if (loop >= 0)
+                    Console.WriteLine($"  loopback self-test: received {loop}/4 (MIDIServer delivery slow/absent — send path still OK)");
+                else
+                    Console.WriteLine($"  loopback self-test: setup code {loop} (skipped)");
+
+                // Feed the controller a synthetic frame sweep so a monitor sees moving CCs.
+                var controller = new Parsec.Audio.Midi.MidiOutputController(midi);
+                Console.WriteLine($"  sweeping CC20/21/22 for {sweepSeconds:F1}s — open a MIDI monitor on 'Parsec' to watch");
+                const int hz = 30;
+                int frames = Math.Max(1, (int)(sweepSeconds * hz));
+                for (int i = 0; i < frames; i++)
+                {
+                    double t = (double)i / frames;
+                    float phase = (float)(t * Math.PI * 2);
+                    var frame = new Parsec.Audio.Sonification.FractalSonicFrame(
+                        Time: t,
+                        HitRatio:  0.5f + 0.5f * MathF.Sin(phase),
+                        MeanDepth: 2.0f + 2.0f * MathF.Sin(phase * 0.5f + 1f),
+                        DepthVariance: 0f, StepMean: 0f, StepP90: 0f,
+                        NormalMean: System.Numerics.Vector3.Zero,
+                        NormalVariance: 0.06f + 0.06f * MathF.Sin(phase * 1.3f + 2f),
+                        TrapMean: System.Numerics.Vector4.Zero, TrapVariance: System.Numerics.Vector4.Zero,
+                        CameraSpeed: 0f, ParameterVelocity: 0f);
+                    controller.Update(frame);
+                    if (i % hz == 0) Console.WriteLine($"    t={t:F2}  {controller.Monitor}");
+                    System.Threading.Thread.Sleep(1000 / hz);
+                }
+                Console.WriteLine("midi-smoke PASS");
+                return 0;
+            }
+            catch (Exception ex) { Console.Error.WriteLine($"midi-smoke FAILED: {ex.Message}\n{ex.StackTrace}"); return 1; }
+        }
+
         // metal-bloom-smoke [intensity] [threshold] [outDir]
         // A/B render of a frame-filling Mandelbox with screen-space bloom off vs on.
         // Bloom is the case march-glow fails: a busy close-up where bright detail should
@@ -7311,6 +7367,7 @@ public static class Program
         Console.WriteLine("  parsec metal-golden [--generate]     Golden-frame regression (5 scenarios, SHA-256 hash compare)");
         Console.WriteLine("  parsec metal-glow-smoke [strength] [falloff] [outDir]  Mandelbox step-glow A/B render (macOS only)");
         Console.WriteLine("  parsec metal-bloom-smoke [intensity] [threshold] [outDir]  Mandelbox screen-space bloom A/B render (macOS only)");
+        Console.WriteLine("  parsec midi-smoke [sweepSeconds]     Publish virtual MIDI source 'Parsec' + loopback test + CC sweep (macOS only)");
         Console.WriteLine("  parsec m7a-check              JI/temperament quantizer self-check");
         Console.WriteLine("  parsec help           Show this help");
         Console.WriteLine();

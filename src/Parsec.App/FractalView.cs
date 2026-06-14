@@ -91,6 +91,40 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
     /// <summary>Optional sonification controller. Set by the host (MainWindow) when sonification is enabled.</summary>
     public SonificationController? Sonification { get; set; }
 
+    // --- MIDI output (geometry → MIDI CC, parallel to the internal synth) ---
+    private Parsec.Audio.Midi.MidiOutputSession? _midiSession;
+    private Parsec.Audio.Midi.MidiOutputController? _midiController;
+    private bool _midiEnabled;
+
+    /// <summary>When true, the live telemetry frame is translated to MIDI CCs on the
+    /// virtual "Parsec" source each frame. Lazily creates the CoreMIDI session.</summary>
+    public bool MidiEnabled
+    {
+        get => _midiEnabled;
+        set
+        {
+            if (value && _midiSession == null)
+            {
+                _midiSession = new Parsec.Audio.Midi.MidiOutputSession("Parsec");
+                _midiController = new Parsec.Audio.Midi.MidiOutputController(_midiSession);
+            }
+            _midiEnabled = value && (_midiSession?.IsAvailable ?? false);
+            _midiController?.Reset();
+        }
+    }
+
+    /// <summary>Null when no MIDI session has been created; otherwise its availability reason.</summary>
+    public string MidiStatus => _midiSession == null
+        ? "MIDI off"
+        : _midiSession.IsAvailable ? $"MIDI: Parsec · {_midiController?.Monitor}" : $"MIDI unavailable: {_midiSession.UnavailableReason}";
+
+    private void EmitMidi(Audio.Sonification.FractalSonicFrame? frame)
+    {
+        if (_midiEnabled && frame != null) _midiController?.Update(frame);
+    }
+
+    private string MidiSuffix() => _midiEnabled && _midiController != null ? $"  ·  MIDI {_midiController.Monitor}" : "";
+
     // Software-blit fallback for macOS when the Avalonia compositor runs in
     // Software mode (no GL context for OpenGlControlBase). Metal renderers
     // produce uint[], which we copy into a WriteableBitmap and draw via
@@ -1340,7 +1374,8 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
                 }
 
                 var sonicFrame = Sonification?.Update(_sonicClock.Elapsed.TotalSeconds, _cam.Position, _cam.Forward, _cam.UpLocal, _lastTelemetry, ComputeGeometryPitches(), ComputeLatticeRatio());
-                Status($"Metal {ActiveType} · {rw}x{rh} · compute {_metalComputeMs} ms · readback {_metalReadbackMs} ms · total {_totalFrameMs} ms  ·  WASD+QE move · drag to look{SonicDebugSuffix(sonicFrame)}");
+                EmitMidi(sonicFrame);
+                Status($"Metal {ActiveType} · {rw}x{rh} · compute {_metalComputeMs} ms · readback {_metalReadbackMs} ms · total {_totalFrameMs} ms  ·  WASD+QE move · drag to look{SonicDebugSuffix(sonicFrame)}{MidiSuffix()}");
             }
         }
 
@@ -1549,6 +1584,7 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
                 && _deepView.Radius <= DeepZoomView.MinRadius * 1.05;
             {
                 var sonicFrame = Sonification?.Update(_sonicClock.Elapsed.TotalSeconds, _cam.Position, _cam.Forward, _cam.UpLocal, _lastTelemetry, ComputeGeometryPitches(), ComputeLatticeRatio());
+                EmitMidi(sonicFrame);
                 string sonicSuffix = SonicDebugSuffix(sonicFrame);
                 Status(ActiveType == FractalType.DeepZoom
                     ? $"Deep Zoom 2D · {(_deepView.Formula switch { 1 => "Prospector", 2 => "Julia", 3 => "Burning Ship", _ => "Mandelbrot" })} · radius {_deepView.Radius:e2}{(atMaxDepth ? " · max depth" : "")} · {rw}x{rh} · drag pan · scroll zoom"
