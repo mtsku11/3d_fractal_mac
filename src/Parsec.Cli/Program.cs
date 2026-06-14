@@ -7037,7 +7037,7 @@ public static class Program
                 // The sweep also drives M2 derivatives: a fast size ramp (expand→contract),
                 // a periodic ParameterVelocity spike (fold), and a complexity collapse (simplify).
                 var controller = new Parsec.Audio.Midi.MidiOutputController(midi);
-                Console.WriteLine($"  sweeping CC20/21/22/23/24 + event notes for {sweepSeconds:F1}s — open a MIDI monitor on 'Parsec' to watch");
+                Console.WriteLine($"  sweeping CC20–34 + gesture + spatial notes for {sweepSeconds:F1}s — open a MIDI monitor on 'Parsec' to watch");
                 int events = 0;
                 const int hz = 30;
                 int frames = Math.Max(1, (int)(sweepSeconds * hz));
@@ -7049,18 +7049,40 @@ public static class Program
                     // a sharp fold spike once per second.
                     float tri = 2f * MathF.Abs((phase / (2f * MathF.PI)) % 1f - 0.5f); // 0..1
                     float fold = ((i % hz) == hz / 2) ? 0.20f : 0.0f;                  // 1 Hz spike
+
+                    // A bright energy blob orbiting the 4×4 grid → moving centroid (CC30/31) and
+                    // region-note onsets (notes 36–51) as it crosses cells.
+                    float ang = phase;
+                    float bx = 1.5f + 1.5f * MathF.Cos(ang);   // 0..3 column
+                    float by = 1.5f + 1.5f * MathF.Sin(ang);   // 0..3 row
+                    var cells = new Parsec.Audio.Sonification.FractalSonicCell[16];
+                    for (int c = 0; c < 16; c++)
+                    {
+                        float ccx = c % 4, ccy = c / 4;
+                        float d2 = (ccx - bx) * (ccx - bx) + (ccy - by) * (ccy - by);
+                        float e = MathF.Exp(-d2 * 1.2f);        // gaussian blob
+                        cells[c] = new Parsec.Audio.Sonification.FractalSonicCell(
+                            WorldPosition: System.Numerics.Vector3.Zero,
+                            HitRatio: e, MeanDepth: 2f, StepComplexity: e,
+                            NormalMean: System.Numerics.Vector3.Zero,
+                            TrapMean: System.Numerics.Vector4.Zero, Energy: e);
+                    }
+
                     var frame = new Parsec.Audio.Sonification.FractalSonicFrame(
                         Time: t,
                         HitRatio:  0.1f + 0.85f * tri,
                         MeanDepth: 2.0f + 2.0f * MathF.Sin(phase * 0.5f + 1f),
-                        DepthVariance: 0f, StepMean: 0f, StepP90: 0f,
-                        NormalMean: System.Numerics.Vector3.Zero,
+                        DepthVariance: 0.4f + 0.4f * MathF.Sin(phase * 0.7f),
+                        StepMean: 20f + 50f * tri, StepP90: 0f,
+                        NormalMean: new System.Numerics.Vector3(0f, MathF.Sin(phase), 0f),
                         NormalVariance: 0.02f + 0.12f * (1f - tri),
-                        TrapMean: System.Numerics.Vector4.Zero, TrapVariance: System.Numerics.Vector4.Zero,
-                        CameraSpeed: 0f, ParameterVelocity: fold);
+                        TrapMean: new System.Numerics.Vector4(0.5f + 0.5f * tri, 0f, 0f, 0f),
+                        TrapVariance: new System.Numerics.Vector4(0.3f * (1f - tri), 0f, 0f, 0f),
+                        CameraSpeed: 1.5f * tri, ParameterVelocity: fold,
+                        Cells: cells, ZoomVelocity: 1.2f * MathF.Sin(phase));
                     float hue = (float)((t / Math.Max(0.5, sweepSeconds)) % 1.0);  // colour wheel sweep → CC24
                     controller.Update(frame, hue);
-                    if (controller.LastEventTime == t)   // an event fired this exact frame
+                    if (controller.LastEventTime == t)   // a gesture event fired this exact frame
                     {
                         events++;
                         Console.WriteLine($"    t={t:F2}  EVENT note: {controller.LastEvent}");
@@ -7093,15 +7115,24 @@ public static class Program
             Console.WriteLine($"  sources connected : {r.SourcesConnected}");
             Console.WriteLine($"  messages received : {r.Messages}  (CC {r.CcMessages} · noteOn {r.NoteOnMessages} · noteOff {r.NoteOffMessages} · undecoded {r.Undecoded})");
 
-            var ccNames = new Dictionary<int, string> { {20,"Size"},{21,"Proximity"},{22,"Complexity"},{23,"Expansion"},{24,"Colour"} };
-            foreach (var cc in new[] { 20, 21, 22, 23, 24 })
+            var ccNames = new Dictionary<int, string> {
+                {20,"Size"},{21,"Proximity"},{22,"Complexity"},{23,"Expansion"},{24,"Colour"},
+                {25,"Layering"},{26,"Haze"},{27,"Verticality"},{28,"Speed"},{29,"Dolly"},
+                {30,"PositionX"},{31,"PositionY"},{32,"Dispersion"},{33,"Structure"},{34,"Heterogeneity"} };
+            for (int cc = 20; cc <= 34; cc++)
                 if (r.LastCc[cc] >= 0)
-                    Console.WriteLine($"    CC{cc} {ccNames[cc],-10} last = {r.LastCc[cc]}");
+                    Console.WriteLine($"    CC{cc} {ccNames[cc],-13} last = {r.LastCc[cc]}");
 
-            var noteNames = new Dictionary<int, string> { {60,"Expand"},{62,"Contract"},{64,"Fold"},{65,"Simplify"} };
-            foreach (var note in new[] { 60, 62, 64, 65 })
+            var noteNames = new Dictionary<int, string> {
+                {60,"Expand"},{62,"Contract"},{64,"Fold"},{65,"Simplify"},
+                {67,"Enclose"},{69,"Emerge"},{71,"Shimmer"} };
+            foreach (var note in new[] { 60, 62, 64, 65, 67, 69, 71 })
                 if (r.NoteOnCounts[note] > 0)
                     Console.WriteLine($"    note {note} {noteNames[note],-9} fired {r.NoteOnCounts[note]}x");
+            int spatialNotes = 0, spatialFires = 0;
+            for (int n = 36; n <= 51; n++) if (r.NoteOnCounts[n] > 0) { spatialNotes++; spatialFires += r.NoteOnCounts[n]; }
+            if (spatialNotes > 0)
+                Console.WriteLine($"    spatial notes 36–51: {spatialNotes} distinct cells fired ({spatialFires} onsets)");
 
             bool ok = r.Messages > 0 && r.CcMessages > 0;
             Console.WriteLine(ok ? "midi-monitor PASS — external delivery confirmed"

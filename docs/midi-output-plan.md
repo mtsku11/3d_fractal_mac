@@ -41,6 +41,20 @@ Metal telemetry → FractalSonicFrame → MidiOutputController → MidiOutputSes
 | folding | `ParameterVelocity` spike | Fold note (velocity = magnitude) | **M2 done** |
 | simplifying | complexity falling | Simplify note (velocity = magnitude) | **M2 done** |
 | colour changing | palette base hue | CC24 | **M3 done** |
+| layering / depth | DepthVariance (relative) | CC25 | **M4 done** |
+| haze / filaments | StepMean | CC26 | **M4 done** |
+| verticality (floor↔ceiling) | NormalMean.y | CC27 (signed) | **M4 done** |
+| motion energy | CameraSpeed | CC28 | **M4 done** |
+| dolly in/out | ZoomVelocity | CC29 (signed) | **M4 done** |
+| on-screen position X | energy centroid X | CC30 (signed) | **M4 done** |
+| on-screen position Y | energy centroid Y | CC31 (signed) | **M4 done** |
+| concentrated ↔ spread | spatial dispersion | CC32 | **M4 done** |
+| feature / material | TrapMean.x | CC33 | **M4 done** |
+| heterogeneity | TrapVariance magnitude | CC34 | **M4 done** |
+| enter tunnel/cavern | HitRatio crossing high | note 67 Enclose | **M4 done** |
+| break into open space | HitRatio crossing low | note 69 Emerge | **M4 done** |
+| detail burst | Haze crossing high | note 71 Shimmer | **M4 done** |
+| object appears in a region | cell Energy onset | notes 36–51 (4×4) | **M4 done** |
 
 **Event detection (M2)** is derivative-based: rate-of-change + threshold with hysteresis, not raw
 values, so "fold" / "expand" fire as discrete musical events rather than constant noise.
@@ -66,6 +80,15 @@ values, so "fold" / "expand" fire as discrete musical events rather than constan
   arc** (hue is circular — 0.98→0.02 must not sweep backwards through the wheel), quantised, dedup'd.
   CC24 moves whenever the palette shifts (manual, keyframe, or audio-reactive). CLI `midi-smoke`
   rotates the wheel → CC24 0→29→60→92. Golden 5/5.
+- **M4 — expanded map (done, verified 2026-06-14).** 10 new continuous CCs (25–34: layering, haze,
+  verticality, speed, dolly, position X/Y, dispersion, structure, heterogeneity), 3 gesture notes
+  (67 Enclose / 69 Emerge / 71 Shimmer), and 16 spatial "object" notes (36–51 = the 4×4 cell grid,
+  fired on per-cell energy onset, velocity = energy). All on channel 1. Spatial aggregates (energy
+  centroid, dispersion) computed in `MidiOutputController` from `frame.Cells`; signed CCs centre at
+  64. Startup guard disarms already-lit cells so enabling MIDI mid-view doesn't blast a 16-note
+  chord (cf. the M2 fold guard). Normalisation gains are tunable fields (defaults set; real tuning is
+  against live flying). Null-safe for the 12 fractals without telemetry. Verified cross-process:
+  670 msgs / 0 undecoded, all 15 CCs + Enclose/Emerge/Shimmer + 6 distinct spatial cells.
 - **M3b — configurability (deferred by the user's "fixed defaults, editor later" choice).** An
   editable mapping panel (signal → CC/note/channel/range), modelled on the existing
   `AudioMappingPanel`. Not started — confirm before building.

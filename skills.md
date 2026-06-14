@@ -1001,7 +1001,11 @@ typedef (not pointer), marshal as `uint`. `MidiOutputController` maps `FractalSo
 CC20 size / CC21 proximity / CC22 complexity, smoothed + dedup'd (only send on quantised change).
 Wired in `FractalView.MidiEnabled` off the existing per-frame sonicFrame. M2 adds CC23 signed
 expansion-rate + Expand/Contract/Fold/Simplify note events (hysteresis + refractory + note gate);
-M3 adds CC24 = `Hue01(Palette.Base)` (slew along the SHORTEST arc — hue is circular).
+M3 adds CC24 = `Hue01(Palette.Base)` (slew along the SHORTEST arc — hue is circular). M4 adds 10
+CCs (25–34: layering/haze/verticality/speed/dolly/posX/posY/dispersion/structure/heterogeneity —
+spatial aggregates from `frame.Cells`, signed CCs centre @64), 3 gesture notes (67/69/71), and 16
+spatial "object" notes (36–51 = the 4×4 grid, energy-onset). **Startup guard:** disarm already-lit
+cells on first frame or enabling MIDI mid-view fires a 16-note chord (same hazard as the M2 fold guard).
 **Gotcha:** `MIDIReceived` delivery is async via MIDIServer — the loopback test sleeps ~150 ms after
 `MIDIPortConnectSource` or early sends drop.
 
