@@ -999,10 +999,24 @@ CoreMIDI.framework/CoreMIDI`): `MIDIClientCreate` → `MIDISourceCreate` → sen
 MIDIPacketList struct alignment is famously wrong if hand-marshalled. MIDIObjectRef = `UInt32`
 typedef (not pointer), marshal as `uint`. `MidiOutputController` maps `FractalSonicFrame` →
 CC20 size / CC21 proximity / CC22 complexity, smoothed + dedup'd (only send on quantised change).
-Wired in `FractalView.MidiEnabled` off the existing per-frame sonicFrame. Verify: `midi-smoke`
-(creates source, in-process loopback 4/4, CC sweep). **Gotcha:** `MIDIReceived` delivery is async
-via MIDIServer — the loopback test sleeps ~150 ms after `MIDIPortConnectSource` or early sends drop.
-Full plan + roadmap (M2 events, M3 colour/config) in `docs/midi-output-plan.md`.
+Wired in `FractalView.MidiEnabled` off the existing per-frame sonicFrame. M2 adds CC23 signed
+expansion-rate + Expand/Contract/Fold/Simplify note events (hysteresis + refractory + note gate);
+M3 adds CC24 = `Hue01(Palette.Base)` (slew along the SHORTEST arc — hue is circular).
+**Gotcha:** `MIDIReceived` delivery is async via MIDIServer — the loopback test sleeps ~150 ms after
+`MIDIPortConnectSource` or early sends drop.
+
+**Cross-process verification (`midi-monitor` / `MidiMonitorProbe`):** an independent receiver that
+enumerates + connects to all sources and decodes them. Three CoreMIDI traps learned here: (1)
+`MIDIGetNumberOfSources` returns 0 in a CLI tool until a **CFRunLoop is pumped** — call
+`CFRunLoopRunInMode("kCFRunLoopDefaultMode", 0.2, 0)` in the scan loop, not `Thread.Sleep`
+(modes compare by string, so a CFString of the literal name works). The in-process loopback dodges
+this by connecting to a known source ref without enumerating. (2) CoreMIDI **coalesces** rapid sends
+into ONE packet (length = 3·k, numPackets still 1) — walk the data buffer, don't assume 1 msg/packet.
+(3) Packet offset (8-aligned vs packed) is host-fragile — try both, keep the one with a valid leading
+status byte. (4) Two **sandboxed** CLI processes don't share a MIDIServer → 0 sources; run unsandboxed.
+Web monitor: `web/midi-monitor.html` (Web MIDI). Playwright/headless Chromium auto-DENIES the Web MIDI
+permission with no grant hook, so it can only be hand-tested or driven via synthetic `onMessage`.
+Full plan + roadmap in `docs/midi-output-plan.md`.
 
 ## Screen-space bloom (2026-06-13)
 

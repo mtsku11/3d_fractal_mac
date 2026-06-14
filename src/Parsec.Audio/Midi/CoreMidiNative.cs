@@ -22,6 +22,12 @@ internal static class CoreMidiNative
     [DllImport(CoreFoundation)]
     internal static extern void CFRelease(IntPtr cf);
 
+    // SInt32 CFRunLoopRunInMode(CFStringRef mode, CFTimeInterval seconds, Boolean returnAfterSourceHandled)
+    // Needed in command-line tools: without a pumped run loop the MIDIClient never finishes
+    // connecting to the MIDIServer, so cross-process source enumeration returns nothing.
+    [DllImport(CoreFoundation)]
+    internal static extern int CFRunLoopRunInMode(IntPtr mode, double seconds, byte returnAfterSourceHandled);
+
     // MIDIClientCreate(CFStringRef name, MIDINotifyProc, void* refCon, MIDIClientRef* outClient)
     [DllImport(CoreMidi)]
     internal static extern int MIDIClientCreate(IntPtr name, IntPtr notifyProc, IntPtr notifyRefCon, out uint outClient);
@@ -61,4 +67,12 @@ internal static class CoreMidiNative
 
     [DllImport(CoreMidi)]
     internal static extern int MIDIPortDispose(uint port);
+
+    // ItemCount MIDIGetNumberOfSources(void)  — ItemCount is unsigned long (64-bit).
+    [DllImport(CoreMidi)]
+    internal static extern nuint MIDIGetNumberOfSources();
+
+    // MIDIEndpointRef MIDIGetSource(ItemCount sourceIndex0)
+    [DllImport(CoreMidi)]
+    internal static extern uint MIDIGetSource(nuint sourceIndex0);
 }

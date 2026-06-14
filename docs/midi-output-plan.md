@@ -72,6 +72,25 @@ values, so "fold" / "expand" fire as discrete musical events rather than constan
 - **Later.** MPE / pitch-bend for expressive per-cell voices; MIDI clock / note quantisation to a
   musical grid; per-cell spatial mapping to channels.
 
+## Testing the output
+
+Three independent ways to confirm the geometry → MIDI stream, in increasing realism:
+
+1. **`parsec midi-smoke [sweepSeconds]`** — publishes "Parsec", runs an in-process loopback
+   (proves the source is published and the MIDIServer delivers), then sweeps CC20–24 + fires the
+   four event notes off a synthetic triangle/fold drive.
+2. **`parsec midi-monitor [seconds]`** — an *independent* CoreMIDI receiver (separate client) that
+   connects to every published source and decodes the channel-voice messages. Run it in one
+   terminal and `midi-smoke` (or the app with MIDI OUT on) in another to prove **cross-process**
+   delivery through the system MIDIServer — the same path Ableton uses. Verified 2026-06-14:
+   465 messages, 0 undecoded, all five CCs + Fold×5/Simplify×1.
+3. **`web/midi-monitor.html`** — a Web MIDI page (Chrome/Edge) with live CC bars + event pads.
+   Serve it (`python3 -m http.server` from `web/`), open in Chrome, **Allow** the MIDI prompt,
+   then enable MIDI OUT in Parsec. Uses the identical OS MIDI path a DAW would. (Automation note:
+   Playwright/headless Chromium auto-*denies* the Web MIDI permission and exposes no grant hook,
+   so the page can only be driven by hand or with synthetic `onMessage` injection — its
+   message-handling/rendering was verified that way; real delivery is proven by #2.)
+
 ## Design notes / gotchas
 
 - MIDIObjectRef (client/source/port) is a `UInt32` typedef, **not** a pointer — marshal as `uint`.
@@ -81,3 +100,15 @@ values, so "fold" / "expand" fire as discrete musical events rather than constan
   But if audio-reactive is modulating params, the emitted MIDI reflects audio-driven geometry — keep
   the two as separate modes (don't run audio-reactive + MIDI-out expecting clean geometry).
 - Rate-limit: dedup on quantised value is the primary flood guard; telemetry is already ~30 Hz.
+- **Cross-process enumeration needs a pumped run loop.** In a command-line tool, `MIDIGetNumberOfSources`
+  returns 0 until the client's connection to the MIDIServer completes — which only happens when a
+  CFRunLoop is serviced. `MidiMonitorProbe` calls `CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.2, …)`
+  in its scan loop instead of `Thread.Sleep`. (The in-process loopback in `MidiOutputSession` avoids
+  this because it connects to a *known* source ref and never enumerates.) Run-loop modes are compared
+  by string, so a `CFString` holding the literal "kCFRunLoopDefaultMode" substitutes for the constant.
+- **CoreMIDI coalesces messages.** Several rapid sends arrive as ONE packet whose data buffer holds
+  many 3-byte messages (length = 3·k), with `numPackets` still 1 — a decoder must walk the buffer,
+  not assume one message per packet. Packet layout offset (8-byte-aligned vs packed) is host-fragile;
+  `MidiMonitorProbe` tries both and keeps whichever yields a valid leading status byte.
+- **The sandbox isolates the MIDIServer.** Two separately-sandboxed CLI processes do not share a
+  MIDIServer, so cross-process tests show 0 sources; run sender and monitor outside the sandbox.

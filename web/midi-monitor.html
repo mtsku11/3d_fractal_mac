@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Parsec MIDI Monitor</title>
+<style>
+  :root { color-scheme: dark; }
+  body { margin: 0; font: 14px/1.4 -apple-system, "SF Pro Text", system-ui, sans-serif;
+         background: #0d0f14; color: #d7dce5; padding: 22px 26px; }
+  h1 { font-size: 17px; font-weight: 600; margin: 0 0 4px; letter-spacing: .3px; }
+  .sub { color: #7d8696; font-size: 12px; margin-bottom: 18px; }
+  #status { display: inline-block; padding: 3px 9px; border-radius: 5px; font-size: 12px;
+            background: #2a2f3a; color: #aab3c2; }
+  #status.ok  { background: #143b22; color: #7fe0a0; }
+  #status.err { background: #3b1414; color: #f08a8a; }
+  .cc { display: grid; grid-template-columns: 150px 1fr 48px; align-items: center;
+        gap: 12px; margin: 7px 0; }
+  .cc .name { color: #c8d0dd; }
+  .cc .name small { color: #6f7889; }
+  .bar { position: relative; height: 16px; background: #1a1e27; border-radius: 4px; overflow: hidden; }
+  .bar > i { position: absolute; left: 0; top: 0; bottom: 0; width: 0%;
+             background: linear-gradient(90deg, #2f6df0, #56b0ff); transition: width .04s linear; }
+  .bar.signed > i { background: linear-gradient(90deg, #f0822f, #ffcf56); }
+  .bar .center { position: absolute; left: 50%; top: 0; bottom: 0; width: 1px; background: #4a5364; }
+  .val { text-align: right; font-variant-numeric: tabular-nums; color: #9fa8b8; }
+  h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .8px; color: #6f7889;
+       margin: 24px 0 8px; }
+  .pads { display: flex; gap: 10px; flex-wrap: wrap; }
+  .pad { flex: 1 1 120px; text-align: center; padding: 12px 8px; border-radius: 8px;
+         background: #161a22; border: 1px solid #232936; transition: background .05s, border-color .05s; }
+  .pad.hit { background: #2b3550; border-color: #56b0ff; }
+  .pad .lbl { font-weight: 600; color: #d7dce5; }
+  .pad .meta { font-size: 11px; color: #6f7889; margin-top: 3px; }
+  #log { margin-top: 18px; height: 150px; overflow: auto; background: #0a0c10;
+         border: 1px solid #1a1e27; border-radius: 6px; padding: 8px 10px;
+         font: 11px/1.5 "SF Mono", ui-monospace, monospace; color: #8a93a4; }
+  .counter { float: right; color: #6f7889; font-size: 12px; }
+</style>
+</head>
+<body>
+  <h1>Parsec MIDI Monitor <span class="counter" id="counter">0 msgs</span></h1>
+  <div class="sub">Web MIDI receiver — the same path Ableton uses. Enable <b>MIDI OUT</b> in Parsec (or run <code>parsec midi-smoke</code>), then watch below.</div>
+  <div id="status">requesting MIDI access…</div>
+
+  <h2>Continuous controls</h2>
+  <div id="ccs"></div>
+
+  <h2>Event notes</h2>
+  <div class="pads" id="pads"></div>
+
+  <h2>Raw log</h2>
+  <div id="log"></div>
+
+<script>
+const CCS = [
+  { cc: 20, name: "Size",       sub: "HitRatio" },
+  { cc: 21, name: "Proximity",  sub: "exp(-depth)" },
+  { cc: 22, name: "Complexity", sub: "normal var." },
+  { cc: 23, name: "Expansion",  sub: "d(size)/dt", signed: true },
+  { cc: 24, name: "Colour",     sub: "palette hue" },
+];
+const NOTES = [
+  { note: 60, lbl: "Expand"   },
+  { note: 62, lbl: "Contract" },
+  { note: 64, lbl: "Fold"     },
+  { note: 65, lbl: "Simplify" },
+];
+
+const ccsEl = document.getElementById("ccs");
+const barById = {};
+const valById = {};
+for (const c of CCS) {
+  const row = document.createElement("div"); row.className = "cc";
+  row.innerHTML = `<div class="name">CC${c.cc} ${c.name} <small>${c.sub}</small></div>
+    <div class="bar ${c.signed ? "signed" : ""}"><i></i>${c.signed ? '<span class="center"></span>' : ""}</div>
+    <div class="val">–</div>`;
+  ccsEl.appendChild(row);
+  barById[c.cc] = row.querySelector("i");
+  valById[c.cc] = row.querySelector(".val");
+}
+
+const padsEl = document.getElementById("pads");
+const padByNote = {};
+const countByNote = {};
+for (const n of NOTES) {
+  const pad = document.createElement("div"); pad.className = "pad";
+  pad.innerHTML = `<div class="lbl">${n.lbl}</div><div class="meta">note ${n.note} · ×0</div>`;
+  padsEl.appendChild(pad);
+  padByNote[n.note] = pad; countByNote[n.note] = 0;
+}
+
+const logEl = document.getElementById("log");
+const counterEl = document.getElementById("counter");
+let total = 0;
+function log(s) {
+  total++; counterEl.textContent = total + " msgs";
+  const line = document.createElement("div"); line.textContent = s;
+  logEl.appendChild(line);
+  while (logEl.childElementCount > 200) logEl.removeChild(logEl.firstChild);
+  logEl.scrollTop = logEl.scrollHeight;
+}
+
+function setStatus(text, cls) {
+  const el = document.getElementById("status");
+  el.textContent = text; el.className = cls || "";
+}
+
+function onMessage(e) {
+  const [status, d1, d2] = e.data;
+  const type = status & 0xF0, ch = (status & 0x0F) + 1;
+  if (type === 0xB0) {
+    if (barById[d1]) {
+      barById[d1].style.width = (d2 / 127 * 100).toFixed(1) + "%";
+      valById[d1].textContent = d2;
+    }
+    log(`CC ${d1} = ${d2}  (ch ${ch})`);
+  } else if (type === 0x90 && d2 > 0) {
+    const pad = padByNote[d1];
+    if (pad) {
+      countByNote[d1]++;
+      pad.querySelector(".meta").textContent = `note ${d1} · ×${countByNote[d1]}`;
+      pad.classList.add("hit");
+      setTimeout(() => pad.classList.remove("hit"), 220);
+    }
+    log(`NOTE ON  ${d1} vel ${d2}  (ch ${ch})`);
+  } else if (type === 0x80 || (type === 0x90 && d2 === 0)) {
+    log(`note off ${d1}  (ch ${ch})`);
+  }
+}
+
+function bindAll(access) {
+  for (const input of access.inputs.values()) input.onmidimessage = onMessage;
+  const names = [...access.inputs.values()].map(i => i.name).join(", ") || "none";
+  const hasParsec = [...access.inputs.values()].some(i => /parsec/i.test(i.name));
+  setStatus(`listening · inputs: ${names}`, hasParsec ? "ok" : "");
+}
+
+if (!navigator.requestMIDIAccess) {
+  setStatus("Web MIDI not supported — use Chrome or Edge.", "err");
+} else {
+  navigator.requestMIDIAccess({ sysex: false }).then(access => {
+    bindAll(access);
+    access.onstatechange = () => bindAll(access);  // pick up 'Parsec' when it appears
+  }, err => {
+    setStatus("MIDI access denied: " + err, "err");
+  });
+}
+</script>
+</body>
+</html>

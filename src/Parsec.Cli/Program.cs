@@ -7075,6 +7075,40 @@ public static class Program
             catch (Exception ex) { Console.Error.WriteLine($"midi-smoke FAILED: {ex.Message}\n{ex.StackTrace}"); return 1; }
         }
 
+        // midi-monitor [seconds]
+        // Independent CoreMIDI receiver (separate client) that connects to every published
+        // source and decodes the channel-voice messages it receives. Run this alongside
+        // `midi-smoke` (or the app with MIDI OUT on) in another terminal to prove that MIDI
+        // is delivered cross-process through the MIDIServer — the same path Ableton uses.
+        if (args[0] == "midi-monitor")
+        {
+            if (!OperatingSystem.IsMacOS()) { Console.Error.WriteLine("midi-monitor requires macOS."); return 1; }
+            int secs = args.Length > 1 && int.TryParse(args[1], out var s) ? s : 12;
+            Console.WriteLine($"midi-monitor — listening on all MIDI sources for {secs}s …");
+            Console.WriteLine("  (start 'parsec midi-smoke' in another terminal, or enable MIDI OUT in the app)");
+
+            var r = Parsec.Audio.Midi.MidiMonitorProbe.Run(secs);
+            if (r.Error != null) { Console.Error.WriteLine($"  monitor setup failed: {r.Error}"); return 1; }
+
+            Console.WriteLine($"  sources connected : {r.SourcesConnected}");
+            Console.WriteLine($"  messages received : {r.Messages}  (CC {r.CcMessages} · noteOn {r.NoteOnMessages} · noteOff {r.NoteOffMessages} · undecoded {r.Undecoded})");
+
+            var ccNames = new Dictionary<int, string> { {20,"Size"},{21,"Proximity"},{22,"Complexity"},{23,"Expansion"},{24,"Colour"} };
+            foreach (var cc in new[] { 20, 21, 22, 23, 24 })
+                if (r.LastCc[cc] >= 0)
+                    Console.WriteLine($"    CC{cc} {ccNames[cc],-10} last = {r.LastCc[cc]}");
+
+            var noteNames = new Dictionary<int, string> { {60,"Expand"},{62,"Contract"},{64,"Fold"},{65,"Simplify"} };
+            foreach (var note in new[] { 60, 62, 64, 65 })
+                if (r.NoteOnCounts[note] > 0)
+                    Console.WriteLine($"    note {note} {noteNames[note],-9} fired {r.NoteOnCounts[note]}x");
+
+            bool ok = r.Messages > 0 && r.CcMessages > 0;
+            Console.WriteLine(ok ? "midi-monitor PASS — external delivery confirmed"
+                                 : "midi-monitor: no messages received (was a sender running?)");
+            return ok ? 0 : 1;
+        }
+
         // metal-bloom-smoke [intensity] [threshold] [outDir]
         // A/B render of a frame-filling Mandelbox with screen-space bloom off vs on.
         // Bloom is the case march-glow fails: a busy close-up where bright detail should
@@ -7382,6 +7416,7 @@ public static class Program
         Console.WriteLine("  parsec metal-glow-smoke [strength] [falloff] [outDir]  Mandelbox step-glow A/B render (macOS only)");
         Console.WriteLine("  parsec metal-bloom-smoke [intensity] [threshold] [outDir]  Mandelbox screen-space bloom A/B render (macOS only)");
         Console.WriteLine("  parsec midi-smoke [sweepSeconds]     Publish virtual MIDI source 'Parsec' + loopback test + CC sweep (macOS only)");
+        Console.WriteLine("  parsec midi-monitor [seconds]        Independent receiver: decode MIDI from any source, cross-process (macOS only)");
         Console.WriteLine("  parsec m7a-check              JI/temperament quantizer self-check");
         Console.WriteLine("  parsec help           Show this help");
         Console.WriteLine();
