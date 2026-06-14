@@ -156,10 +156,10 @@ palette-hue fallback for the CLI). (3, done) `MidiResponsivenessSlider` → `Fra
 → `MidiOutputController.Smoothing`. (2a, done) full-res energy centroid/spread from the 64×36 grid
 (`TelemetryReduction.FullResCentroid`) → `CentroidX/Y/Dispersion` on stats+frame → CC30/31/32 (4×4
 fallback kept; sonification grid untouched). (4, in progress) trimmed MIDI-only telemetry kernels for
-the remaining 12 fractals — **RotBox done** (template `rotbox_telemetry.metal`; validator
-`metal-midi-telemetry`); 11 remaining (Hybrid, QuaternionJulia, Bicomplex, Phoenix, Biomorph, Mosely,
-PseudoKleinian4D, RiemannSphere, Mandalay, Anisotropic, OrbitHybrid). Full spec, the 5-step per-fractal
-pattern, and acceptance in `docs/midi-output-plan.md`.
+the remaining 12 fractals — **RotBox + QuaternionJulia done** (template `rotbox_telemetry.metal`;
+validator `metal-midi-telemetry`); coverage 10/20; 10 remaining (Hybrid, Bicomplex, Phoenix, Biomorph,
+Mosely, PseudoKleinian4D, RiemannSphere, Mandalay, Anisotropic, OrbitHybrid). Full spec, the 5-step
+per-fractal pattern, and acceptance in `docs/midi-output-plan.md`.
 
 See `skills.md` for Metal porting recipes and gotchas. See `docs/macos-3d-only-build-plan.md` for the macOS render track, `docs/fractal-sonification-plan.md` for the sonification feature, and `docs/midi-output-plan.md` for the MIDI output feature.
 

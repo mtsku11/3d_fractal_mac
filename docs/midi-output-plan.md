@@ -216,11 +216,15 @@ pass; `metal-d-telemetry`-style validation per batch.
 4. Switch arm in `FractalView.RunActiveTelemetryPass`.
 5. A line in the `metal-midi-telemetry` CLI validator; run it outside the sandbox on Metal hardware.
 
-**Batch 1 (done, verified 2026-06-14):** **RotBox** — `metal-midi-telemetry`: hitFar 0.019 →
-hitClose 0.308, 16 cells, full-res centroid finite, PASS. Coverage now **9 of 20**.
-**Remaining 11:** Hybrid, QuaternionJulia, Bicomplex, Phoenix, Biomorph, Mosely, PseudoKleinian4D,
-RiemannSphere, Mandalay, Anisotropic, OrbitHybrid. (Attractor has no Metal renderer — out of scope.)
-All have dedicated `Metal*Renderer` classes, so each is the 5-step pattern above. Do a few per pass.
+**Batches done (verified 2026-06-14 via `metal-midi-telemetry`):**
+- Batch 1: **RotBox** — hitFar 0.019 → hitClose 0.308, 16 cells, centroid finite, PASS.
+- Batch 2: **QuaternionJulia** — hitFar 0.006 → hitClose 0.077, 16 cells, centroid finite, PASS.
+
+Coverage now **10 of 20**. **Remaining 10:** Hybrid, Bicomplex, Phoenix, Biomorph, Mosely,
+PseudoKleinian4D, RiemannSphere, Mandalay, Anisotropic, OrbitHybrid. (Attractor has no Metal
+renderer — out of scope.) All have dedicated `Metal*Renderer` classes, so each is the 5-step
+pattern above. Do a few per pass; add a line to `metal-midi-telemetry` and run it on Metal hardware
+outside the sandbox per batch.
 
 ### Recommended sequence
 
