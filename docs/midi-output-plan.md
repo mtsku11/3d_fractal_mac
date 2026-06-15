@@ -251,6 +251,19 @@ without telemetry.
 → then optionally 2b (finer region notes) and the deferred M3b mapping editor. Each lands as its own
 verified, committed increment.
 
+## Audio/video showcase (2026-06-15)
+
+`parsec midi-showcase [duration] [out.mp4] [w] [h]` renders a Mandelbulb power-morph flythrough,
+**captures the exact MIDI the controller emits** (via new `MidiOutputSession.OnControlChange/OnNoteOn/
+OnNoteOff` observer hooks), plays it through `MidiInstrumentSynth` — an in-repo **8-voice multitimbral
+synth**, each instrument driven by a distinct slice of the map (1 sub bass ← Size/Proximity · 2 pad ←
+Layering/Complexity · 3 lead ← PositionX/Brightness · 4 choir ← Colour/Saturation · 5 cello ←
+Proximity/Dolly · 6 glass bells ← fine 8×6 region notes · 7 marimba ← 4×4 region notes · 8 perc ←
+Fold/Expand/Contract + Shimmer gestures) — and muxes audio+video to an mp4 with ffmpeg. Verified at
+1280×720/20s: 600 frames in ~48 s, 4789 MIDI messages captured, mix peak −2 dBFS, H.264+AAC. This is
+the most faithful "external instruments" test short of a real DAW (the web monitor only visualises;
+headless Chrome can't be granted Web MIDI). No external soundfont needed.
+
 ## Testing the output
 
 Three independent ways to confirm the geometry → MIDI stream, in increasing realism:
