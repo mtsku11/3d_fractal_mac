@@ -21,11 +21,15 @@ public sealed class FluidParticleField
 
     public readonly Particle[] Particles;
     public float SpawnInner = 1.1f, SpawnOuter = 3.0f, KillRadius = 4.5f;
-    public float RepelStrength = 2.2f, RepelBand = 0.9f;
-    public float SwirlStrength = 1.1f;
-    public float CurlStrength = 1.4f, CurlScale = 1.3f, CurlFlow = 0.25f;
-    public float AdvectStrength = 6.0f;
-    public float Drag = 0.94f, MaxSpeed = 3.5f, LifeSeconds = 9f;
+    public float RepelStrength = 1.3f, RepelBand = 0.7f;
+    public float SwirlStrength = 0.30f;
+    public float CurlStrength = 0.40f, CurlScale = 1.0f, CurlFlow = 0.12f;
+    public float AdvectStrength = 7.0f;
+    // Deep-sea: forces fall off sharply with distance from the surface, so particles far out are
+    // nearly static (held by "pressure") while ones hugging the fractal move much more. CurlFloor is
+    // the faint residual drift the far field keeps. High drag + low MaxSpeed = viscous, settled water.
+    public float InfluenceDist = 0.55f, CurlFloor = 0.05f;
+    public float Drag = 0.86f, MaxSpeed = 1.3f, LifeSeconds = 14f;
 
     private readonly Random _rng;
 
@@ -43,7 +47,7 @@ public sealed class FluidParticleField
         float r = MathF.Cbrt(Lerp(SpawnInner * SpawnInner * SpawnInner,
                                   SpawnOuter * SpawnOuter * SpawnOuter, (float)_rng.NextDouble()));
         p.Pos = dir * r;
-        p.Vel = RandUnit() * 0.1f;
+        p.Vel = RandUnit() * 0.02f;
         p.Life = (initial ? (float)_rng.NextDouble() : 1f) * LifeSeconds;
     }
 
@@ -70,19 +74,25 @@ public sealed class FluidParticleField
             float gl = g.Length();
             Vector3 grad = gl > 1e-5f ? g / gl : RandUnitDet(i);
 
+            // Proximity weight: 1 at the surface → ~0 far away. The fractal only stirs the water
+            // near it; out in the deep the particles are held nearly static by "pressure".
+            float prox = MathF.Exp(-MathF.Max(0f, d) / InfluenceDist);
+
             // 1. Surface repulsion — keep particles out of the solid, in the "water" band.
             float band = MathF.Max(0f, (RepelBand - d) / RepelBand);
             Vector3 repel = grad * (band * band) * RepelStrength;
 
-            // 2. Tangential swirl — drift around the shape, stronger near the surface.
-            Vector3 swirl = Vector3.Cross(grad, Vector3.UnitY) * SwirlStrength * MathF.Exp(-MathF.Max(0f, d) * 0.7f);
+            // 2. Tangential swirl — drift around the shape, near-field only.
+            Vector3 swirl = Vector3.Cross(grad, Vector3.UnitY) * SwirlStrength * prox;
 
-            // 3. Curl noise — organic incompressible flow.
-            Vector3 curl = CurlNoise(pos * CurlScale + new Vector3(0f, time * CurlFlow, 0f)) * CurlStrength;
+            // 3. Curl noise — organic incompressible flow; mostly near the fractal, faint floor far out.
+            Vector3 curl = CurlNoise(pos * CurlScale + new Vector3(0f, time * CurlFlow, 0f))
+                           * CurlStrength * (CurlFloor + (1f - CurlFloor) * prox);
 
-            // 4. Motion advection — surface encroaching on the particle (∂DE/∂t < 0) shoves it out.
+            // 4. Motion advection — when the fractal morphs/expands (∂DE/∂t < 0) it shoves nearby
+            //    water outward. Gated by proximity so only particles near the surface are driven.
             float ddt = (d - dePrev(pos)) / dt;
-            Vector3 advect = grad * MathF.Max(0f, -ddt) * AdvectStrength;
+            Vector3 advect = grad * MathF.Max(0f, -ddt) * AdvectStrength * prox;
 
             Vector3 acc = repel + swirl + curl + advect;
             p.Vel = p.Vel * Drag + acc * dt;
