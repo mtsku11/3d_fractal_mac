@@ -108,6 +108,7 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
                 _midiSession = new Parsec.Audio.Midi.MidiOutputSession("Parsec");
                 _midiController = new Parsec.Audio.Midi.MidiOutputController(_midiSession);
                 _midiController.Smoothing = _midiSmoothing;
+                _midiController.FineRegionsEnabled = _midiFineRegions;
             }
             _midiEnabled = value && (_midiSession?.IsAvailable ?? false);
             _midiController?.Reset();
@@ -115,6 +116,7 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
     }
 
     private float _midiSmoothing = 0.25f;
+    private bool _midiFineRegions = true;
 
     /// <summary>MIDI responsiveness: one-pole smoothing factor (0.05 = smooth/laggy →
     /// 1.0 = instant/jittery). Applied live to the controller when present.</summary>
@@ -125,6 +127,18 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
         {
             _midiSmoothing = Math.Clamp(value, 0.05f, 1f);
             if (_midiController != null) _midiController.Smoothing = _midiSmoothing;
+        }
+    }
+
+    /// <summary>Improvement 2b: emit the finer 8×6 region-note grid on MIDI channel 2
+    /// (parallel to the 4×4 spatial notes on channel 1).</summary>
+    public bool MidiFineRegions
+    {
+        get => _midiFineRegions;
+        set
+        {
+            _midiFineRegions = value;
+            if (_midiController != null) _midiController.FineRegionsEnabled = value;
         }
     }
 

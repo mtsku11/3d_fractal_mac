@@ -537,10 +537,12 @@ public sealed class MetalMandelboxRenderer : IThreeDimensionalRenderBackend
 
         var (fcx, fcy, fdisp) = TelemetryReduction.FullResCentroid(
             gridW, gridH, maxDist, i => (cells[i].Hit, cells[i].Depth));
+        var midiGrid = TelemetryReduction.RegionEnergyGrid(
+            gridW, gridH, maxDist, 8, 6, i => (cells[i].Hit, cells[i].Depth));
 
         return new FractalGeometryStats(hitRatio, meanDepth, depthVar, stepMean, stepP90,
             normalMean, normalVar, trapMean, trapVar, Cells: spatialCells,
-            CentroidX: fcx, CentroidY: fcy, Dispersion: fdisp);
+            CentroidX: fcx, CentroidY: fcy, Dispersion: fdisp, MidiRegionEnergy: midiGrid);
     }
 
     // Partition the 64×36 telemetry grid into a 4×4 array of spatial cells.

@@ -34,4 +34,8 @@ public readonly record struct FractalGeometryStats(
     // 0,0 = centred / no hits.
     float CentroidX = 0f,
     float CentroidY = 0f,
-    float Dispersion = 0f);
+    float Dispersion = 0f,
+    // Improvement 2b: finer (8×6 = 48) energy grid for MIDI region notes only — row-major
+    // top→bottom, left→right; per-tile energy in [0,1]. Null when no telemetry ran.
+    // The sonification 4×4 Cells grid is unaffected.
+    float[]? MidiRegionEnergy = null);

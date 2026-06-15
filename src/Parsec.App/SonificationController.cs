@@ -71,7 +71,8 @@ public sealed class SonificationController
             LatticeRatio:        latticeRatio,
             CentroidX:           telemetry?.CentroidX  ?? 0f,
             CentroidY:           telemetry?.CentroidY  ?? 0f,
-            Dispersion:          telemetry?.Dispersion ?? 0f);
+            Dispersion:          telemetry?.Dispersion ?? 0f,
+            MidiRegionEnergy:    telemetry?.MidiRegionEnergy);
 
         Volatile.Write(ref _latestFrame, frame);
         return frame;

@@ -23,6 +23,8 @@ namespace Parsec.Audio.Midi;
 ///   M2  60 Expand · 62 Contract · 64 Fold · 65 Simplify
 ///   M4  67 Enclose (enter tunnel/cavern) · 69 Emerge (open space) · 71 Shimmer (detail burst)
 ///   M4  36–51  spatial "object" notes — one per 4×4 cell; fires when that screen region lights up.
+///   I2b 36–83  finer 8×6=48 region notes on <see cref="SpatialChannel"/> (default ch 2) — parallel
+///              to the 4×4, fires per-cell on energy onset; off by toggling <see cref="FineRegionsEnabled"/>.
 /// </summary>
 public sealed class MidiOutputController
 {
@@ -65,6 +67,19 @@ public sealed class MidiOutputController
     public int ShimmerNote { get; set; } = 71;
     /// <summary>Base note for the 16 spatial cells (cell i → SpatialNoteBase + i).</summary>
     public int SpatialNoteBase { get; set; } = 36;
+
+    // Improvement 2b: finer MIDI-only region grid (8×6 = 48) on its OWN channel so its
+    // notes (FineRegionNoteBase + 0..47) never collide with the channel-1 gesture/4×4 notes.
+    // Must match the producer grid in TelemetryReduction.RegionEnergyGrid (8×6).
+    public const int FineTilesX = 8, FineTilesY = 6;
+    private const int NFineCells = FineTilesX * FineTilesY; // 48
+    /// <summary>Channel (0–15) for the finer region grid. Default 1 = MIDI channel 2.</summary>
+    public int SpatialChannel { get; set; } = 1;
+    public int FineRegionNoteBase { get; set; } = 36;
+    public bool FineRegionsEnabled { get; set; } = true;
+    public float FineRegionHigh { get; set; } = 0.14f;
+    public float FineRegionLow { get; set; } = 0.06f;
+    public float FineRegionGate { get; set; } = 0.30f;
 
     public float ExpansionFullScaleRate { get; set; } = 1.0f;
     public float NoteGateSec { get; set; } = 0.18f;
@@ -127,9 +142,18 @@ public sealed class MidiOutputController
     private bool _spatialInit;
     private int _activeRegions;
 
+    // Spatial fine-grid (2b) arm/fire state (48 cells, separate channel).
+    private readonly bool[] _fineArmed = new bool[NFineCells];
+    private readonly double[] _fineFired = new double[NFineCells];
+    private bool _fineInit;
+    private int _activeFine;
+
     // Notes currently sounding, with the time their Note Off is due.
     private readonly Dictionary<int, double> _noteOffDue = new();
     private readonly List<int> _offScratch = new();
+    // Separate book-keeping for the fine grid (its own channel).
+    private readonly Dictionary<int, double> _fineNoteOffDue = new();
+    private readonly List<int> _fineOffScratch = new();
 
     public string Monitor { get; private set; } = "size – · prox – · cplx –";
     public string LastEvent { get; private set; } = "";
@@ -306,8 +330,33 @@ public sealed class MidiOutputController
             _activeRegions = active;
         }
 
+        // --- Improvement 2b: finer region grid on its own channel (parallel to the 4×4) ---
+        var fine = f.MidiRegionEnergy;
+        if (FineRegionsEnabled && fine != null && fine.Length == NFineCells)
+        {
+            ReleaseDueNotesCh(now, _fineNoteOffDue, SpatialChannel);
+            if (!_fineInit)
+            {
+                // Startup guard: arm only cells currently quiet so enabling MIDI mid-view
+                // doesn't blast a 48-note chord (cf. the 4×4 guard).
+                for (int i = 0; i < NFineCells; i++) _fineArmed[i] = fine[i] <= FineRegionLow;
+                _fineInit = true;
+            }
+            int activeFine = 0;
+            for (int i = 0; i < NFineCells; i++)
+            {
+                float e = MathF.Max(0f, fine[i]);
+                if (e >= FineRegionHigh) activeFine++;
+                DetectRegionNote(now, SpatialChannel, FineRegionNoteBase + i,
+                    e >= FineRegionHigh, e <= FineRegionLow,
+                    e / MathF.Max(1e-3f, FineRegionHigh * 4f),
+                    ref _fineArmed[i], ref _fineFired[i], FineRegionGate, _fineNoteOffDue);
+            }
+            _activeFine = activeFine;
+        }
+
         Monitor = $"size {_lastSize,3} · prox {_lastProx,3} · cplx {_lastComplex,3} · exp {_lastExpansion,3} · col {_lastColor,3}"
-                + $" · pos {_lastCc[5],3},{_lastCc[6],3} · spd {_lastCc[3],3} · obj {_activeRegions,2}";
+                + $" · pos {_lastCc[5],3},{_lastCc[6],3} · spd {_lastCc[3],3} · obj {_activeRegions,2} · fine {_activeFine,2}";
     }
 
     public void Reset()
@@ -325,6 +374,11 @@ public sealed class MidiOutputController
         for (int i = 0; i < NCells; i++) { _regionArmed[i] = true; _regionFired[i] = 0; }
         foreach (var note in _noteOffDue.Keys) _midi.SendNoteOff(Channel, note);
         _noteOffDue.Clear();
+        // Fine grid (2b)
+        _fineInit = false; _activeFine = 0;
+        for (int i = 0; i < NFineCells; i++) { _fineArmed[i] = true; _fineFired[i] = 0; }
+        foreach (var note in _fineNoteOffDue.Keys) _midi.SendNoteOff(SpatialChannel, note);
+        _fineNoteOffDue.Clear();
         LastEvent = ""; LastEventTime = double.NegativeInfinity;
     }
 
@@ -354,6 +408,38 @@ public sealed class MidiOutputController
         else if (under)
         {
             armed = true;
+        }
+    }
+
+    // Improvement 2b: region-note onset on an arbitrary channel with its own note-off book.
+    private void DetectRegionNote(double now, int channel, int note, bool over, bool under,
+        float magnitude01, ref bool armed, ref double lastFire, float gate, Dictionary<int, double> offDue)
+    {
+        if (over && armed && (now - lastFire) >= Refractory)
+        {
+            int vel = 1 + (int)MathF.Round(Clamp01(magnitude01) * 126f);
+            if (offDue.ContainsKey(note)) _midi.SendNoteOff(channel, note);
+            _midi.SendNoteOn(channel, note, vel);
+            offDue[note] = now + gate;
+            armed = false;
+            lastFire = now;
+        }
+        else if (under)
+        {
+            armed = true;
+        }
+    }
+
+    private void ReleaseDueNotesCh(double now, Dictionary<int, double> offDue, int channel)
+    {
+        if (offDue.Count == 0) return;
+        _fineOffScratch.Clear();
+        foreach (var kv in offDue)
+            if (now >= kv.Value) _fineOffScratch.Add(kv.Key);
+        foreach (var note in _fineOffScratch)
+        {
+            _midi.SendNoteOff(channel, note);
+            offDue.Remove(note);
         }
     }
 

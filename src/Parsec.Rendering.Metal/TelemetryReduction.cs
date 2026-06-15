@@ -111,10 +111,11 @@ internal static class TelemetryReduction
                                       (float)(tvzS / hits), (float)(tvwS / hits));
 
         var (fcx, fcy, fdisp) = FullResCentroid(gridW, gridH, maxDist, i => (cells[i].Hit, cells[i].Depth));
+        var midiGrid = RegionEnergyGrid(gridW, gridH, maxDist, 8, 6, i => (cells[i].Hit, cells[i].Depth));
 
         return new FractalGeometryStats(hitRatio, meanDepth, depthVar, stepMean, stepP90,
             normalMean, normalVar, trapMean, trapVar, Cells: spatialCells,
-            CentroidX: fcx, CentroidY: fcy, Dispersion: fdisp);
+            CentroidX: fcx, CentroidY: fcy, Dispersion: fdisp, MidiRegionEnergy: midiGrid);
     }
 
     /// <summary>
@@ -155,6 +156,35 @@ internal static class TelemetryReduction
         }
         float disp = MathF.Min(1f, MathF.Sqrt((float)(vs / ew)) / 1.414f);
         return (cx, cy, disp);
+    }
+
+    /// <summary>
+    /// Improvement 2b: a finer-than-4×4 energy grid for MIDI region notes only (the sonification
+    /// 4×4 grid is left untouched). Partitions the raw telemetry grid into tilesX×tilesY tiles and
+    /// returns per-tile energy = mean(hit·max(0,1−depth/maxDist)), row-major top→bottom, left→right.
+    /// Accessor-based so it works for any per-fractal cell struct.
+    /// </summary>
+    public static float[] RegionEnergyGrid(
+        int gridW, int gridH, float maxDist, int tilesX, int tilesY,
+        Func<int, (int hit, float depth)> cell)
+    {
+        var result = new float[tilesX * tilesY];
+        int tileW = gridW / tilesX, tileH = gridH / tilesY;
+        if (tileW < 1 || tileH < 1) return result;
+        for (int ty = 0; ty < tilesY; ty++)
+        for (int tx = 0; tx < tilesX; tx++)
+        {
+            double sum = 0; int count = 0;
+            for (int py = ty * tileH; py < (ty + 1) * tileH; py++)
+            for (int px = tx * tileW; px < (tx + 1) * tileW; px++)
+            {
+                var (hit, depth) = cell(py * gridW + px);
+                if (hit != 0) sum += MathF.Max(0f, 1f - depth / maxDist);
+                count++;
+            }
+            result[ty * tilesX + tx] = count > 0 ? (float)(sum / count) : 0f;
+        }
+        return result;
     }
 
     private static MetalSpatialCell[] ComputeSpatialCells(

@@ -7164,6 +7164,17 @@ public static class Program
                             TrapMean: System.Numerics.Vector4.Zero, Energy: e);
                     }
 
+                    // Finer 8×6 region grid (improvement 2b): the same blob, projected onto 8×6 → CH2 notes 36–83.
+                    var fineGrid = new float[48];
+                    float bxF = 3.5f + 3.5f * MathF.Cos(ang);
+                    float byF = 2.5f + 2.5f * MathF.Sin(ang);
+                    for (int cy2 = 0; cy2 < 6; cy2++)
+                        for (int cx2 = 0; cx2 < 8; cx2++)
+                        {
+                            float d2f = (cx2 - bxF) * (cx2 - bxF) + (cy2 - byF) * (cy2 - byF);
+                            fineGrid[cy2 * 8 + cx2] = MathF.Exp(-d2f * 0.7f);
+                        }
+
                     var frame = new Parsec.Audio.Sonification.FractalSonicFrame(
                         Time: t,
                         HitRatio:  0.1f + 0.85f * tri,
@@ -7177,7 +7188,9 @@ public static class Program
                         CameraSpeed: 1.5f * tri, ParameterVelocity: fold,
                         Cells: cells, ZoomVelocity: 1.2f * MathF.Sin(phase),
                         // Improvement 2a: full-res centroid that tracks the orbiting blob → CC30/31/32.
-                        CentroidX: MathF.Cos(ang), CentroidY: -MathF.Sin(ang), Dispersion: 0.2f);
+                        CentroidX: MathF.Cos(ang), CentroidY: -MathF.Sin(ang), Dispersion: 0.2f,
+                        // Improvement 2b: finer region grid → CH2 region notes.
+                        MidiRegionEnergy: fineGrid);
                     // Real on-screen colour path: synthesize a small RGBA8 frame whose colour
                     // cycles (hue wheel + saturation/brightness wobble), then run it through the
                     // same reducer the app uses → CC24 (hue) + CC35 (sat) + CC36 (val).
@@ -7242,7 +7255,14 @@ public static class Program
             int spatialNotes = 0, spatialFires = 0;
             for (int n = 36; n <= 51; n++) if (r.NoteOnCounts[n] > 0) { spatialNotes++; spatialFires += r.NoteOnCounts[n]; }
             if (spatialNotes > 0)
-                Console.WriteLine($"    spatial notes 36–51: {spatialNotes} distinct cells fired ({spatialFires} onsets)");
+                Console.WriteLine($"    spatial notes 36–51 (4×4, ch1): {spatialNotes} distinct cells fired ({spatialFires} onsets)");
+            // Improvement 2b: notes 52–83 are produced ONLY by the finer 8×6 grid (ch2) — the 4×4
+            // never reaches them, so they unambiguously confirm fine-grid delivery (probe is
+            // channel-agnostic, so 36–51 may mix both grids).
+            int fineNotes = 0, fineFires = 0;
+            for (int n = 52; n <= 83; n++) if (r.NoteOnCounts[n] > 0) { fineNotes++; fineFires += r.NoteOnCounts[n]; }
+            if (fineNotes > 0)
+                Console.WriteLine($"    fine region notes 52–83 (8×6, ch2): {fineNotes} distinct cells fired ({fineFires} onsets)");
 
             bool ok = r.Messages > 0 && r.CcMessages > 0;
             Console.WriteLine(ok ? "midi-monitor PASS — external delivery confirmed"

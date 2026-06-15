@@ -134,6 +134,14 @@ public partial class MainWindow : Window
                 _view.MidiResponsiveness = (float)midiResponsivenessSlider.Value;
             };
 
+        var midiFineRegionsCheckBox = this.FindControl<CheckBox>("MidiFineRegionsCheckBox");
+        if (midiFineRegionsCheckBox != null)
+            midiFineRegionsCheckBox.IsCheckedChanged += (_, _) =>
+            {
+                if (_view == null) return;
+                _view.MidiFineRegions = midiFineRegionsCheckBox.IsChecked == true;
+            };
+
         var sonifyBlendSlider = this.FindControl<Slider>("SonifyBlendSlider");
         if (sonifyBlendSlider != null)
             sonifyBlendSlider.PropertyChanged += (_, e) =>
