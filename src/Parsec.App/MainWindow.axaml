@@ -133,6 +133,7 @@
                     ToolTip.Tip="MIDI CC smoothing: low = smooth but laggy, high = instant but jittery. Telemetry runs at ~30 Hz and your DAW buffer adds fixed latency on top." />
             <CheckBox Name="MidiFineRegionsCheckBox" IsChecked="True" Content="Fine region grid → ch2 (8×6)"
                       ToolTip.Tip="Emit a finer 8×6 grid of region notes (notes 36–83) on MIDI channel 2, parallel to the 4×4 spatial notes on channel 1. Sharper on-screen position than the 4×4." />
+            <ContentControl Name="MidiMappingHost" Margin="0,6,0,0" />
           </StackPanel>
           <StackPanel Margin="0,10,0,0" Spacing="4">
             <TextBlock Text="SURFACE TEXTURE" Foreground="#9a9ab0" FontSize="11" FontWeight="SemiBold" />

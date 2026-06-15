@@ -7219,6 +7219,54 @@ public static class Program
             catch (Exception ex) { Console.Error.WriteLine($"midi-smoke FAILED: {ex.Message}\n{ex.StackTrace}"); return 1; }
         }
 
+        // midi-map-check [seconds] — improvement M3b: remap the mapping table, then sweep so a
+        // monitor sees the EDITED routing (Size→CC50 on ch3, Complexity disabled, Proximity range
+        // 100–127). In-process it asserts the dedup/enable plumbing honours the config.
+        if (args[0] == "midi-map-check")
+        {
+            if (!OperatingSystem.IsMacOS()) { Console.Error.WriteLine("midi-map-check requires macOS."); return 1; }
+            double secs = args.Length > 1 && double.TryParse(args[1], out var s2) ? s2 : 3.0;
+            try
+            {
+                using var midi = new Parsec.Audio.Midi.MidiOutputSession("Parsec");
+                if (!midi.IsAvailable) { Console.Error.WriteLine($"MIDI unavailable: {midi.UnavailableReason}"); return 1; }
+                var cfg = new Parsec.Audio.Midi.MidiMappingConfig();
+                cfg[Parsec.Audio.Midi.MidiSignal.Size].Cc = 50;
+                cfg[Parsec.Audio.Midi.MidiSignal.Size].Channel = 2;       // MIDI channel 3
+                cfg[Parsec.Audio.Midi.MidiSignal.Complexity].Enabled = false;
+                cfg[Parsec.Audio.Midi.MidiSignal.Proximity].OutMin = 100; // narrowed range
+                cfg[Parsec.Audio.Midi.MidiSignal.Proximity].OutMax = 127;
+                var controller = new Parsec.Audio.Midi.MidiOutputController(midi, cfg);
+                Console.WriteLine($"midi-map-check — Size→CC50(ch3), Complexity off, Proximity range 100–127; sweeping {secs:F1}s");
+
+                int frames = Math.Max(1, (int)(secs * 30));
+                for (int i = 0; i < frames; i++)
+                {
+                    double t = secs * i / frames;
+                    float tri = 2f * MathF.Abs(((float)(t)) % 1f - 0.5f);
+                    var frame = new Parsec.Audio.Sonification.FractalSonicFrame(
+                        Time: t, HitRatio: 0.1f + 0.8f * tri, MeanDepth: 1.0f + 2.0f * (1f - tri),
+                        DepthVariance: 0.3f, StepMean: 30f, StepP90: 0f,
+                        NormalMean: System.Numerics.Vector3.Zero, NormalVariance: 0.05f + 0.1f * tri,
+                        TrapMean: System.Numerics.Vector4.Zero, TrapVariance: System.Numerics.Vector4.Zero,
+                        CameraSpeed: 0f, ParameterVelocity: 0f);
+                    controller.Update(frame);
+                    System.Threading.Thread.Sleep(1000 / 30);
+                }
+
+                bool sizeOnNew = cfg[Parsec.Audio.Midi.MidiSignal.Size].LastSent >= 0 && cfg[Parsec.Audio.Midi.MidiSignal.Size].Cc == 50;
+                bool complexOff = cfg[Parsec.Audio.Midi.MidiSignal.Complexity].LastSent < 0;
+                bool proxClamped = cfg[Parsec.Audio.Midi.MidiSignal.Proximity].LastSent >= 100;
+                Console.WriteLine($"  Size sent on CC50: {sizeOnNew}");
+                Console.WriteLine($"  Complexity suppressed (disabled): {complexOff}");
+                Console.WriteLine($"  Proximity within 100–127: {proxClamped} (last={cfg[Parsec.Audio.Midi.MidiSignal.Proximity].LastSent})");
+                bool ok = sizeOnNew && complexOff && proxClamped;
+                Console.WriteLine(ok ? "midi-map-check PASS" : "midi-map-check FAIL");
+                return ok ? 0 : 1;
+            }
+            catch (Exception ex) { Console.Error.WriteLine($"midi-map-check FAILED: {ex.Message}\n{ex.StackTrace}"); return 1; }
+        }
+
         // midi-monitor [seconds]
         // Independent CoreMIDI receiver (separate client) that connects to every published
         // source and decodes the channel-voice messages it receives. Run this alongside
@@ -7245,6 +7293,10 @@ public static class Program
             for (int cc = 20; cc <= 36; cc++)
                 if (r.LastCc[cc] >= 0)
                     Console.WriteLine($"    CC{cc} {ccNames[cc],-13} last = {r.LastCc[cc]}");
+            // Any remapped CC outside the default 20–36 block (improvement M3b).
+            for (int cc = 0; cc < 128; cc++)
+                if ((cc < 20 || cc > 36) && r.LastCc[cc] >= 0)
+                    Console.WriteLine($"    CC{cc} (remapped)    last = {r.LastCc[cc]}");
 
             var noteNames = new Dictionary<int, string> {
                 {60,"Expand"},{62,"Contract"},{64,"Fold"},{65,"Simplify"},

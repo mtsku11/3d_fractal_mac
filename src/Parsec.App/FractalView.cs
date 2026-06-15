@@ -95,6 +95,10 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
     private Parsec.Audio.Midi.MidiOutputSession? _midiSession;
     private Parsec.Audio.Midi.MidiOutputController? _midiController;
     private bool _midiEnabled;
+    // M3b: editable mapping table, owned here so it outlives the lazily-created controller
+    // (the MIDI mapping panel binds to it directly).
+    private readonly Parsec.Audio.Midi.MidiMappingConfig _midiMappingConfig = new();
+    public Parsec.Audio.Midi.MidiMappingConfig MidiMappingConfig => _midiMappingConfig;
 
     /// <summary>When true, the live telemetry frame is translated to MIDI CCs on the
     /// virtual "Parsec" source each frame. Lazily creates the CoreMIDI session.</summary>
@@ -106,7 +110,7 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
             if (value && _midiSession == null)
             {
                 _midiSession = new Parsec.Audio.Midi.MidiOutputSession("Parsec");
-                _midiController = new Parsec.Audio.Midi.MidiOutputController(_midiSession);
+                _midiController = new Parsec.Audio.Midi.MidiOutputController(_midiSession, _midiMappingConfig);
                 _midiController.Smoothing = _midiSmoothing;
                 _midiController.FineRegionsEnabled = _midiFineRegions;
             }

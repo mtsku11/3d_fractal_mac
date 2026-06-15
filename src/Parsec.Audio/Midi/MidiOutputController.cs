@@ -51,8 +51,6 @@ public sealed class MidiOutputController
     public const int CcSaturation = 35;
     public const int CcBrightness = 36;
 
-    /// <summary>MIDI channel 0–15 (0 = channel 1).</summary>
-    public int Channel { get; set; }
     public float ProximityK { get; set; } = 2.5f;
     public float ComplexityScale { get; set; } = 8f;
     public float Smoothing { get; set; } = 0.25f;
@@ -73,10 +71,11 @@ public sealed class MidiOutputController
     // Must match the producer grid in TelemetryReduction.RegionEnergyGrid (8×6).
     public const int FineTilesX = 8, FineTilesY = 6;
     private const int NFineCells = FineTilesX * FineTilesY; // 48
-    /// <summary>Channel (0–15) for the finer region grid. Default 1 = MIDI channel 2.</summary>
-    public int SpatialChannel { get; set; } = 1;
+    /// <summary>Channel (0–15) for the finer region grid — proxies the mapping config.</summary>
+    public int SpatialChannel { get => _config.FineGrid.Channel; set => _config.FineGrid.Channel = value; }
     public int FineRegionNoteBase { get; set; } = 36;
-    public bool FineRegionsEnabled { get; set; } = true;
+    /// <summary>Proxies <c>Mappings.FineGrid.Enabled</c> for the FractalView toggle.</summary>
+    public bool FineRegionsEnabled { get => _config.FineGrid.Enabled; set => _config.FineGrid.Enabled = value; }
     public float FineRegionHigh { get; set; } = 0.14f;
     public float FineRegionLow { get; set; } = 0.06f;
     public float FineRegionGate { get; set; } = 0.30f;
@@ -112,23 +111,19 @@ public sealed class MidiOutputController
     public float StructureFull { get; set; } = 2.0f;
     public float HeterogeneityFull { get; set; } = 2.0f;
 
-    // M1 smoothed signals + dedup
+    // M3b: editable mapping table. Dedup + per-mapping smoothing live on each MidiCcMapping.
+    private readonly MidiMappingConfig _config;
+    /// <summary>Editable signal→CC routes + note-group channels (improvement M3b).</summary>
+    public MidiMappingConfig Mappings => _config;
+
+    // Smoothed signals used both for CC output and (size/complex) the derivative events.
     private float _sSize, _sProx, _sComplex, _sSizeRate, _sColor;
     private bool _init, _colorInit;
-    private int _lastColor = -1;
     // Improvement 1 — saturation/brightness of the real on-screen colour.
     private float _sSat, _sVal;
     private bool _svInit;
-    private int _lastSat = -1, _lastVal = -1;
     private double _prevTime;
     private float _prevSize, _prevComplex;
-    private int _lastSize = -1, _lastProx = -1, _lastComplex = -1, _lastExpansion = -1;
-
-    // M4 CCs: parallel smoothed + last-sent arrays (index = CC# - 25)
-    private const int NCC = 10;
-    private readonly float[] _s = new float[NCC];
-    private readonly int[] _lastCc = new int[NCC];
-    private bool _ccInit;
 
     // Gesture-event arm/fire state.
     private bool _expandArmed = true, _contractArmed = true, _foldArmed = true, _simplifyArmed = true;
@@ -148,8 +143,8 @@ public sealed class MidiOutputController
     private bool _fineInit;
     private int _activeFine;
 
-    // Notes currently sounding, with the time their Note Off is due.
-    private readonly Dictionary<int, double> _noteOffDue = new();
+    // Notes currently sounding, with the time their Note Off is due and the channel they fired on.
+    private readonly Dictionary<int, (double due, int ch)> _noteOffDue = new();
     private readonly List<int> _offScratch = new();
     // Separate book-keeping for the fine grid (its own channel).
     private readonly Dictionary<int, double> _fineNoteOffDue = new();
@@ -159,10 +154,10 @@ public sealed class MidiOutputController
     public string LastEvent { get; private set; } = "";
     public double LastEventTime { get; private set; } = double.NegativeInfinity;
 
-    public MidiOutputController(MidiOutputSession midi)
+    public MidiOutputController(MidiOutputSession midi, MidiMappingConfig? config = null)
     {
         _midi = midi;
-        for (int i = 0; i < NCC; i++) _lastCc[i] = -1;
+        _config = config ?? new MidiMappingConfig();
     }
 
     /// <param name="colorHue01">Optional colour hue (0–1, wraps) → CC24. When the caller has a
@@ -194,9 +189,9 @@ public sealed class MidiOutputController
             _sComplex += (complexity - _sComplex) * a;
         }
 
-        SendCc(CcSize, _sSize, ref _lastSize);
-        SendCc(CcProximity, _sProx, ref _lastProx);
-        SendCc(CcComplexity, _sComplex, ref _lastComplex);
+        EmitMapped(MidiSignal.Size, _sSize, alreadySmoothed: true);
+        EmitMapped(MidiSignal.Proximity, _sProx, alreadySmoothed: true);
+        EmitMapped(MidiSignal.Complexity, _sComplex, alreadySmoothed: true);
 
         // --- M2 derivatives ---
         float dt = Math.Clamp((float)(now - _prevTime), 1f / 240f, 0.5f);
@@ -206,25 +201,30 @@ public sealed class MidiOutputController
 
         _sSizeRate += (sizeRate - _sSizeRate) * a;
         float expNorm = Math.Clamp(_sSizeRate / MathF.Max(1e-4f, ExpansionFullScaleRate), -1f, 1f);
-        SendCcRaw(CcExpansion, 64 + (int)MathF.Round(expNorm * 63f), ref _lastExpansion);
+        EmitMapped(MidiSignal.Expansion, expNorm, alreadySmoothed: true);
 
         ReleaseDueNotes(now);
 
-        DetectEvent(now, sizeRate >= SizeRateHigh, sizeRate <= SizeRateLow,
-                    ExpandNote, sizeRate / MathF.Max(1e-4f, SizeRateHigh * 4f),
-                    ref _expandArmed, ref _expandFired, "expand", NoteGateSec, true);
-        DetectEvent(now, sizeRate <= -SizeRateHigh, sizeRate >= -SizeRateLow,
-                    ContractNote, -sizeRate / MathF.Max(1e-4f, SizeRateHigh * 4f),
-                    ref _contractArmed, ref _contractFired, "contract", NoteGateSec, true);
-        float fold = MathF.Abs(f.ParameterVelocity);
-        DetectEvent(now, fold >= FoldHigh, fold <= FoldLow,
-                    FoldNote, fold / MathF.Max(1e-4f, FoldHigh * 4f),
-                    ref _foldArmed, ref _foldFired, "fold", NoteGateSec, true);
-        DetectEvent(now, complexRate <= -ComplexRateHigh, complexRate >= -ComplexRateLow,
-                    SimplifyNote, -complexRate / MathF.Max(1e-4f, ComplexRateHigh * 4f),
-                    ref _simplifyArmed, ref _simplifyFired, "simplify", NoteGateSec, true);
+        int gestureCh = _config.Gestures.Channel;
+        bool gestures = _config.Gestures.Enabled;
+        if (gestures)
+        {
+            DetectEvent(now, sizeRate >= SizeRateHigh, sizeRate <= SizeRateLow,
+                        gestureCh, ExpandNote, sizeRate / MathF.Max(1e-4f, SizeRateHigh * 4f),
+                        ref _expandArmed, ref _expandFired, "expand", NoteGateSec, true);
+            DetectEvent(now, sizeRate <= -SizeRateHigh, sizeRate >= -SizeRateLow,
+                        gestureCh, ContractNote, -sizeRate / MathF.Max(1e-4f, SizeRateHigh * 4f),
+                        ref _contractArmed, ref _contractFired, "contract", NoteGateSec, true);
+            float fold = MathF.Abs(f.ParameterVelocity);
+            DetectEvent(now, fold >= FoldHigh, fold <= FoldLow,
+                        gestureCh, FoldNote, fold / MathF.Max(1e-4f, FoldHigh * 4f),
+                        ref _foldArmed, ref _foldFired, "fold", NoteGateSec, true);
+            DetectEvent(now, complexRate <= -ComplexRateHigh, complexRate >= -ComplexRateLow,
+                        gestureCh, SimplifyNote, -complexRate / MathF.Max(1e-4f, ComplexRateHigh * 4f),
+                        ref _simplifyArmed, ref _simplifyFired, "simplify", NoteGateSec, true);
+        }
 
-        // --- M3 colour ---
+        // --- M3 colour (circular slew, then routed through its mapping) ---
         if (colorHue01 is float hue)
         {
             hue = Wrap01(hue);
@@ -235,7 +235,7 @@ public sealed class MidiOutputController
                 if (d > 0.5f) d -= 1f; else if (d < -0.5f) d += 1f;
                 _sColor = Wrap01(_sColor + d * a);
             }
-            SendCcRaw(CcColor, (int)MathF.Round(_sColor * 127f), ref _lastColor);
+            EmitMapped(MidiSignal.Colour, _sColor, alreadySmoothed: true);
         }
 
         // Improvement 1 — real on-screen saturation + brightness (linear slew, not circular).
@@ -244,8 +244,8 @@ public sealed class MidiOutputController
             sat01 = Clamp01(sat01); val01 = Clamp01(val01);
             if (!_svInit) { _sSat = sat01; _sVal = val01; _svInit = true; }
             else { _sSat += (sat01 - _sSat) * a; _sVal += (val01 - _sVal) * a; }
-            SendCc(CcSaturation, _sSat, ref _lastSat);
-            SendCc(CcBrightness, _sVal, ref _lastVal);
+            EmitMapped(MidiSignal.Saturation, _sSat, alreadySmoothed: true);
+            EmitMapped(MidiSignal.Brightness, _sVal, alreadySmoothed: true);
         }
 
         // --- M4 motion / structure / spatial ---
@@ -287,29 +287,32 @@ public sealed class MidiOutputController
         float haze = Clamp01(f.StepMean / MathF.Max(1f, HazeFullSteps));
         float layering = Clamp01(MathF.Sqrt(MathF.Max(0f, f.DepthVariance)) / MathF.Max(0.01f, f.MeanDepth) * LayeringGain);
 
-        EmitCc(0, CcLayering,      layering,                                                false, a);
-        EmitCc(1, CcHaze,          haze,                                                    false, a);
-        EmitCc(2, CcVerticality,   Clamp(f.NormalMean.Y * VerticalityGain, -1f, 1f),        true,  a);
-        EmitCc(3, CcSpeed,         Clamp01(f.CameraSpeed / MathF.Max(1e-3f, SpeedFull)),    false, a);
-        EmitCc(4, CcDolly,         Clamp(f.ZoomVelocity / MathF.Max(1e-3f, DollyFull), -1f, 1f), true, a);
-        EmitCc(5, CcPositionX,     Clamp(posX, -1f, 1f),                                     true,  a);
-        EmitCc(6, CcPositionY,     Clamp(posY, -1f, 1f),                                     true,  a);
-        EmitCc(7, CcDispersion,    Clamp01(disp),                                            false, a);
-        EmitCc(8, CcStructure,     Clamp01(f.TrapMean.X / MathF.Max(1e-3f, StructureFull)),  false, a);
-        EmitCc(9, CcHeterogeneity, Clamp01(f.TrapVariance.Length() / MathF.Max(1e-3f, HeterogeneityFull)), false, a);
-        _ccInit = true;
+        EmitMapped(MidiSignal.Layering,      layering);
+        EmitMapped(MidiSignal.Haze,          haze);
+        EmitMapped(MidiSignal.Verticality,   Clamp(f.NormalMean.Y * VerticalityGain, -1f, 1f));
+        EmitMapped(MidiSignal.Speed,         Clamp01(f.CameraSpeed / MathF.Max(1e-3f, SpeedFull)));
+        EmitMapped(MidiSignal.Dolly,         Clamp(f.ZoomVelocity / MathF.Max(1e-3f, DollyFull), -1f, 1f));
+        EmitMapped(MidiSignal.PositionX,     Clamp(posX, -1f, 1f));
+        EmitMapped(MidiSignal.PositionY,     Clamp(posY, -1f, 1f));
+        EmitMapped(MidiSignal.Dispersion,    Clamp01(disp));
+        EmitMapped(MidiSignal.Structure,     Clamp01(f.TrapMean.X / MathF.Max(1e-3f, StructureFull)));
+        EmitMapped(MidiSignal.Heterogeneity, Clamp01(f.TrapVariance.Length() / MathF.Max(1e-3f, HeterogeneityFull)));
 
         // Gesture notes: enclosure / emergence / shimmer.
-        DetectEvent(now, size >= EncloseHigh, size <= EncloseLow, EncloseNote, size,
-                    ref _encloseArmed, ref _encloseFired, "enclose", NoteGateSec, true);
-        DetectEvent(now, size <= EmergeLow, size >= EmergeHigh, EmergeNote, 1f - size,
-                    ref _emergeArmed, ref _emergeFired, "emerge", NoteGateSec, true);
-        DetectEvent(now, haze >= ShimmerHigh, haze <= ShimmerLow, ShimmerNote, haze,
-                    ref _shimmerArmed, ref _shimmerFired, "shimmer", NoteGateSec, true);
+        if (gestures)
+        {
+            DetectEvent(now, size >= EncloseHigh, size <= EncloseLow, gestureCh, EncloseNote, size,
+                        ref _encloseArmed, ref _encloseFired, "enclose", NoteGateSec, true);
+            DetectEvent(now, size <= EmergeLow, size >= EmergeHigh, gestureCh, EmergeNote, 1f - size,
+                        ref _emergeArmed, ref _emergeFired, "emerge", NoteGateSec, true);
+            DetectEvent(now, haze >= ShimmerHigh, haze <= ShimmerLow, gestureCh, ShimmerNote, haze,
+                        ref _shimmerArmed, ref _shimmerFired, "shimmer", NoteGateSec, true);
+        }
 
         // Spatial "object" notes — one per cell, fired on energy onset.
-        if (haveCells)
+        if (haveCells && _config.Spatial4x4.Enabled)
         {
+            int spatialCh = _config.Spatial4x4.Channel;
             if (!_spatialInit)
             {
                 // Don't blast a 16-note chord for regions already lit when MIDI is enabled;
@@ -324,7 +327,7 @@ public sealed class MidiOutputController
                 float e = MathF.Max(0f, cells![i].Energy);
                 if (e >= RegionHigh) active++;
                 DetectEvent(now, e >= RegionHigh, e <= RegionLow,
-                            SpatialNoteBase + i, e / MathF.Max(1e-3f, RegionHigh * 4f),
+                            spatialCh, SpatialNoteBase + i, e / MathF.Max(1e-3f, RegionHigh * 4f),
                             ref _regionArmed[i], ref _regionFired[i], "object", RegionGate, false);
             }
             _activeRegions = active;
@@ -355,24 +358,24 @@ public sealed class MidiOutputController
             _activeFine = activeFine;
         }
 
-        Monitor = $"size {_lastSize,3} · prox {_lastProx,3} · cplx {_lastComplex,3} · exp {_lastExpansion,3} · col {_lastColor,3}"
-                + $" · pos {_lastCc[5],3},{_lastCc[6],3} · spd {_lastCc[3],3} · obj {_activeRegions,2} · fine {_activeFine,2}";
+        Monitor = $"size {_config[MidiSignal.Size].LastSent,3} · prox {_config[MidiSignal.Proximity].LastSent,3}"
+                + $" · cplx {_config[MidiSignal.Complexity].LastSent,3} · exp {_config[MidiSignal.Expansion].LastSent,3}"
+                + $" · col {_config[MidiSignal.Colour].LastSent,3} · pos {_config[MidiSignal.PositionX].LastSent,3},{_config[MidiSignal.PositionY].LastSent,3}"
+                + $" · spd {_config[MidiSignal.Speed].LastSent,3} · obj {_activeRegions,2} · fine {_activeFine,2}";
     }
 
     public void Reset()
     {
-        _init = false; _colorInit = false; _ccInit = false; _spatialInit = false;
+        _init = false; _colorInit = false; _spatialInit = false;
         _svInit = false;
-        _lastSize = _lastProx = _lastComplex = -1;
-        _lastExpansion = -1; _lastColor = -1; _lastSat = -1; _lastVal = -1;
         _sSizeRate = 0f; _activeRegions = 0;
-        for (int i = 0; i < NCC; i++) { _s[i] = 0f; _lastCc[i] = -1; }
+        foreach (var m in _config.Cc) { m.LastSent = -1; m.SmoothInit = false; m.Smoothed = 0f; }
         _expandArmed = _contractArmed = _foldArmed = _simplifyArmed = true;
         _encloseArmed = _emergeArmed = _shimmerArmed = true;
         _expandFired = _contractFired = _foldFired = _simplifyFired = 0;
         _encloseFired = _emergeFired = _shimmerFired = 0;
         for (int i = 0; i < NCells; i++) { _regionArmed[i] = true; _regionFired[i] = 0; }
-        foreach (var note in _noteOffDue.Keys) _midi.SendNoteOff(Channel, note);
+        foreach (var kv in _noteOffDue) _midi.SendNoteOff(kv.Value.ch, kv.Key);
         _noteOffDue.Clear();
         // Fine grid (2b)
         _fineInit = false; _activeFine = 0;
@@ -382,25 +385,36 @@ public sealed class MidiOutputController
         LastEvent = ""; LastEventTime = double.NegativeInfinity;
     }
 
-    // Smooth then emit a continuous CC. signed → mapped around 64; else 0..127.
-    private void EmitCc(int idx, int cc, float raw, bool signed, float a)
+    // M3b: smooth (unless pre-smoothed), map to the configured CC/channel/range, dedup, send.
+    private void EmitMapped(MidiSignal sig, float value, bool alreadySmoothed = false)
     {
-        _s[idx] = _ccInit ? _s[idx] + (raw - _s[idx]) * a : raw;
-        int q = signed
-            ? 64 + (int)MathF.Round(Clamp(_s[idx], -1f, 1f) * 63f)
-            : (int)MathF.Round(Clamp01(_s[idx]) * 127f);
-        SendCcRaw(cc, Math.Clamp(q, 0, 127), ref _lastCc[idx]);
+        var m = _config.Cc[(int)sig];
+        if (!m.Enabled) return;
+        float v;
+        if (alreadySmoothed) v = value;
+        else
+        {
+            float a = Math.Clamp(Smoothing, 0.01f, 1f);
+            m.Smoothed = m.SmoothInit ? m.Smoothed + (value - m.Smoothed) * a : value;
+            m.SmoothInit = true;
+            v = m.Smoothed;
+        }
+        float t = m.Signed ? (Clamp(v, -1f, 1f) * 0.5f + 0.5f) : Clamp01(v);
+        if (m.Invert) t = 1f - t;
+        int q = Math.Clamp(m.OutMin + (int)MathF.Round(t * (m.OutMax - m.OutMin)), 0, 127);
+        if (q == m.LastSent) return;
+        if (_midi.SendControlChange(m.Channel, m.Cc, q)) m.LastSent = q;
     }
 
-    private void DetectEvent(double now, bool over, bool under, int note, float magnitude01,
+    private void DetectEvent(double now, bool over, bool under, int channel, int note, float magnitude01,
                              ref bool armed, ref double lastFire, string tag, float gate, bool flash)
     {
         if (over && armed && (now - lastFire) >= Refractory)
         {
             int vel = 1 + (int)MathF.Round(Clamp01(magnitude01) * 126f);
-            if (_noteOffDue.ContainsKey(note)) _midi.SendNoteOff(Channel, note);
-            _midi.SendNoteOn(Channel, note, vel);
-            _noteOffDue[note] = now + gate;
+            if (_noteOffDue.TryGetValue(note, out var prev)) _midi.SendNoteOff(prev.ch, note);
+            _midi.SendNoteOn(channel, note, vel);
+            _noteOffDue[note] = (now + gate, channel);
             armed = false;
             lastFire = now;
             if (flash) { LastEvent = tag; LastEventTime = now; }
@@ -448,21 +462,12 @@ public sealed class MidiOutputController
         if (_noteOffDue.Count == 0) return;
         _offScratch.Clear();
         foreach (var kv in _noteOffDue)
-            if (now >= kv.Value) _offScratch.Add(kv.Key);
+            if (now >= kv.Value.due) _offScratch.Add(kv.Key);
         foreach (var note in _offScratch)
         {
-            _midi.SendNoteOff(Channel, note);
+            _midi.SendNoteOff(_noteOffDue[note].ch, note);
             _noteOffDue.Remove(note);
         }
-    }
-
-    private void SendCc(int cc, float v01, ref int last)
-        => SendCcRaw(cc, (int)MathF.Round(Clamp01(v01) * 127f), ref last);
-
-    private void SendCcRaw(int cc, int q, ref int last)
-    {
-        if (q == last) return;
-        if (_midi.SendControlChange(Channel, cc, q)) last = q;
     }
 
     private static float Clamp01(float v) => v < 0f ? 0f : (v > 1f ? 1f : v);

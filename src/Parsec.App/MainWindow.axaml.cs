@@ -306,6 +306,11 @@ public partial class MainWindow : Window
         if (audioMappingHost != null)
             audioMappingHost.Content = _audioMappingPanel;
 
+        // M3b: MIDI mapping editor, bound to the view's live mapping config.
+        var midiMappingHost = this.FindControl<ContentControl>("MidiMappingHost");
+        if (midiMappingHost != null && _view != null)
+            midiMappingHost.Content = new MidiMappingPanel(_view.MidiMappingConfig);
+
         _modTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(16) };
         _modTimer.Tick += (_, _) =>
         {
