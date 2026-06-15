@@ -225,8 +225,9 @@ public static class MidiInstrumentSynth
             float mr = dryR + rr * 0.9f;
             ml = MathF.Tanh(ml * 0.8f);
             mr = MathF.Tanh(mr * 0.8f);
-            outBuf[i * 2] = (short)Math.Clamp((int)(ml * 30000f), -32768, 32767);
-            outBuf[i * 2 + 1] = (short)Math.Clamp((int)(mr * 30000f), -32768, 32767);
+            // ~2 dB headroom below full scale so the AAC encoder doesn't clip on dense transients.
+            outBuf[i * 2] = (short)Math.Clamp((int)(ml * 26000f), -32768, 32767);
+            outBuf[i * 2 + 1] = (short)Math.Clamp((int)(mr * 26000f), -32768, 32767);
         }
 
         return outBuf;
