@@ -1003,8 +1003,14 @@ public static class Program
                 {
                     float t = (float)i / fps;
                     float u = nFrames > 1 ? (float)i / (nFrames - 1) : 0f;
+                    // Slow "breathing" pulse (a living inhale/exhale) on top of the big morph.
+                    float breath = MathF.Sin(2f * MathF.PI * 0.13f * t);
                     float power = powerMid + powerAmp * MathF.Sin(2f * MathF.PI * morphHz * t)
-                                           + 0.3f * pace * MathF.Sin(2f * MathF.PI * 0.55f * pace * t + 0.6f);
+                                           + 0.3f * pace * MathF.Sin(2f * MathF.PI * 0.55f * pace * t + 0.6f)
+                                           + 0.45f * breath;
+                    // Animated domain warp = membrane undulation; its strength breathes too.
+                    Parsec.Rendering.DomainWarpState.SetControls(true, 0.065f + 0.03f * (0.5f + 0.5f * breath), 1.5f);
+                    Parsec.Rendering.DomainWarpState.SetPhase(t * 0.5f);
                     float ang = 2f * MathF.PI * 0.5f * pace * u + 0.4f;
                     float radius = 2.4f - 0.5f * MathF.Sin(2f * MathF.PI * 0.25f * pace * t);
                     float elev = 0.45f + 0.25f * MathF.Sin(2f * MathF.PI * 0.2f * pace * t);
@@ -1037,11 +1043,12 @@ public static class Program
                         Dispersion: st?.Dispersion ?? 0f, MidiRegionEnergy: st?.MidiRegionEnergy);
 
                     float hueShift = 0.4f * t / (float)Math.Max(1.0, duration);
+                    // Bioluminescent deep-sea palette: dark teal body with cyan/green/magenta bands.
                     var palette = new PaletteParams
                     {
-                        Base = new Vector3(0.5f, 0.5f, 0.5f), Amp = new Vector3(0.5f, 0.5f, 0.5f),
-                        Frequency = 1.3f, Phase = new Vector3(hueShift, 0.33f + hueShift, 0.67f + hueShift),
-                        TrapScale = 0.7f, TrapMix = new Vector3(0.5f, 0.55f, 0.35f), ShellMix = 0.5f,
+                        Base = new Vector3(0.16f, 0.30f, 0.34f), Amp = new Vector3(0.42f, 0.40f, 0.46f),
+                        Frequency = 1.1f, Phase = new Vector3(hueShift, 0.45f + hueShift, 0.85f + hueShift),
+                        TrapScale = 0.7f, TrapMix = new Vector3(0.45f, 0.6f, 0.4f), ShellMix = 0.5f,
                     };
                     var pixels = renderer.RenderMandelbulb(fractal, cam, w, h, dispSettings, bg, surface, light, palette);
                     var (hue, hsat, hval) = Parsec.Audio.Midi.MidiOutputController.MeanScreenColorHsv(pixels, w, h);
@@ -1059,8 +1066,8 @@ public static class Program
                     field.Step(1f / fps, p => Mbulb(p, power), p => Mbulb(p, pprev), t, foldEnv);
                     prevPos = pos; prevPower = power; havePrev = true;
 
-                    // ---- underwater grade + particle composite (with behind-fractal occlusion) ----
-                    FluidCompositor.Apply(pixels, w, h, field, cam, fovY, t, p => Mbulb(p, power));
+                    // ---- water grade + creature emissive layer + particle composite (occluded) ----
+                    FluidCompositor.Apply(pixels, w, h, field, cam, fovY, t, p => Mbulb(p, power), deepSea: true, foldEnv: foldEnv);
 
                     var info  = new SKImageInfo(w, h, SKColorType.Rgba8888, SKAlphaType.Premul);
                     var bmp   = new SKBitmap(info);
