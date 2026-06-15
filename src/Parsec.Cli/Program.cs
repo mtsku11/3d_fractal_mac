@@ -995,6 +995,7 @@ public static class Program
                 Directory.CreateDirectory(frameDir);
 
                 var prevPos = Vector3.Zero; float prevPower = 0f; bool havePrev = false;
+                float foldEnv = 0f;
                 float fovY = MathF.PI / 3.5f;
                 var sw = System.Diagnostics.Stopwatch.StartNew();
 
@@ -1017,11 +1018,6 @@ public static class Program
                     float spd = havePrev ? (pos - prevPos).Length() * fps : 0f;
                     float zv  = havePrev ? Vector3.Dot(pos - prevPos, fwd) * fps : 0f;
                     float pv  = havePrev ? MathF.Abs(power - prevPower) * fps : 0f;
-
-                    // Advance the particle field; advection uses this frame's vs last frame's power.
-                    float pprev = havePrev ? prevPower : power;
-                    field.Step(1f / fps, p => Mbulb(p, power), p => Mbulb(p, pprev), t);
-                    prevPos = pos; prevPower = power; havePrev = true;
 
                     FractalSonicCell[]? cells = null;
                     if (st?.Cells is { Length: > 0 } mc)
@@ -1049,10 +1045,22 @@ public static class Program
                     };
                     var pixels = renderer.RenderMandelbulb(fractal, cam, w, h, dispSettings, bg, surface, light, palette);
                     var (hue, hsat, hval) = Parsec.Audio.Midi.MidiOutputController.MeanScreenColorHsv(pixels, w, h);
+                    int evBefore = events.Count;
                     evTime = t; controller.Update(frame, hue, hsat, hval);
+                    // A Fold note (64, ch1) emitted this frame yanks the nearest particles.
+                    bool folded = false;
+                    for (int e = evBefore; e < events.Count; e++)
+                        if (events[e].Type == Parsec.Audio.Midi.MidiInstrumentSynth.EvType.NoteOn
+                            && events[e].Channel == 0 && events[e].D1 == 64) { folded = true; break; }
+                    foldEnv = folded ? 1f : foldEnv * 0.80f;
 
-                    // ---- underwater grade + particle composite ----
-                    FluidCompositor.Apply(pixels, w, h, field, cam, fovY, t);
+                    // Advance the particle field (advection uses this vs last frame's power; fold yank).
+                    float pprev = havePrev ? prevPower : power;
+                    field.Step(1f / fps, p => Mbulb(p, power), p => Mbulb(p, pprev), t, foldEnv);
+                    prevPos = pos; prevPower = power; havePrev = true;
+
+                    // ---- underwater grade + particle composite (with behind-fractal occlusion) ----
+                    FluidCompositor.Apply(pixels, w, h, field, cam, fovY, t, p => Mbulb(p, power));
 
                     var info  = new SKImageInfo(w, h, SKColorType.Rgba8888, SKAlphaType.Premul);
                     var bmp   = new SKBitmap(info);

@@ -28,7 +28,9 @@ public sealed class FluidParticleField
     // Deep-sea: forces fall off sharply with distance from the surface, so particles far out are
     // nearly static (held by "pressure") while ones hugging the fractal move much more. CurlFloor is
     // the faint residual drift the far field keeps. High drag + low MaxSpeed = viscous, settled water.
-    public float InfluenceDist = 0.55f, CurlFloor = 0.05f;
+    public float InfluenceDist = 0.40f, CurlFloor = 0.05f;
+    // Fold "yank": a fold event briefly shoves the very nearest particles outward.
+    public float YankStrength = 11f, YankDist = 0.30f;
     public float Drag = 0.86f, MaxSpeed = 1.3f, LifeSeconds = 14f;
 
     private readonly Random _rng;
@@ -53,7 +55,8 @@ public sealed class FluidParticleField
 
     /// <param name="de">distance estimator at the current time.</param>
     /// <param name="dePrev">distance estimator at the previous frame (for ∂DE/∂t advection).</param>
-    public void Step(float dt, Func<Vector3, float> de, Func<Vector3, float> dePrev, float time)
+    /// <param name="foldImpulse">0–1 envelope; on a fold event the very nearest particles get yanked.</param>
+    public void Step(float dt, Func<Vector3, float> de, Func<Vector3, float> dePrev, float time, float foldImpulse = 0f)
     {
         if (dt <= 0f) return;
         float eps = 0.012f;
@@ -94,10 +97,18 @@ public sealed class FluidParticleField
             float ddt = (d - dePrev(pos)) / dt;
             Vector3 advect = grad * MathF.Max(0f, -ddt) * AdvectStrength * prox;
 
-            Vector3 acc = repel + swirl + curl + advect;
+            // 5. Fold yank — a brief, sharp outward shove on the very nearest particles when the
+            //    fractal folds. Tighter gate than the others, with a little tangential scatter.
+            float proxYank = foldImpulse > 1e-3f ? MathF.Exp(-MathF.Max(0f, d) / YankDist) : 0f;
+            Vector3 yank = (grad + Vector3.Cross(grad, Vector3.UnitX) * 0.4f)
+                           * foldImpulse * YankStrength * proxYank;
+
+            Vector3 acc = repel + swirl + curl + advect + yank;
             p.Vel = p.Vel * Drag + acc * dt;
+            // Yanked particles may transiently exceed the resting max speed.
+            float maxSp = MaxSpeed * (1f + 3f * foldImpulse * proxYank);
             float sp = p.Vel.Length();
-            if (sp > MaxSpeed) p.Vel *= MaxSpeed / sp;
+            if (sp > maxSp) p.Vel *= maxSp / sp;
             p.Pos = pos + p.Vel * dt;
             p.Life -= dt;
 

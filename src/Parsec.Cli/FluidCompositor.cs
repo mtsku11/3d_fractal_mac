@@ -12,7 +12,8 @@ namespace Parsec.Cli;
 /// </summary>
 internal static class FluidCompositor
 {
-    public static void Apply(uint[] px, int w, int h, FluidParticleField field, Camera3D cam, float fovY, float time)
+    public static void Apply(uint[] px, int w, int h, FluidParticleField field, Camera3D cam, float fovY, float time,
+                             Func<Vector3, float>? de = null)
     {
         // 1. Underwater grade (parallel over rows).
         Parallel.For(0, h, y =>
@@ -51,9 +52,35 @@ internal static class FluidCompositor
         float tanY = MathF.Tan(fovY * 0.5f);
         float tanX = tanY * cam.AspectRatio;
         float lifeSec = field.LifeSeconds;
+        var parts = field.Particles;
 
-        foreach (ref readonly var part in field.Particles.AsSpan())
+        // Occlusion: sphere-trace the DE from camera toward each particle; if it hits the surface
+        // before reaching the particle, the mote is behind the fractal and is hidden. Computed in
+        // parallel (read-only) so the additive splat below can stay single-threaded.
+        bool[]? occluded = null;
+        if (de != null)
         {
+            occluded = new bool[parts.Length];
+            Parallel.For(0, parts.Length, i =>
+            {
+                Vector3 toP = parts[i].Pos - posCam;
+                float dist = toP.Length();
+                if (dist < 1e-3f) { occluded[i] = true; return; }
+                Vector3 dir = toP / dist;
+                float tt = 0.04f;
+                for (int s = 0; s < 32 && tt < dist - 0.05f; s++)
+                {
+                    float dd = de(posCam + dir * tt);
+                    if (dd < 1.8e-3f) { occluded[i] = true; return; }
+                    tt += MathF.Max(dd, 1.2e-3f);
+                }
+            });
+        }
+
+        for (int pi = 0; pi < parts.Length; pi++)
+        {
+            if (occluded != null && occluded[pi]) continue;
+            ref readonly var part = ref parts[pi];
             Vector3 v = part.Pos - posCam;
             float zc = Vector3.Dot(v, fwd);
             if (zc <= 0.08f) continue;
