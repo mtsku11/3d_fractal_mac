@@ -782,10 +782,18 @@ public static class Program
                 int w = args.Length > 3 && int.TryParse(args[3], out var pw) ? pw : 1280;
                 int h = args.Length > 4 && int.TryParse(args[4], out var ph) ? ph : 720;
                 if ((w & 1) != 0) w++; if ((h & 1) != 0) h++;
+                // Optional morph controls: [morphHz] [powerLo] [powerHi]. Slower Hz + wider range = a
+                // big, languid morph. Camera pace scales with morphHz (relative to the 0.18 default).
+                float morphHz = args.Length > 5 && float.TryParse(args[5], out var mh) ? mh : 0.18f;
+                float powerLo = args.Length > 6 && float.TryParse(args[6], out var pl) ? pl : 2.4f;
+                float powerHi = args.Length > 7 && float.TryParse(args[7], out var pH) ? pH : 8.6f;
+                float powerMid = (powerLo + powerHi) * 0.5f, powerAmp = (powerHi - powerLo) * 0.5f;
+                float pace = morphHz / 0.18f;
                 const int fps = 30;
                 int nFrames = Math.Max(1, (int)Math.Round(duration * fps));
 
                 Console.WriteLine($"midi-showcase — Mandelbulb power-morph, {duration:F1}s @ {fps}fps ({nFrames} frames), {w}x{h}");
+                Console.WriteLine($"  morph {powerLo:F1}→{powerHi:F1} @ {morphHz:F3} Hz (pace ×{pace:F2})");
 
                 using var renderer = new MetalMandelbulbRenderer();
                 if (!renderer.IsAvailable) { Console.Error.WriteLine("Metal backend not available."); return 1; }
@@ -828,13 +836,14 @@ public static class Program
                 {
                     float t = (float)i / fps;                 // seconds
                     float u = nFrames > 1 ? (float)i / (nFrames - 1) : 0f;
-                    // Power morph: slow sweep with a faster wobble → folds + complexity changes.
-                    float power = 5.0f + 2.6f * MathF.Sin(2f * MathF.PI * 0.18f * t)
-                                       + 1.0f * MathF.Sin(2f * MathF.PI * 0.55f * t + 0.6f);
-                    // Camera: slow orbit + dolly in/out → position, proximity, dolly motion.
-                    float ang = 2f * MathF.PI * 0.5f * u + 0.4f;
-                    float radius = 2.35f - 0.55f * MathF.Sin(2f * MathF.PI * 0.25f * t);
-                    float elev = 0.45f + 0.25f * MathF.Sin(2f * MathF.PI * 0.2f * t);
+                    // Power morph: single sine over [powerLo,powerHi] at morphHz. A tiny fast wobble
+                    // is kept but scaled down with pace so slow renders stay smooth.
+                    float power = powerMid + powerAmp * MathF.Sin(2f * MathF.PI * morphHz * t)
+                                           + 0.35f * pace * MathF.Sin(2f * MathF.PI * 0.55f * pace * t + 0.6f);
+                    // Camera: slow orbit + dolly in/out, all paced with the morph.
+                    float ang = 2f * MathF.PI * 0.5f * pace * u + 0.4f;
+                    float radius = 2.35f - 0.55f * MathF.Sin(2f * MathF.PI * 0.25f * pace * t);
+                    float elev = 0.45f + 0.25f * MathF.Sin(2f * MathF.PI * 0.2f * pace * t);
                     var pos = new Vector3(MathF.Cos(ang) * radius, elev, MathF.Sin(ang) * radius);
                     var fwd = Vector3.Normalize(Vector3.Zero - pos);
 
