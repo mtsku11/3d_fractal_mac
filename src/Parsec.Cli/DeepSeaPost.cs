@@ -30,52 +30,61 @@ internal static class DeepSeaPost
         bloom = BoxBlur(bloom, w, h, 7);
         Parallel.For(0, n, i =>
         {
-            float bl = bloom[i] * 0.55f;
+            float bl = bloom[i] * 1.05f;            // gelatinous subsurface halo
             if (bl < 0.002f) return;
-            // Teal-green subsurface tint.
-            AddRgb(px, i, 0.15f * bl, 0.55f * bl, 0.60f * bl);
+            AddRgb(px, i, 0.18f * bl, 0.62f * bl, 0.68f * bl);
         });
 
-        // --- bioluminescent fresnel rim on the silhouette ---
-        // A foreground pixel that has background within ~3px is near the edge → cyan rim.
+        // --- bioluminescent fresnel rim on the silhouette (bold cyan edge) ---
         Parallel.For(0, h, y =>
         {
             for (int x = 0; x < w; x++)
             {
                 int i = y * w + x;
-                if (bright[i] < 0.25f) continue;
+                if (bright[i] < 0.22f) continue;
                 bool nearEdge = false;
                 for (int s = 0; s < 8 && !nearEdge; s++)
                 {
-                    int nx = x + Off8X[s] * 3, ny = y + Off8Y[s] * 3;
+                    int nx = x + Off8X[s] * 4, ny = y + Off8Y[s] * 4;
                     if (nx < 0 || ny < 0 || nx >= w || ny >= h) { nearEdge = true; break; }
-                    if (bright[ny * w + nx] < 0.08f) nearEdge = true;
+                    if (bright[ny * w + nx] < 0.07f) nearEdge = true;
                 }
                 if (!nearEdge) continue;
-                float rim = 0.55f * bright[i];
-                AddRgb(px, i, 0.10f * rim, 0.70f * rim, 0.95f * rim);
+                float rim = 1.05f * bright[i];
+                AddRgb(px, i, 0.12f * rim, 0.85f * rim, 1.15f * rim);
             }
         });
 
-        // --- bioluminescent photophores: sparse pulsing dots on the brightest detail ---
-        float foldBoost = 1f + 2.2f * foldEnv;
-        Parallel.For(0, h, y =>
+        // --- bioluminescent photophores: sparse pulsing glow discs on the brightest detail ---
+        // Sequential so each lights a small disc (visible at video scale). Sparse → cheap.
+        float foldBoost = 1f + 3.5f * foldEnv;
+        for (int y = 0; y < h; y += 5)
         {
-            for (int x = 0; x < w; x++)
+            for (int x = 0; x < w; x += 5)
             {
-                int i = y * w + x;
-                if (bright[i] < 0.55f) continue;
-                // Sparse lattice gate so only ~1 in N bright cells lights up.
+                int ci = y * w + x;
+                if (bright[ci] < 0.48f) continue;
                 uint cell = Hash2((uint)(x / 5), (uint)(y / 5));
-                if ((cell & 15u) != 0u) continue;
+                if ((cell & 7u) != 0u) continue;          // ~1 in 8 bright cells
                 float ph = (cell & 0xFFFF) / 65535f * 6.2832f;
-                float pulse = 0.45f + 0.55f * MathF.Sin(time * 4.0f + ph);
-                float intensity = pulse * foldBoost * 0.72f * bright[i];
-                // Alternate cyan / magenta photophores.
-                if ((cell & 64u) != 0u) AddRgb(px, i, 0.9f * intensity, 0.25f * intensity, 0.9f * intensity);
-                else                    AddRgb(px, i, 0.2f * intensity, 0.95f * intensity, 1.0f * intensity);
+                float pulse = 0.4f + 0.6f * MathF.Sin(time * 3.5f + ph);
+                float inten = pulse * foldBoost * 1.25f * bright[ci];
+                bool magenta = (cell & 64u) != 0u;
+                float cr = magenta ? 1.0f * inten : 0.25f * inten;
+                float cg = magenta ? 0.30f * inten : 1.0f * inten;
+                float cb = magenta ? 1.0f * inten : 1.15f * inten;
+                int rad = 3;
+                for (int dy = -rad; dy <= rad; dy++)
+                for (int dx = -rad; dx <= rad; dx++)
+                {
+                    int xx = x + dx, yy = y + dy;
+                    if (xx < 0 || yy < 0 || xx >= w || yy >= h) continue;
+                    float dd = dx * dx + dy * dy; if (dd > rad * rad) continue;
+                    float fall = 1f - MathF.Sqrt(dd) / rad; fall *= fall;
+                    AddRgb(px, yy * w + xx, cr * fall, cg * fall, cb * fall);
+                }
             }
-        });
+        }
     }
 
     private static readonly int[] Off8X = { 1, -1, 0, 0, 1, -1, 1, -1 };

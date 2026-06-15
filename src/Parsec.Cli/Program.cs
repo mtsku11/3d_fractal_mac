@@ -1004,13 +1004,13 @@ public static class Program
                     float t = (float)i / fps;
                     float u = nFrames > 1 ? (float)i / (nFrames - 1) : 0f;
                     // Slow "breathing" pulse (a living inhale/exhale) on top of the big morph.
-                    float breath = MathF.Sin(2f * MathF.PI * 0.13f * t);
+                    float breath = MathF.Sin(2f * MathF.PI * 0.14f * t);
                     float power = powerMid + powerAmp * MathF.Sin(2f * MathF.PI * morphHz * t)
                                            + 0.3f * pace * MathF.Sin(2f * MathF.PI * 0.55f * pace * t + 0.6f)
-                                           + 0.45f * breath;
-                    // Animated domain warp = membrane undulation; its strength breathes too.
-                    Parsec.Rendering.DomainWarpState.SetControls(true, 0.065f + 0.03f * (0.5f + 0.5f * breath), 1.5f);
-                    Parsec.Rendering.DomainWarpState.SetPhase(t * 0.5f);
+                                           + 1.2f * breath;                                   // pronounced swell/contract
+                    // Animated domain warp = membrane undulation; strong + breathing strength, faster ripple.
+                    Parsec.Rendering.DomainWarpState.SetControls(true, 0.18f + 0.10f * (0.5f + 0.5f * breath), 1.6f);
+                    Parsec.Rendering.DomainWarpState.SetPhase(t * 1.0f);
                     float ang = 2f * MathF.PI * 0.5f * pace * u + 0.4f;
                     float radius = 2.4f - 0.5f * MathF.Sin(2f * MathF.PI * 0.25f * pace * t);
                     float elev = 0.45f + 0.25f * MathF.Sin(2f * MathF.PI * 0.2f * pace * t);
