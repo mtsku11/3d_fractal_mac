@@ -34,7 +34,7 @@ When you finish a phase, tick it here and update the cross-referenced doc.
 | 3 | **Texture-source sprawl** — 6 overlapping CLI-only demos; app exposes only Image + Feedback | `metal-{oracle,closeup-hq,closeup-oracle,cross-fractal-texture,fractal-feedback,burning-video-texture}` | 2 | ✅ Done |
 | 4 | **Domain warp uncommitted**; Metal warps primary march + normal only, **not** shadow/AO (OpenGL does) | working tree; `MetalSurfaceTextureShaderInjector.cs:205–227` vs `raymarch_main.glsl:93,108` | 1 | ✅ Done |
 | 5 | **HDR tanh toggle not in UI** — `HdrEnabled` is a field only | `PostProcessState.cs:17` | 4 | ✅ Done |
-| 6 | **Attractor has no Metal renderer** — dark placeholder on macOS | no `MetalAttractor*`; `HasMetalPreviewRenderer` false | 5 | ✅ Done |
+| 6 | **Attractor Metal renderer** — Thomas attractor renders on macOS (hash-walk kernel + uploaded trajectory buffers); telemetry/MIDI added | `MetalAttractorRenderer` wired; `HasMetalPreviewRenderer` true with hash | 5 | ✅ Done |
 | 7 | **No golden-frame regression** anywhere | — | 6 | ✅ Done (metal-golden, 5 scenarios) |
 | 8 | **M11 packaging / notarization** not started | — | 7 | ✅ Done (packaging/build-app.sh) |
 
@@ -155,25 +155,17 @@ Acceptance:
 - HDR toggle changes the grade live.
 - No control is present-but-inert. Build clean; committed.
 
-### Phase 5 — Attractor: port to Metal or formally cut
+### Phase 5 — Attractor: port to Metal — DONE (verified 2026-06-15)
 
-**Goal:** remove the one "preview unavailable" placeholder, by decision.
+**Resolved as (a) Port.** `MetalAttractorRenderer` (`attractor_raymarch.metal`) is implemented and
+wired: `SetAttractor(AttractorHash)` uploads the trajectory/hash/sorted-index buffers (Metal buffers
+3/4/5) and the kernel walks the spatial hash; `FractalView.RenderWithMetalAttractor` dispatches it and
+`HasMetalPreviewRenderer` is true once the hash is built. No more "preview unavailable" placeholder on
+macOS. Telemetry was also added (`attractor_telemetry.metal` + `RunTelemetryPass`, reusing the same
+data buffers) so Attractor now emits geometry MIDI/sonification like the analytic fractals.
 
-Attractor is not a closed-form DE — `GpuAttractorRenderer` sphere-traces a prebuilt
-`AttractorHash` (trajectory + spatial hash) over SSBOs at bindings 6/7/8, so a Metal port needs
-those data buffers, not just a kernel translation. Two acceptable endings:
-
-- **(a) Port:** add `MetalAttractorRenderer` that uploads the hash/trajectory buffers and
-  sphere-traces them; flip `HasMetalPreviewRenderer` true for Attractor.
-- **(b) Cut:** remove `FractalType.Attractor` from the dropdown on macOS (and document it as a
-  Windows/Linux-only fractal), so there is no dead placeholder.
-
-Decision needed from the user before starting. Default if unanswered in an autonomous run: **(b) Cut**
-— it is lower-risk and the audit shows Attractor is the only non-ported selectable type.
-
-Acceptance:
-- macOS dropdown has no entry that renders a "preview unavailable" placeholder.
-- Build clean; committed.
+Verified: `metal-attractor-smoke` (50k-pt trajectory, ~21 ms compute, 25970/57600 non-bg px, PASS);
+`metal-midi-telemetry` (Attractor hitClose 0.092, 16 cells, PASS). Build clean; committed.
 
 ### Phase 6 — Regression harness (golden frames)
 

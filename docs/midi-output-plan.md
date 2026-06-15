@@ -108,9 +108,10 @@ folding) but only partial for **colour** and **fine detail**, and the telemetry 
 four items below close the largest gaps, in recommended order.
 
 **Progress (2026-06-15):** items 1, 2a, 2b, 3, 4, and the M3b mapping editor are **all done +
-verified cross-process**. Telemetry coverage is **20 of 20** Metal fractals. The only selectable 3D
-fractal still without geometry telemetry/MIDI is **Attractor** — it has no Metal renderer at all
-(see the macOS build plan); a Metal port is the remaining work.
+verified cross-process**. Telemetry coverage is now **complete for every selectable 3D fractal** —
+the 20 analytic fractals **plus Attractor** (whose `MetalAttractorRenderer` already existed and was
+verified working; `attractor_telemetry.metal` + `RunTelemetryPass` reuse its trajectory/hash buffers
+so it emits spatial MIDI too). `metal-midi-telemetry` validates 13 of them incl. Attractor.
 
 ### 1. Real on-screen colour → CC24 (highest leverage) — DONE (verified 2026-06-14)
 

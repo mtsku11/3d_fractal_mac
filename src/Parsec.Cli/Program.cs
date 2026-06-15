@@ -5190,6 +5190,19 @@ public static class Program
                 using (var r = new MetalOrbitHybridRenderer())
                 { if (!r.IsAvailable) { Console.Error.WriteLine("OrbitHybrid Metal unavailable"); return 1; }
                   Check("OrbitHybrid", r.RunTelemetryPass(new OrbitHybridParams(), Cam(24f), settingsM), r.RunTelemetryPass(new OrbitHybridParams(), Cam(9f), settingsM)); }
+                using (var r = new MetalAttractorRenderer())
+                {
+                    if (!r.IsAvailable) { Console.Error.WriteLine("Attractor Metal unavailable"); return 1; }
+                    var traj = Parsec.Core.Attractors.ThomasAttractor.Generate(new Parsec.Core.Attractors.AttractorParams { NumSteps = 50_000 });
+                    var hash = Parsec.Core.Attractors.AttractorHash.Build(traj, gridSize: 64);
+                    r.SetAttractor(hash);
+                    var ctr = (hash.BoundsMin + hash.BoundsMax) * 0.5f;
+                    float span = (hash.BoundsMax - hash.BoundsMin).Length();
+                    var rp = new Parsec.Rendering.Gpu.AttractorRenderParams { TubeRadius = 0.06f, Fudge = 0.45f };
+                    Camera3D acam(float mul) => new(ctr + new Vector3(0f, 0.3f, 1f) * span * mul, ctr, Vector3.UnitY, MathF.PI / 4f, 64f / 36f);
+                    Check("Attractor", r.RunTelemetryPass(rp, acam(2.2f), settingsM, hash),
+                                       r.RunTelemetryPass(rp, acam(0.9f), settingsM, hash));
+                }
 
                 if (failures > 0) { Console.Error.WriteLine($"metal-midi-telemetry: {failures} kernel(s) failed."); return 1; }
                 Console.WriteLine("All MIDI-only telemetry kernels compiled and returned valid stats.");

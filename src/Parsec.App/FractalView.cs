@@ -889,6 +889,8 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
             => _metalAnisotropicRenderer.RunTelemetryPass(Anisotropic.ToParams(), camera, settings),
         FractalType.OrbitHybrid when _metalOrbitHybridRenderer?.IsAvailable == true
             => _metalOrbitHybridRenderer.RunTelemetryPass(OrbitHybrid.ToParams(), camera, settings),
+        FractalType.Attractor when _metalAttractorRenderer?.IsAvailable == true && _attractorHash != null
+            => _metalAttractorRenderer.RunTelemetryPass(Attractor.ToRenderParams(), camera, settings, _attractorHash),
         _ => null,
     };
 

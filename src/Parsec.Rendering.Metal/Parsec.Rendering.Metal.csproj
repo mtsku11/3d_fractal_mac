@@ -33,6 +33,7 @@
     <EmbeddedResource Include="Shaders\mandalay_telemetry.metal" />
     <EmbeddedResource Include="Shaders\anisotropic_telemetry.metal" />
     <EmbeddedResource Include="Shaders\orbithybrid_telemetry.metal" />
+    <EmbeddedResource Include="Shaders\attractor_telemetry.metal" />
     <EmbeddedResource Include="Shaders\mandelbulb_raymarch.metal" />
     <EmbeddedResource Include="Shaders\rotbox_raymarch.metal" />
     <EmbeddedResource Include="Shaders\kifs_raymarch.metal" />
