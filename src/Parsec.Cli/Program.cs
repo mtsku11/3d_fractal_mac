@@ -769,6 +769,157 @@ public static class Program
             catch (Exception ex) { Console.Error.WriteLine($"metal-morph-mp4 FAILED: {ex.Message}\n{ex.StackTrace}"); return 1; }
         }
 
+        // midi-showcase [duration] [out.mp4] [w] [h]
+        // Render a Mandelbulb power-morph flythrough and play the EXACT geometry→MIDI stream it
+        // emits through the in-repo 8-voice instrument synth, muxed to an audio+video mp4.
+        if (args[0] is "midi-showcase")
+        {
+            if (!OperatingSystem.IsMacOS()) { Console.Error.WriteLine("midi-showcase requires macOS."); return 1; }
+            try
+            {
+                double duration = args.Length > 1 && double.TryParse(args[1], out var dd) ? dd : 20.0;
+                string outMp4   = args.Length > 2 ? args[2] : ResolveOutputPath("midi_showcase.mp4");
+                int w = args.Length > 3 && int.TryParse(args[3], out var pw) ? pw : 1280;
+                int h = args.Length > 4 && int.TryParse(args[4], out var ph) ? ph : 720;
+                if ((w & 1) != 0) w++; if ((h & 1) != 0) h++;
+                const int fps = 30;
+                int nFrames = Math.Max(1, (int)Math.Round(duration * fps));
+
+                Console.WriteLine($"midi-showcase — Mandelbulb power-morph, {duration:F1}s @ {fps}fps ({nFrames} frames), {w}x{h}");
+
+                using var renderer = new MetalMandelbulbRenderer();
+                if (!renderer.IsAvailable) { Console.Error.WriteLine("Metal backend not available."); return 1; }
+
+                // MIDI controller + recording hook: capture the exact emitted stream.
+                using var midi = new Parsec.Audio.Midi.MidiOutputSession("Parsec");
+                if (!midi.IsAvailable) { Console.Error.WriteLine($"MIDI unavailable: {midi.UnavailableReason}"); return 1; }
+                var cfg = new Parsec.Audio.Midi.MidiMappingConfig();
+                var controller = new Parsec.Audio.Midi.MidiOutputController(midi, cfg);
+                var events = new List<Parsec.Audio.Midi.MidiInstrumentSynth.Ev>();
+                double evTime = 0;
+                midi.OnControlChange = (ch, cc, v) => events.Add(new(evTime, Parsec.Audio.Midi.MidiInstrumentSynth.EvType.Cc, ch, cc, v));
+                midi.OnNoteOn        = (ch, nn, ve) => events.Add(new(evTime, Parsec.Audio.Midi.MidiInstrumentSynth.EvType.NoteOn, ch, nn, ve));
+                midi.OnNoteOff       = (ch, nn) => events.Add(new(evTime, Parsec.Audio.Midi.MidiInstrumentSynth.EvType.NoteOff, ch, nn, 0));
+
+                var telSettings = new RaymarchSettings(
+                    MaxSteps: 160, HitEpsilon: 1e-3f, MaxDistance: 40f, NormalEpsilon: 1.5e-3f,
+                    EnableSoftShadows: false, ShadowSteps: 0, ShadowSoftness: 0f,
+                    EnableAmbientOcclusion: false, AOSamples: 0, AOStepDistance: 0f, AOIntensity: 0f,
+                    HeroSamples: 1, EnableReflections: false, ReflectionBounces: 0,
+                    Gloss: 0f, F0: 0f, LightIntensity: 1f);
+                var dispSettings = new RaymarchSettings(
+                    MaxSteps: 300, HitEpsilon: 5e-4f, MaxDistance: 40f, NormalEpsilon: 5e-4f,
+                    EnableSoftShadows: true, ShadowSteps: 64, ShadowSoftness: 12f,
+                    EnableAmbientOcclusion: true, AOSamples: 5, AOStepDistance: 0.04f, AOIntensity: 1.0f,
+                    HeroSamples: 1, EnableReflections: false, ReflectionBounces: 0,
+                    Gloss: 0f, F0: 0f, LightIntensity: 1.0f);
+
+                var bg = new Color(0.01f, 0.01f, 0.03f);
+                var surface = Color.Rgb(200, 175, 155);
+                var light = Vector3.Normalize(new Vector3(0.8f, 1.6f, 1.0f));
+
+                var frameDir = Path.Combine(Path.GetTempPath(), $"parsec-midishow-{Guid.NewGuid():N}");
+                Directory.CreateDirectory(frameDir);
+
+                var prevPos = Vector3.Zero; float prevPower = 0f; bool havePrev = false;
+                var sw = System.Diagnostics.Stopwatch.StartNew();
+
+                for (int i = 0; i < nFrames; i++)
+                {
+                    float t = (float)i / fps;                 // seconds
+                    float u = nFrames > 1 ? (float)i / (nFrames - 1) : 0f;
+                    // Power morph: slow sweep with a faster wobble → folds + complexity changes.
+                    float power = 5.0f + 2.6f * MathF.Sin(2f * MathF.PI * 0.18f * t)
+                                       + 1.0f * MathF.Sin(2f * MathF.PI * 0.55f * t + 0.6f);
+                    // Camera: slow orbit + dolly in/out → position, proximity, dolly motion.
+                    float ang = 2f * MathF.PI * 0.5f * u + 0.4f;
+                    float radius = 2.35f - 0.55f * MathF.Sin(2f * MathF.PI * 0.25f * t);
+                    float elev = 0.45f + 0.25f * MathF.Sin(2f * MathF.PI * 0.2f * t);
+                    var pos = new Vector3(MathF.Cos(ang) * radius, elev, MathF.Sin(ang) * radius);
+                    var fwd = Vector3.Normalize(Vector3.Zero - pos);
+
+                    var fractal = new MandelbulbParams { Power = power, Iterations = 10, Bailout = 2.0f, Fudge = 0.9f, BoundRadius = 1.3f };
+                    var telCam  = new Camera3D(pos, Vector3.Zero, Vector3.UnitY, MathF.PI / 3.5f, (float)w / h);
+                    var st = renderer.RunTelemetryPass(fractal, telCam, telSettings);
+
+                    float spd = havePrev ? (pos - prevPos).Length() * fps : 0f;
+                    float zv  = havePrev ? Vector3.Dot(pos - prevPos, fwd) * fps : 0f;
+                    float pv  = havePrev ? MathF.Abs(power - prevPower) * fps : 0f;
+                    prevPos = pos; prevPower = power; havePrev = true;
+
+                    FractalSonicCell[]? cells = null;
+                    if (st?.Cells is { Length: > 0 } mc)
+                    {
+                        cells = new FractalSonicCell[mc.Length];
+                        for (int ci = 0; ci < mc.Length; ci++)
+                            cells[ci] = new FractalSonicCell(mc[ci].WorldPosition, mc[ci].HitRatio, mc[ci].MeanDepth,
+                                mc[ci].StepComplexity, mc[ci].NormalMean, mc[ci].TrapMean, mc[ci].Energy);
+                    }
+
+                    var frame = new FractalSonicFrame(
+                        Time: t, HitRatio: st?.HitRatio ?? 0f, MeanDepth: st?.MeanDepth ?? 0f,
+                        DepthVariance: st?.DepthVariance ?? 0f, StepMean: st?.StepMean ?? 0f, StepP90: st?.StepP90 ?? 0f,
+                        NormalMean: st?.NormalMean ?? Vector3.Zero, NormalVariance: st?.NormalVariance ?? 0f,
+                        TrapMean: st?.TrapMean ?? Vector4.Zero, TrapVariance: st?.TrapVariance ?? Vector4.Zero,
+                        CameraSpeed: spd, ParameterVelocity: pv,
+                        CameraPosition: pos, CameraForward: fwd, CameraUp: Vector3.UnitY,
+                        Cells: cells, ZoomVelocity: zv,
+                        CentroidX: st?.CentroidX ?? 0f, CentroidY: st?.CentroidY ?? 0f, Dispersion: st?.Dispersion ?? 0f,
+                        MidiRegionEnergy: st?.MidiRegionEnergy);
+
+                    // Animate palette hue slowly so on-screen colour (→ CC24 → choir) actually moves.
+                    float hueShift = 0.5f * t / (float)Math.Max(1.0, duration);
+                    var palette = new PaletteParams
+                    {
+                        Base = new Vector3(0.5f, 0.5f, 0.5f), Amp = new Vector3(0.5f, 0.5f, 0.5f),
+                        Frequency = 1.4f, Phase = new Vector3(hueShift, 0.33f + hueShift, 0.67f + hueShift),
+                        TrapScale = 0.75f, TrapMix = new Vector3(0.6f, 0.5f, 0.2f), ShellMix = 0.55f,
+                    };
+
+                    var pixels = renderer.RenderMandelbulb(fractal, telCam, w, h, dispSettings, bg, surface, light, palette);
+                    var (hue, hsat, hval) = Parsec.Audio.Midi.MidiOutputController.MeanScreenColorHsv(pixels, w, h);
+
+                    evTime = t;
+                    controller.Update(frame, hue, hsat, hval);
+
+                    var info  = new SKImageInfo(w, h, SKColorType.Rgba8888, SKAlphaType.Premul);
+                    var bmp   = new SKBitmap(info);
+                    var bytes = new byte[pixels.Length * 4];
+                    Buffer.BlockCopy(pixels, 0, bytes, 0, bytes.Length);
+                    Marshal.Copy(bytes, 0, bmp.GetPixels(), bytes.Length);
+                    ImageOutput.SavePng(bmp, Path.Combine(frameDir, $"frame_{i:D4}.png"));
+                    bmp.Dispose();
+                    if (i % fps == 0 || i == nFrames - 1)
+                        Console.Write($"\r  frame {i + 1}/{nFrames}  pow={power:F1} hit={st?.HitRatio ?? 0:F2} events={events.Count}   ");
+                }
+                sw.Stop();
+                Console.WriteLine($"\n  rendered {nFrames} frames in {sw.ElapsedMilliseconds / 1000.0:F1}s; captured {events.Count} MIDI messages");
+
+                // Synthesize the 8-voice instrument audio from the captured MIDI.
+                Console.Write("  synthesizing 8-voice instrument mix... ");
+                var pcm = Parsec.Audio.Midi.MidiInstrumentSynth.Synthesize(events, duration);
+                string wav = Path.Combine(frameDir, "mix.wav");
+                WavEncoder.Write(wav, pcm, Parsec.Audio.Midi.MidiInstrumentSynth.SampleRate, channels: 2);
+                float pk = 0f; for (int s = 0; s < pcm.Length; s++) pk = MathF.Max(pk, MathF.Abs(pcm[s]) / 32767f);
+                Console.WriteLine($"peak {20f * MathF.Log10(pk + 1e-9f):F1} dBFS");
+
+                // Mux frames + audio → mp4.
+                Directory.CreateDirectory(Path.GetDirectoryName(outMp4)!);
+                string ffArgs = $"-y -framerate {fps} -i \"{Path.Combine(frameDir, "frame_%04d.png")}\" -i \"{wav}\" " +
+                    $"-c:v libx264 -crf 17 -preset medium -pix_fmt yuv420p -c:a aac -b:a 192k -shortest \"{outMp4}\"";
+                var proc = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("ffmpeg", ffArgs)
+                    { RedirectStandardError = true, UseShellExecute = false })!;
+                proc.StandardError.ReadToEnd();
+                proc.WaitForExit();
+                if (proc.ExitCode != 0) { Console.Error.WriteLine("ffmpeg failed."); return 1; }
+                Directory.Delete(frameDir, recursive: true);
+                var fi = new FileInfo(outMp4);
+                Console.WriteLine($"  -> {outMp4}  ({fi.Length / 1024} KB)");
+                return 0;
+            }
+            catch (Exception ex) { Console.Error.WriteLine($"midi-showcase FAILED: {ex.Message}\n{ex.StackTrace}"); return 1; }
+        }
+
         if (args[0] is "metal-domain-warp-mp4")
         {
             if (!OperatingSystem.IsMacOS()) { Console.Error.WriteLine("metal-domain-warp-mp4 requires macOS."); return 1; }

@@ -57,9 +57,17 @@ public sealed class MidiOutputSession : IDisposable
         }
     }
 
+    // Optional observers — fire on every emitted message regardless of CoreMIDI delivery, so an
+    // offline tool (e.g. the MIDI-instrument showcase) can record the exact stream the controller
+    // produces and play it through a synth. (channel, data1, data2[/velocity]).
+    public Action<int, int, int>? OnControlChange;
+    public Action<int, int, int>? OnNoteOn;
+    public Action<int, int>? OnNoteOff;
+
     /// <summary>Control Change (0xB0). channel 0–15, cc/value 0–127.</summary>
     public bool SendControlChange(int channel, int cc, int value)
     {
+        OnControlChange?.Invoke(channel, cc & 0x7F, value & 0x7F);
         Span<byte> m = stackalloc byte[3];
         m[0] = (byte)(0xB0 | (channel & 0x0F));
         m[1] = (byte)(cc & 0x7F);
@@ -70,6 +78,7 @@ public sealed class MidiOutputSession : IDisposable
     /// <summary>Note On (0x90). A velocity of 0 is, per spec, a Note Off.</summary>
     public bool SendNoteOn(int channel, int note, int velocity)
     {
+        OnNoteOn?.Invoke(channel, note & 0x7F, velocity & 0x7F);
         Span<byte> m = stackalloc byte[3];
         m[0] = (byte)(0x90 | (channel & 0x0F));
         m[1] = (byte)(note & 0x7F);
@@ -80,6 +89,7 @@ public sealed class MidiOutputSession : IDisposable
     /// <summary>Note Off (0x80).</summary>
     public bool SendNoteOff(int channel, int note)
     {
+        OnNoteOff?.Invoke(channel, note & 0x7F);
         Span<byte> m = stackalloc byte[3];
         m[0] = (byte)(0x80 | (channel & 0x0F));
         m[1] = (byte)(note & 0x7F);
