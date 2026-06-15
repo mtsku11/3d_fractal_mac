@@ -89,9 +89,14 @@ values, so "fold" / "expand" fire as discrete musical events rather than constan
   chord (cf. the M2 fold guard). Normalisation gains are tunable fields (defaults set; real tuning is
   against live flying). Null-safe for the 12 fractals without telemetry. Verified cross-process:
   670 msgs / 0 undecoded, all 15 CCs + Enclose/Emerge/Shimmer + 6 distinct spatial cells.
-- **M3b — configurability (deferred by the user's "fixed defaults, editor later" choice).** An
-  editable mapping panel (signal → CC/note/channel/range), modelled on the existing
-  `AudioMappingPanel`. Not started — confirm before building.
+- **M3b — configurability (done, verified 2026-06-15).** `MidiMappingConfig` holds 17 editable
+  CC routes + 3 note-group channels; `MidiOutputController` routes every CC/note through it
+  (`EmitMapped`, per-mapping smoothing+dedup) with defaults reproducing the prior fixed map
+  byte-for-byte. `MidiMappingPanel` (code-behind, cf. `AudioMappingPanel`) edits the live config:
+  enable / CC# / channel / out min–max / invert per signal + per-group channel. CLI
+  `midi-map-check` verifies remap end-to-end (Size→CC50 ch3, Complexity off, Proximity 100–127);
+  `midi-monitor` prints remapped CCs outside 20–36. Note-NUMBER editing is still fixed (channel +
+  enable per group is exposed); that and a Reset-to-defaults button are easy follow-ons.
 - **Later.** MPE / pitch-bend for expressive per-cell voices; MIDI clock / note quantisation to a
   musical grid; per-cell spatial mapping to channels.
 
@@ -102,9 +107,10 @@ folding) but only partial for **colour** and **fine detail**, and the telemetry 
 *geometry*, not the rendered *pixels* — so shading/lighting/bloom/grade are not represented. The
 four items below close the largest gaps, in recommended order.
 
-**Progress (2026-06-15):** items 1, 2a, 3, and **4 are all done + verified**. Telemetry coverage is
-now **20 of 20** Metal fractals. Remaining optional work: 2b (finer region-note grid) and the M3b
-mapping editor — both deferred pending confirmation.
+**Progress (2026-06-15):** items 1, 2a, 2b, 3, 4, and the M3b mapping editor are **all done +
+verified cross-process**. Telemetry coverage is **20 of 20** Metal fractals. The only selectable 3D
+fractal still without geometry telemetry/MIDI is **Attractor** — it has no Metal renderer at all
+(see the macOS build plan); a Metal port is the remaining work.
 
 ### 1. Real on-screen colour → CC24 (highest leverage) — DONE (verified 2026-06-14)
 
@@ -161,6 +167,13 @@ of stable audio code — avoid.
 
 **Acceptance.** 2a: position CCs track a small off-centre object the 4×4 grid blurs; sonification output
 unchanged (A/B a sonify render). **Effort:** 2a small, 2b moderate. **Risk:** 2a low, 2b medium (note layout).
+
+**2b status (done, verified 2026-06-15):** `TelemetryReduction.RegionEnergyGrid` computes an 8×6=48
+energy grid from the 64×36 telemetry → `MidiRegionEnergy` on stats+frame. `MidiOutputController`
+fires per-cell onset notes (base 36, so 36–83) on the fine-grid channel (default **ch 2**) with its
+own note-off book and a startup guard — parallel to the 4×4 on ch 1, no collision, sonification grid
+untouched. UI checkbox "Fine region grid → ch2" (default on). Verified cross-process: notes 52–83
+(fine-only) fired 28 distinct cells, 0 undecoded.
 
 **2a status (done, verified 2026-06-14):** `TelemetryReduction.FullResCentroid` computes an
 energy-weighted centroid + spread over the full 64×36 grid (shared via an `(int hit, float depth)`
