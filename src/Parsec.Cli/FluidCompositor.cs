@@ -14,7 +14,7 @@ internal static class FluidCompositor
 {
     public static void Apply(uint[] px, int w, int h, FluidParticleField field, Camera3D cam, float fovY, float time,
                              Func<Vector3, float>? de = null, bool deepSea = false, float foldEnv = 0f,
-                             float excitement = 0f)
+                             float excitement = 0f, SurfacePhotophores? photophores = null)
     {
         // 1. Underwater grade (parallel over rows).
         Parallel.For(0, h, y =>
@@ -48,6 +48,10 @@ internal static class FluidCompositor
         // 1b. "Living creature" emissive layer (subsurface bloom + bioluminescent rim/photophores),
         //     applied over the water-graded body but under the particles so it glows through.
         if (deepSea) DeepSeaPost.ApplyEmissive(px, w, h, time, foldEnv, excitement);
+
+        // Surface-anchored bioluminescent photophores (3-D, occluded, riding the skin).
+        if (deepSea && photophores != null && de != null)
+            DrawSurfacePhotophores(px, w, h, cam, fovY, de, photophores, time, excitement, foldEnv);
 
         // 2. Additive particle splats (single-threaded — splats overlap in the buffer).
         var posCam = cam.Position;
@@ -124,6 +128,75 @@ internal static class FluidCompositor
                 int nr = Math.Min(255, (int)(q & 0xFF) + (int)(cr * wgt * 255f));
                 int ng = Math.Min(255, (int)((q >> 8) & 0xFF) + (int)(cg * wgt * 255f));
                 int nb = Math.Min(255, (int)((q >> 16) & 0xFF) + (int)(cb * wgt * 255f));
+                px[idx] = (255u << 24) | ((uint)nb << 16) | ((uint)ng << 8) | (uint)nr;
+            }
+        }
+    }
+
+    // 3-D photophores anchored to the surface: project, occlusion-test against the DE, draw a
+    // pulsing glow disc. They ride the deforming skin and hide on the creature's far side.
+    private static void DrawSurfacePhotophores(uint[] px, int w, int h, Camera3D cam, float fovY,
+        Func<Vector3, float> de, SurfacePhotophores ph, float time, float excitement, float foldEnv)
+    {
+        var posCam = cam.Position;
+        var fwd = Vector3.Normalize(cam.LookAt - cam.Position);
+        var right = Vector3.Normalize(Vector3.Cross(fwd, cam.Up));
+        var upL = Vector3.Cross(right, fwd);
+        float tanY = MathF.Tan(fovY * 0.5f);
+        float tanX = tanY * cam.AspectRatio;
+        float foldBoost = 1f + 3.0f * foldEnv;
+        float pulseRate = 2.2f * (1f + 1.4f * excitement);
+
+        for (int i = 0; i < ph.Pos.Length; i++)
+        {
+            Vector3 a = ph.Pos[i];
+            Vector3 v = a - posCam;
+            float zc = Vector3.Dot(v, fwd);
+            if (zc <= 0.08f) continue;
+            float sx = Vector3.Dot(v, right) / (zc * tanX);
+            float sy = Vector3.Dot(v, upL) / (zc * tanY);
+            if (MathF.Abs(sx) > 1.05f || MathF.Abs(sy) > 1.05f) continue;
+
+            // Occlusion: march camera→anchor; if it hits the surface before (almost) reaching the
+            // anchor, this photophore is on the creature's far side → hidden.
+            float dist = v.Length();
+            Vector3 dir = v / dist;
+            bool occ = false;
+            float tt = 0.04f;
+            for (int s = 0; s < 40 && tt < dist - 0.06f; s++)
+            {
+                float dd = de(posCam + dir * tt);
+                if (dd < 1.8e-3f) { occ = true; break; }
+                tt += MathF.Max(dd, 1.2e-3f);
+            }
+            if (occ) continue;
+
+            float fpx = (sx * 0.5f + 0.5f) * w;
+            float fpy = (0.5f - sy * 0.5f) * h;
+            float fog = MathF.Exp(-zc * 0.2f);
+            float pulse = 0.4f + 0.6f * MathF.Sin(time * pulseRate + ph.Phase[i]);
+            float inten = pulse * foldBoost * 2.2f * fog;   // bright so they read against the glow
+            bool magenta = ph.Magenta[i];
+            float cr = magenta ? 1.15f * inten : 0.30f * inten;
+            float cg = magenta ? 0.30f * inten : 1.10f * inten;
+            float cb = magenta ? 1.15f * inten : 1.30f * inten;
+
+            int rad = 5;
+            int x0 = Math.Max(0, (int)(fpx - rad)), x1 = Math.Min(w - 1, (int)(fpx + rad));
+            int y0 = Math.Max(0, (int)(fpy - rad)), y1 = Math.Min(h - 1, (int)(fpy + rad));
+            float r2 = rad * rad;
+            for (int yy = y0; yy <= y1; yy++)
+            for (int xx = x0; xx <= x1; xx++)
+            {
+                float dx = xx - fpx, dy = yy - fpy;
+                float dd = dx * dx + dy * dy;
+                if (dd > r2) continue;
+                float fall = 1f - MathF.Sqrt(dd) / rad; fall *= fall;
+                int idx = yy * w + xx;
+                uint q = px[idx];
+                int nr = Math.Min(255, (int)(q & 0xFF) + (int)(cr * fall * 255f));
+                int ng = Math.Min(255, (int)((q >> 8) & 0xFF) + (int)(cg * fall * 255f));
+                int nb = Math.Min(255, (int)((q >> 16) & 0xFF) + (int)(cb * fall * 255f));
                 px[idx] = (255u << 24) | ((uint)nb << 16) | ((uint)ng << 8) | (uint)nr;
             }
         }

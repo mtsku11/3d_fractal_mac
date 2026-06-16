@@ -30,9 +30,9 @@ internal static class DeepSeaPost
         bloom = BoxBlur(bloom, w, h, 7);
         Parallel.For(0, n, i =>
         {
-            float bl = bloom[i] * 1.4f;             // gelatinous subsurface halo (boosted for dark body)
+            float bl = bloom[i] * 0.95f;            // gelatinous subsurface halo (eased so the dots read)
             if (bl < 0.002f) return;
-            AddRgb(px, i, 0.20f * bl, 0.70f * bl, 0.78f * bl);
+            AddRgb(px, i, 0.18f * bl, 0.62f * bl, 0.70f * bl);
         });
 
         // --- bioluminescent fresnel rim on the silhouette (bold cyan edge) ---
@@ -55,39 +55,9 @@ internal static class DeepSeaPost
             }
         });
 
-        // --- bioluminescent photophores: pulsing glow discs on mid-tone "skin" (so they read as
-        //     lights emerging from the darker body, not lost in the blown-out highlights). ---
-        float foldBoost = 1f + 3.5f * foldEnv;
-        const int cellPx = 7;
-        for (int y = 0; y < h; y += cellPx)
-        {
-            for (int x = 0; x < w; x += cellPx)
-            {
-                int ci = y * w + x;
-                // On the body (skin), excluding only the very brightest tips → high-contrast dots.
-                if (bright[ci] < 0.10f || bright[ci] > 0.62f) continue;
-                uint cell = Hash2((uint)(x / cellPx), (uint)(y / cellPx));
-                if ((cell & 7u) != 0u) continue;          // ~1 in 8 eligible cells
-                float ph = (cell & 0xFFFF) / 65535f * 6.2832f;
-                float pulseRate = 2.2f * (1f + 1.4f * excitement);   // excited → faster flicker
-                float pulse = 0.35f + 0.65f * MathF.Sin(time * pulseRate + ph);
-                float inten = pulse * foldBoost * 2.9f * (0.4f + 0.6f * bright[ci]);
-                bool magenta = (cell & 64u) != 0u;
-                float cr = magenta ? 1.1f * inten : 0.25f * inten;
-                float cg = magenta ? 0.30f * inten : 1.1f * inten;
-                float cb = magenta ? 1.1f * inten : 1.25f * inten;
-                int rad = 4;
-                for (int dy = -rad; dy <= rad; dy++)
-                for (int dx = -rad; dx <= rad; dx++)
-                {
-                    int xx = x + dx, yy = y + dy;
-                    if (xx < 0 || yy < 0 || xx >= w || yy >= h) continue;
-                    float dd = dx * dx + dy * dy; if (dd > rad * rad) continue;
-                    float fall = 1f - MathF.Sqrt(dd) / rad; fall *= fall;
-                    AddRgb(px, yy * w + xx, cr * fall, cg * fall, cb * fall);
-                }
-            }
-        }
+        // NOTE: the bioluminescent photophores are NOT drawn here any more — they are 3-D points
+        // anchored to the surface (see SurfacePhotophores / FluidCompositor.DrawSurfacePhotophores)
+        // so they ride the rippling/morphing skin instead of being pasted on in screen space.
     }
 
     private static readonly int[] Off8X = { 1, -1, 0, 0, 1, -1, 1, -1 };
@@ -140,12 +110,5 @@ internal static class DeepSeaPost
     {
         float t = Math.Clamp((x - a) / (b - a), 0f, 1f);
         return t * t * (3f - 2f * t);
-    }
-
-    private static uint Hash2(uint x, uint y)
-    {
-        uint h = x * 374761393u + y * 668265263u;
-        h = (h ^ (h >> 13)) * 1274126177u;
-        return h ^ (h >> 16);
     }
 }

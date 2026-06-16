@@ -992,6 +992,7 @@ public static class Program
                 var light = Vector3.Normalize(new Vector3(0.8f, 1.6f, 1.0f));
 
                 var field = new Parsec.Core.Fluid.FluidParticleField(nParticles, seed: 7);
+                var photophores = new SurfacePhotophores(110, seed: 13);   // bioluminescent skin nodes
                 var frameDir = Path.Combine(Path.GetTempPath(), $"parsec-fluid-{Guid.NewGuid():N}");
                 Directory.CreateDirectory(frameDir);
 
@@ -1073,10 +1074,12 @@ public static class Program
                     // Advance the particle field (advection uses this vs last frame's power; fold yank).
                     float pprev = havePrev ? prevPower : power;
                     field.Step(1f / fps, p => Mbulb(p, power), p => Mbulb(p, pprev), t, foldEnv);
+                    photophores.Update(p => Mbulb(p, power), 1f / fps, t);   // re-stick to the morphing skin
                     prevPos = pos; prevPower = power; havePrev = true;
 
                     // ---- water grade + creature emissive layer + particle composite (occluded) ----
-                    FluidCompositor.Apply(pixels, w, h, field, cam, fovY, t, p => Mbulb(p, power), deepSea: true, foldEnv: foldEnv, excitement: u);
+                    FluidCompositor.Apply(pixels, w, h, field, cam, fovY, t, p => Mbulb(p, power),
+                        deepSea: true, foldEnv: foldEnv, excitement: u, photophores: photophores);
 
                     var info  = new SKImageInfo(w, h, SKColorType.Rgba8888, SKAlphaType.Premul);
                     var bmp   = new SKBitmap(info);
