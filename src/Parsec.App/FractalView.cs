@@ -155,32 +155,71 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
     // from the sliders and advance its phase so the ripple animates.
     private void DeepSeaSetupWarp()
     {
-        if (!DeepSeaActive) return;
-        DeepSea.Phase += DeepSea.WarpRate / 30f;
+        if (!DeepSeaActive)
+        {
+            SyncDomainWarpState();
+            return;
+        }
+
+        if (_dsPrevFractalType != ActiveType)
+        {
+            _dsPrevPower = 0f;
+            _dsPrevFractalType = ActiveType;
+        }
+
+        float warpRate = ActiveType == FractalType.BurningShip ? DeepSea.WarpRate * 0.28f : DeepSea.WarpRate;
+        DeepSea.Phase += warpRate / 30f;
         // Breathing: a slow inhale/exhale on the warp AMPLITUDE so the whole membrane swells and
         // contracts as if respiring (on top of the fast ripple, which is a phase animation).
         float t = (float)_sonicClock.Elapsed.TotalSeconds;
         float breath = MathF.Sin(2f * MathF.PI * 0.16f * t);
         _dsBreath = breath;
-        float amp = DeepSea.WarpStrength * (1f + 0.95f * DeepSea.BreathDepth * breath);
+        float warpBias = ActiveType == FractalType.BurningShip ? 0.55f : 1f;
+        float amp = DeepSea.WarpStrength * warpBias * (1f + 0.95f * DeepSea.BreathDepth * breath);
         Parsec.Rendering.DomainWarpState.SetControls(true, MathF.Max(0f, amp), DeepSea.WarpScale);
         Parsec.Rendering.DomainWarpState.SetPhase(DeepSea.Phase);
 
         // Gentle body-size pulse on the SAME breath: temporarily nudge the render power so the whole
         // creature swells/contracts (not just the surface relief). Restored right after the render by
         // DeepSeaRestorePower so the user's Power value never drifts.
-        _dsBasePower = Mandelbulb.Power;
-        _dsRenderPower = MathF.Max(5.2f, _dsBasePower + 0.6f * DeepSea.BreathDepth * breath);
-        Mandelbulb.Power = _dsRenderPower;
+        _dsPowerPulsedType = ActiveType;
+        _dsBasePower = DeepSeaCurrentPower();
+        _dsRenderPower = DeepSeaBreathingPower(_dsBasePower, breath);
+        DeepSeaSetPower(_dsRenderPower);
         _dsPowerPulsed = true;
     }
 
-    // Undo the temporary body-size breath offset applied to Mandelbulb.Power before the render.
+    // Undo the temporary body-size breath offset applied before the render.
     private void DeepSeaRestorePower()
     {
         if (!_dsPowerPulsed) return;
-        Mandelbulb.Power = _dsBasePower;
+        DeepSeaSetPower(_dsBasePower, _dsPowerPulsedType);
         _dsPowerPulsed = false;
+    }
+
+    private float DeepSeaCurrentPower() => ActiveType switch
+    {
+        FractalType.Mandelbulb => Mandelbulb.Power,
+        FractalType.BurningShip => BurningShip.Power,
+        _ => 0f,
+    };
+
+    private float DeepSeaBreathingPower(float basePower, float breath) => ActiveType switch
+    {
+        FractalType.Mandelbulb => MathF.Max(5.2f, basePower + 0.6f * DeepSea.BreathDepth * breath),
+        FractalType.BurningShip => Math.Clamp(basePower + 0.45f * DeepSea.BreathDepth * breath, 1.45f, 12f),
+        _ => basePower,
+    };
+
+    private void DeepSeaSetPower(float power) => DeepSeaSetPower(power, ActiveType);
+
+    private void DeepSeaSetPower(float power, FractalType type)
+    {
+        switch (type)
+        {
+            case FractalType.Mandelbulb: Mandelbulb.Power = power; break;
+            case FractalType.BurningShip: BurningShip.Power = power; break;
+        }
     }
 
     // Called after the render: steps the particle/photophore sim with a CPU DE for the active
@@ -195,36 +234,63 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
         if (DeepSea.SnowCount <= 0) { _dsSnow = null; _dsSnowCount = -1; }
         else if (_dsSnow == null || _dsSnowCount != DeepSea.SnowCount)
         { _dsSnow = MakeMarineSnow(DeepSea.SnowCount); _dsSnowCount = DeepSea.SnowCount; }
+        if (DeepSea.ChromatophoreCount <= 0) { _dsChromato = null; _dsChromatoCount = -1; }
+        else if (_dsChromato == null || _dsChromatoCount != DeepSea.ChromatophoreCount)
+        { _dsChromato = new Parsec.Rendering.Fluid.SurfacePhotophores(DeepSea.ChromatophoreCount, seed: 41) { DriftSpeed = 0.08f };
+          _dsChromatoCount = DeepSea.ChromatophoreCount; }
 
         float power = _dsRenderPower;   // breathed render power (body-size pulse), set in DeepSeaSetupWarp
-        int iters = Math.Min(Mandelbulb.Iterations, 8);
-        Func<Vector3, float> de = p => Parsec.Rendering.Fluid.CpuDistanceEstimators.Mandelbulb(p, power, iters);
+        int iters = ActiveType == FractalType.BurningShip ? Math.Min(BurningShip.Iterations, 8) : Math.Min(Mandelbulb.Iterations, 8);
+        Func<Vector3, float> de = DeepSeaEstimator(power, iters);
         float pprev = _dsPrevPower == 0f ? power : _dsPrevPower;
-        Func<Vector3, float> dePrev = p => Parsec.Rendering.Fluid.CpuDistanceEstimators.Mandelbulb(p, pprev, iters);
+        Func<Vector3, float> dePrev = DeepSeaEstimator(pprev, iters);
         _dsPrevPower = power;
 
         // Flow forces scaled by the slider (deep-sea-tuned bases).
-        _dsField.CurlStrength = 0.40f * DeepSea.FlowStrength;
-        _dsField.SwirlStrength = 0.30f * DeepSea.FlowStrength;
-        _dsField.AdvectStrength = 7.0f * DeepSea.FlowStrength;
+        float shipBias = ActiveType == FractalType.BurningShip ? 1.25f : 1f;
+        _dsField.CurlStrength = 0.40f * DeepSea.FlowStrength * shipBias;
+        _dsField.SwirlStrength = (ActiveType == FractalType.BurningShip ? 0.42f : 0.30f) * DeepSea.FlowStrength;
+        _dsField.AdvectStrength = 7.0f * DeepSea.FlowStrength * shipBias;
         _dsField.InfluenceDist = Math.Max(0.05f, DeepSea.Falloff);
 
         float t = (float)_sonicClock.Elapsed.TotalSeconds;
         const float dt = 1f / 30f;
-        _dsField.Step(dt, de, dePrev, t);
+        float motionEnv = ActiveType == FractalType.BurningShip ? Clamp01(MathF.Abs(power - pprev) * 4f) : 0f;
+        _dsField.Step(dt, de, dePrev, t, motionEnv);
         _dsPhotophores.Update(de, dt, t);
         _dsSnow?.Step(dt, de, dePrev, t);
+        _dsChromato?.Update(de, dt, t);
 
         // Breath-coupled glow: bioluminescence brightens on the inhale, dims on the exhale.
-        float glow = 1f + 0.5f * _dsBreath;
+        float glow = ActiveType == FractalType.BurningShip ? 0.55f + 0.10f * _dsBreath : 1f + 0.5f * _dsBreath;
         var dsp = DeepSea.ToParams();
-        dsp = dsp with { Bloom = dsp.Bloom * glow, Rim = dsp.Rim * glow,
+        dsp = ActiveType == FractalType.BurningShip
+            ? dsp with
+            {
+                Bloom = dsp.Bloom * glow * 0.55f,
+                Rim = dsp.Rim * glow * 0.55f,
+                PhotophoreBrightness = dsp.PhotophoreBrightness * glow * 0.45f,
+                GodRays = dsp.GodRays * 0.70f,
+            }
+            : dsp with { Bloom = dsp.Bloom * glow, Rim = dsp.Rim * glow,
                          PhotophoreBrightness = dsp.PhotophoreBrightness * glow };
 
+        float foldEnv = ActiveType == FractalType.BurningShip ? motionEnv * 0.35f : motionEnv;
         Parsec.Rendering.Fluid.FluidCompositor.Apply(pixels, rw, rh, _dsField, camera,
-            camera.VerticalFovRadians, t, de, deepSea: true, foldEnv: 0f, excitement: 0.35f,
-            photophores: _dsPhotophores, dsp: dsp, snow: _dsSnow, snowIntensity: 0.6f);
+            camera.VerticalFovRadians, t, de, deepSea: true, foldEnv: foldEnv,
+            excitement: ActiveType == FractalType.BurningShip ? 0.22f : 0.35f,
+            photophores: _dsPhotophores, dsp: dsp, snow: _dsSnow, snowIntensity: 0.6f,
+            chromatophores: _dsChromato, chromatophoreIntensity: DeepSea.ChromatophoreIntensity);
     }
+
+    private Func<Vector3, float> DeepSeaEstimator(float power, int iterations) => ActiveType switch
+    {
+        FractalType.BurningShip => p => Parsec.Rendering.Fluid.CpuDistanceEstimators.BurningShip(
+            p, power, BurningShip.Bailout, iterations),
+        _ => p => Parsec.Rendering.Fluid.CpuDistanceEstimators.Mandelbulb(p, power, iterations),
+    };
+
+    private static float Clamp01(float v) => v < 0f ? 0f : (v > 1f ? 1f : v);
 
     // Marine snow: a near-static, slowly-sinking, fractal-agnostic drift filling the whole volume.
     private static Parsec.Core.Fluid.FluidParticleField MakeMarineSnow(int n)
@@ -355,13 +421,16 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
     private Parsec.Core.Fluid.FluidParticleField? _dsField;
     private Parsec.Rendering.Fluid.SurfacePhotophores? _dsPhotophores;
     private Parsec.Core.Fluid.FluidParticleField? _dsSnow;
-    private int _dsParticleCount = -1, _dsPhotophoreCount = -1, _dsSnowCount = -1;
+    private Parsec.Rendering.Fluid.SurfacePhotophores? _dsChromato;
+    private int _dsParticleCount = -1, _dsPhotophoreCount = -1, _dsSnowCount = -1, _dsChromatoCount = -1;
     private float _dsPrevPower;
+    private FractalType? _dsPrevFractalType;
     private float _dsBasePower, _dsRenderPower;   // body-size breath: base + temporarily-applied render power
     private bool _dsPowerPulsed;
+    private FractalType _dsPowerPulsedType;
     private float _dsBreath;                       // last breath value [-1,1]; couples glow to the breath
     /// <summary>True when the deep-sea composite can run on the active fractal (needs a CPU DE).</summary>
-    private bool DeepSeaActive => DeepSea.Enabled && ActiveType == FractalType.Mandelbulb;
+    private bool DeepSeaActive => DeepSea.Enabled && ActiveType is FractalType.Mandelbulb or FractalType.BurningShip;
     private float _glowStrength = 2.5f;
     private float _glowFalloff = 12f;
 

@@ -34,6 +34,10 @@ public sealed class DeepSeaState
     public int PhotophoreCount = 90;
     public float PhotophoreGlow = 1.0f;
 
+    // Chromatophore pigment patches migrating across the skin.
+    public int ChromatophoreCount = 22;
+    public float ChromatophoreIntensity = 0.6f;
+
     // Membrane warp (geometry undulation) — small, slow transverse ripple traversing object +X.
     public float WarpStrength = 0.018f;    // really small ripples
     public float WarpScale = 22f;          // fine wavelength (= 2pi/scale)

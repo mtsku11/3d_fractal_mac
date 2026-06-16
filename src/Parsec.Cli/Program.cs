@@ -995,6 +995,7 @@ public static class Program
 
                 var field = new Parsec.Core.Fluid.FluidParticleField(nParticles, seed: 7);
                 var photophores = new SurfacePhotophores(110, seed: 13);   // bioluminescent skin nodes
+                var chromato = new SurfacePhotophores(22, seed: 41) { DriftSpeed = 0.08f };   // pigment patches
                 // Marine snow: a near-static, slowly-sinking, fractal-agnostic drift filling the volume.
                 var snow = new Parsec.Core.Fluid.FluidParticleField(Math.Max(2200, nParticles), seed: 99)
                 {
@@ -1094,6 +1095,7 @@ public static class Program
                     field.Step(1f / fps, p => Mbulb(p, power), p => Mbulb(p, pprev), t, foldEnv);
                     photophores.Update(p => Mbulb(p, power), 1f / fps, t);   // re-stick to the morphing skin
                     snow.Step(1f / fps, p => Mbulb(p, power), p => Mbulb(p, pprev), t);
+                    chromato.Update(p => Mbulb(p, power), 1f / fps, t);   // pigment patches migrate on the skin
                     prevPos = pos; prevPower = power; havePrev = true;
 
                     // ---- water grade + god rays + creature emissive layer + particle/snow composite ----
@@ -1102,7 +1104,8 @@ public static class Program
                     FluidCompositor.Apply(pixels, w, h, field, cam, fovY, t, p => Mbulb(p, power),
                         deepSea: true, foldEnv: foldEnv, excitement: u, photophores: photophores,
                         dsp: new DeepSeaParams(Bloom: 0.5f * glow, Rim: 0.65f * glow, GodRays: 0.6f),
-                        snow: snow, snowIntensity: 1.4f);
+                        snow: snow, snowIntensity: 1.4f,
+                        chromatophores: chromato, chromatophoreIntensity: 0.6f);
 
                     var info  = new SKImageInfo(w, h, SKColorType.Rgba8888, SKAlphaType.Premul);
                     var bmp   = new SKBitmap(info);

@@ -15,7 +15,8 @@ public static class FluidCompositor
     public static void Apply(uint[] px, int w, int h, FluidParticleField field, Camera3D cam, float fovY, float time,
                              Func<Vector3, float>? de = null, bool deepSea = false, float foldEnv = 0f,
                              float excitement = 0f, SurfacePhotophores? photophores = null,
-                             DeepSeaParams? dsp = null, FluidParticleField? snow = null, float snowIntensity = 0.6f)
+                             DeepSeaParams? dsp = null, FluidParticleField? snow = null, float snowIntensity = 0.6f,
+                             SurfacePhotophores? chromatophores = null, float chromatophoreIntensity = 0.6f)
     {
         var p_ = dsp ?? DeepSeaParams.Default;
         float gradeB = p_.GradeBrightness;
@@ -47,6 +48,11 @@ public static class FluidCompositor
                 px[idx] = Pack(r, g, b);
             }
         });
+
+        // 1·skin. Chromatophore pigment patches migrating across the skin (octopus-like). Drawn on the
+        //     graded body BEFORE the glow/rays so the bloom sits over the pigmented skin.
+        if (deepSea && chromatophores != null && de != null)
+            DrawChromatophores(px, w, h, cam, fovY, de, chromatophores, time, chromatophoreIntensity);
 
         // 1a. Volumetric light shafts (god rays) slanting down through the water — strongest near the
         //     surface above, swaying slowly. Over the grade, under the creature so the body occludes them.
@@ -322,6 +328,86 @@ public static class FluidCompositor
             }
         }
     }
+
+    // Pigment palette for chromatophores (cephalopod-ish): deep violet, dark teal, rust amber, crimson,
+    // indigo. Patches tint the skin toward one of these.
+    private static readonly Vector3[] Pigments =
+    {
+        new(0.36f, 0.12f, 0.46f), new(0.07f, 0.30f, 0.32f), new(0.46f, 0.22f, 0.06f),
+        new(0.42f, 0.06f, 0.13f), new(0.12f, 0.10f, 0.42f),
+    };
+
+    // Chromatophore patches: 3-D surface-anchored points (they ride/wander the skin) that TINT the
+    // local surface toward a pigment colour — blended, not added, and masked by surface brightness so
+    // they read as pigment in the skin rather than a decal floating over it. Slow size/intensity pulse.
+    private static void DrawChromatophores(uint[] px, int w, int h, Camera3D cam, float fovY,
+        Func<Vector3, float> de, SurfacePhotophores patches, float time, float intensity)
+    {
+        var posCam = cam.Position;
+        var fwd = Vector3.Normalize(cam.LookAt - cam.Position);
+        var right = Vector3.Normalize(Vector3.Cross(fwd, cam.Up));
+        var upL = Vector3.Cross(right, fwd);
+        float tanY = MathF.Tan(fovY * 0.5f);
+        float tanX = tanY * cam.AspectRatio;
+
+        for (int i = 0; i < patches.Pos.Length; i++)
+        {
+            Vector3 a = patches.Pos[i];
+            Vector3 v = a - posCam;
+            float zc = Vector3.Dot(v, fwd);
+            if (zc <= 0.08f) continue;
+            float sx = Vector3.Dot(v, right) / (zc * tanX);
+            float sy = Vector3.Dot(v, upL) / (zc * tanY);
+            if (MathF.Abs(sx) > 1.1f || MathF.Abs(sy) > 1.1f) continue;
+
+            // Occlusion: hide patches on the creature's far side.
+            float dist = v.Length();
+            Vector3 dir = v / dist;
+            bool occ = false;
+            float tt = 0.04f;
+            for (int s = 0; s < 40 && tt < dist - 0.06f; s++)
+            {
+                float dd = de(posCam + dir * tt);
+                if (dd < 1.8e-3f) { occ = true; break; }
+                tt += MathF.Max(dd, 1.2e-3f);
+            }
+            if (occ) continue;
+
+            Vector3 pig = Pigments[i % Pigments.Length];
+            float ph = patches.Phase[i];
+            float pulse = 0.7f + 0.3f * MathF.Sin(time * 0.3f + ph);     // slow expand/contract
+            float fog = MathF.Exp(-zc * 0.18f);
+            float fpx = (sx * 0.5f + 0.5f) * w, fpy = (0.5f - sy * 0.5f) * h;
+            // Patch size varies per-index; soft and large relative to a photophore.
+            float rad = (18f + 16f * Frac(i * 0.6180339f)) * fog * (0.7f + 0.5f * pulse);
+            int x0 = Math.Max(0, (int)(fpx - rad)), x1 = Math.Min(w - 1, (int)(fpx + rad));
+            int y0 = Math.Max(0, (int)(fpy - rad)), y1 = Math.Min(h - 1, (int)(fpy + rad));
+            float r2 = rad * rad;
+            for (int yy = y0; yy <= y1; yy++)
+            for (int xx = x0; xx <= x1; xx++)
+            {
+                float dx = xx - fpx, dy = yy - fpy, dd = dx * dx + dy * dy;
+                if (dd > r2) continue;
+                float fall = 1f - MathF.Sqrt(dd) / rad; fall *= fall;   // soft edge
+                int idx = yy * w + xx;
+                uint q = px[idx];
+                float r = (q & 0xFF) / 255f, g = ((q >> 8) & 0xFF) / 255f, b = ((q >> 16) & 0xFF) / 255f;
+                float lum = 0.3f * r + 0.6f * g + 0.1f * b;
+                float surf = Clamp01((lum - 0.05f) / 0.30f);            // only on lit skin, not the water
+                if (surf < 0.04f) continue;
+                float wgt = Clamp01(fall * surf * intensity * pulse * 0.95f);
+                // Pigment sac: always DARKER than the lit skin (so it reads as pigment against the bright
+                // bioluminescent surface), shaded by local luminance so it still follows the light.
+                float shade = 0.18f + 0.55f * lum;
+                r = r * (1f - wgt) + pig.X * shade * wgt;
+                g = g * (1f - wgt) + pig.Y * shade * wgt;
+                b = b * (1f - wgt) + pig.Z * shade * wgt;
+                px[idx] = Pack(r, g, b);
+            }
+        }
+    }
+
+    private static float Frac(float v) => v - MathF.Floor(v);
 
     private static float Clamp01(float v) => v < 0f ? 0f : (v > 1f ? 1f : v);
 

@@ -222,6 +222,10 @@
             <Slider Name="DeepSeaSnowSlider" Minimum="0" Maximum="4000" Value="1400" TickFrequency="100" IsSnapToTickEnabled="False" />
             <TextBlock Text="Breathing depth" FontSize="11" />
             <Slider Name="DeepSeaBreathSlider" Minimum="0" Maximum="1.5" Value="0.5" TickFrequency="0.05" IsSnapToTickEnabled="False" />
+            <TextBlock Text="Chromatophores (skin pigment)" FontSize="11" />
+            <Slider Name="DeepSeaChromatoSlider" Minimum="0" Maximum="80" Value="22" TickFrequency="1" IsSnapToTickEnabled="False" />
+            <TextBlock Text="Chromatophore intensity" FontSize="11" />
+            <Slider Name="DeepSeaChromatoIntensitySlider" Minimum="0" Maximum="1.5" Value="0.6" TickFrequency="0.05" IsSnapToTickEnabled="False" />
           </StackPanel>
         </StackPanel>
       </Grid>
