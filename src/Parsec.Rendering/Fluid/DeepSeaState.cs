@@ -25,9 +25,9 @@ public sealed class DeepSeaState
     public float FlowStrength = 1.0f;     // scales curl/swirl/advect
     public float Falloff = 0.40f;         // near-field influence distance
 
-    // Emissive look.
-    public float Bloom = 0.95f;
-    public float Rim = 1.35f;
+    // Emissive look (toned down from the original neon defaults).
+    public float Bloom = 0.55f;
+    public float Rim = 0.7f;
     public int PhotophoreCount = 90;
     public float PhotophoreGlow = 1.0f;
 

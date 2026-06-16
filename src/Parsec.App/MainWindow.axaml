@@ -201,9 +201,9 @@
             <TextBlock Text="Near-field falloff (wide ← → tight)" FontSize="11" />
             <Slider Name="DeepSeaFalloffSlider" Minimum="0.15" Maximum="1.2" Value="0.4" TickFrequency="0.01" IsSnapToTickEnabled="False" />
             <TextBlock Text="Subsurface bloom" FontSize="11" />
-            <Slider Name="DeepSeaBloomSlider" Minimum="0" Maximum="2.5" Value="0.95" TickFrequency="0.05" IsSnapToTickEnabled="False" />
+            <Slider Name="DeepSeaBloomSlider" Minimum="0" Maximum="2.5" Value="0.55" TickFrequency="0.05" IsSnapToTickEnabled="False" />
             <TextBlock Text="Bioluminescent rim" FontSize="11" />
-            <Slider Name="DeepSeaRimSlider" Minimum="0" Maximum="3" Value="1.35" TickFrequency="0.05" IsSnapToTickEnabled="False" />
+            <Slider Name="DeepSeaRimSlider" Minimum="0" Maximum="3" Value="0.7" TickFrequency="0.05" IsSnapToTickEnabled="False" />
             <TextBlock Text="Photophores" FontSize="11" />
             <Slider Name="DeepSeaPhotophoresSlider" Minimum="0" Maximum="300" Value="90" TickFrequency="5" IsSnapToTickEnabled="False" />
             <TextBlock Text="Photophore glow" FontSize="11" />

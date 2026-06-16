@@ -996,12 +996,12 @@ public static class Program
                 var field = new Parsec.Core.Fluid.FluidParticleField(nParticles, seed: 7);
                 var photophores = new SurfacePhotophores(110, seed: 13);   // bioluminescent skin nodes
                 // Marine snow: a near-static, slowly-sinking, fractal-agnostic drift filling the volume.
-                var snow = new Parsec.Core.Fluid.FluidParticleField(Math.Max(600, nParticles), seed: 99)
+                var snow = new Parsec.Core.Fluid.FluidParticleField(Math.Max(2200, nParticles), seed: 99)
                 {
-                    SpawnInner = 0.6f, SpawnOuter = 3.6f, KillRadius = 5.0f,
+                    SpawnInner = 0.6f, SpawnOuter = 3.8f, KillRadius = 5.2f,
                     RepelStrength = 0.25f, RepelBand = 0.4f, SwirlStrength = 0f, AdvectStrength = 0f,
-                    CurlStrength = 0.05f, CurlScale = 0.6f, CurlFloor = 1f, CurlFlow = 0.05f,
-                    InfluenceDist = 0.25f, DownDrift = 0.05f, Drag = 0.92f, MaxSpeed = 0.28f, LifeSeconds = 26f,
+                    CurlStrength = 0.06f, CurlScale = 0.6f, CurlFloor = 1f, CurlFlow = 0.05f,
+                    InfluenceDist = 0.25f, DownDrift = 0.55f, Drag = 0.90f, MaxSpeed = 0.45f, LifeSeconds = 22f,
                 };
                 var frameDir = Path.Combine(Path.GetTempPath(), $"parsec-fluid-{Guid.NewGuid():N}");
                 Directory.CreateDirectory(frameDir);
@@ -1016,17 +1016,21 @@ public static class Program
                 {
                     float t = (float)i / fps;
                     float u = nFrames > 1 ? (float)i / (nFrames - 1) : 0f;   // 0..1 progress
-                    // Slow "breathing" pulse (a living inhale/exhale) on top of the big morph.
-                    float breath = MathF.Sin(2f * MathF.PI * 0.14f * t);
+                    // Slow "breathing" pulse (a living inhale/exhale) on top of the big morph. Deepened
+                    // so the swell/contract is obvious: one breath drives BOTH the body size (power) and
+                    // the membrane warp AMPLITUDE — the surface relief inflates on the inhale, nearly
+                    // flattens on the exhale.
+                    float breath = MathF.Sin(2f * MathF.PI * 0.16f * t);
                     float power = powerMid + powerAmp * MathF.Sin(2f * MathF.PI * morphHz * t)
                                            + 0.3f * pace * MathF.Sin(2f * MathF.PI * 0.55f * pace * t + 0.6f)
-                                           + 0.7f * breath;
+                                           + 1.1f * breath;
                     power = MathF.Max(power, 5.2f);   // never collapse to a smooth low-power sphere
                     // Ripple is fine in space (scale 16.8); its TEMPORAL rate ramps 0 → high across the
                     // clip so the frequency sweep is unmistakable (and reads as an organic acceleration).
                     float rippleRate = 24f * u;
                     warpPhase += (1f / fps) * rippleRate;
-                    Parsec.Rendering.DomainWarpState.SetControls(true, 0.021f + 0.011f * (0.5f + 0.5f * breath), 16.8f);
+                    float breathAmp = MathF.Max(0f, 0.024f * (1f + 0.95f * breath));   // ~2x on inhale → ~0 on exhale
+                    Parsec.Rendering.DomainWarpState.SetControls(true, breathAmp, 16.8f);
                     Parsec.Rendering.DomainWarpState.SetPhase(warpPhase);
                     // Stationary camera (no dolly / orbit) — the creature's own motion reads.
                     var pos = new Vector3(1.25f, 0.65f, 2.05f);
@@ -1091,7 +1095,8 @@ public static class Program
                     // ---- water grade + god rays + creature emissive layer + particle/snow composite ----
                     FluidCompositor.Apply(pixels, w, h, field, cam, fovY, t, p => Mbulb(p, power),
                         deepSea: true, foldEnv: foldEnv, excitement: u, photophores: photophores,
-                        snow: snow, snowIntensity: 0.6f);
+                        dsp: new DeepSeaParams(Bloom: 0.5f, Rim: 0.65f, GodRays: 0.6f),
+                        snow: snow, snowIntensity: 1.4f);
 
                     var info  = new SKImageInfo(w, h, SKColorType.Rgba8888, SKAlphaType.Premul);
                     var bmp   = new SKBitmap(info);

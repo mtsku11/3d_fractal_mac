@@ -226,7 +226,7 @@ public static class FluidCompositor
             float a = fog * env * intensity * 0.5f;
             if (a < 0.003f) continue;
             float cr = 0.85f * a, cg = 0.92f * a, cb = 1.0f * a;
-            float rad = 0.8f + 1.4f * fog;
+            float rad = 1.0f + 1.8f * fog;
             int x0 = Math.Max(0, (int)(fpx - rad)), x1 = Math.Min(w - 1, (int)(fpx + rad));
             int y0 = Math.Max(0, (int)(fpy - rad)), y1 = Math.Min(h - 1, (int)(fpy + rad));
             float r2 = rad * rad;

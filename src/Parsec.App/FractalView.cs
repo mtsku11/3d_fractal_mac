@@ -160,8 +160,8 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
         // Breathing: a slow inhale/exhale on the warp AMPLITUDE so the whole membrane swells and
         // contracts as if respiring (on top of the fast ripple, which is a phase animation).
         float t = (float)_sonicClock.Elapsed.TotalSeconds;
-        float breath = MathF.Sin(2f * MathF.PI * 0.14f * t);
-        float amp = DeepSea.WarpStrength * (1f + 0.6f * DeepSea.BreathDepth * breath);
+        float breath = MathF.Sin(2f * MathF.PI * 0.16f * t);
+        float amp = DeepSea.WarpStrength * (1f + 0.95f * DeepSea.BreathDepth * breath);
         Parsec.Rendering.DomainWarpState.SetControls(true, MathF.Max(0f, amp), DeepSea.WarpScale);
         Parsec.Rendering.DomainWarpState.SetPhase(DeepSea.Phase);
     }
