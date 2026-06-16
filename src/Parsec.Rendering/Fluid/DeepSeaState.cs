@@ -34,10 +34,10 @@ public sealed class DeepSeaState
     public int PhotophoreCount = 90;
     public float PhotophoreGlow = 1.0f;
 
-    // Membrane warp (geometry undulation).
-    public float WarpStrength = 0.022f;
-    public float WarpScale = 16.8f;
-    public float WarpRate = 6.0f;          // temporal ripple rate
+    // Membrane warp (geometry undulation) — small, slow transverse ripple traversing object +X.
+    public float WarpStrength = 0.018f;    // really small ripples
+    public float WarpScale = 22f;          // fine wavelength (= 2pi/scale)
+    public float WarpRate = 3.0f;          // slow steady travel speed
 
     // Water.
     public float Murk = 0.5f;              // 0 = clear/bright, 1 = dark deep water

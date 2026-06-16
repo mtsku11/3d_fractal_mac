@@ -1025,12 +1025,13 @@ public static class Program
                                            + 0.3f * pace * MathF.Sin(2f * MathF.PI * 0.55f * pace * t + 0.6f)
                                            + 1.1f * breath;
                     power = MathF.Max(power, 5.2f);   // never collapse to a smooth low-power sphere
-                    // Ripple is fine in space (scale 16.8); its TEMPORAL rate ramps 0 → high across the
-                    // clip so the frequency sweep is unmistakable (and reads as an organic acceleration).
-                    float rippleRate = 24f * u;
+                    // Small, slow transverse ripple traversing the body's +X axis (like a lake ripple):
+                    // fine wavelength (scale 22) and a slow STEADY travel rate so it clearly traverses
+                    // rather than vibrating in place.
+                    float rippleRate = 4f;                 // slow, steady (no fast frequency sweep)
                     warpPhase += (1f / fps) * rippleRate;
-                    float breathAmp = MathF.Max(0f, 0.024f * (1f + 0.95f * breath));   // ~2x on inhale → ~0 on exhale
-                    Parsec.Rendering.DomainWarpState.SetControls(true, breathAmp, 16.8f);
+                    float breathAmp = MathF.Max(0f, 0.018f * (1f + 0.9f * breath));   // really small ripples
+                    Parsec.Rendering.DomainWarpState.SetControls(true, breathAmp, 22f);
                     Parsec.Rendering.DomainWarpState.SetPhase(warpPhase);
                     // Gentle buoyancy bob/sway (no z-dolly) so the creature floats in the current; the
                     // bob translates camera + target together, leaving the view direction unchanged.
@@ -1135,6 +1136,147 @@ public static class Program
                 return 0;
             }
             catch (Exception ex) { Console.Error.WriteLine($"fluid-showcase FAILED: {ex.Message}\n{ex.StackTrace}"); return 1; }
+        }
+
+        // fluid-burning-showcase [duration] [out.mp4] [w] [h] [particles]
+        // BurningShip version of deep-sea mode: folded low-power sheets breathe, ripple, glow, and
+        // drive the same DE-aware particle/photophore simulation used by Mandelbulb.
+        if (args[0] is "fluid-burning-showcase")
+        {
+            if (!OperatingSystem.IsMacOS()) { Console.Error.WriteLine("fluid-burning-showcase requires macOS."); return 1; }
+            try
+            {
+                double duration = args.Length > 1 && double.TryParse(args[1], out var dd) ? dd : 8.0;
+                string outMp4 = args.Length > 2 ? args[2] : ResolveOutputPath("fluid_burning_showcase.mp4");
+                int w = args.Length > 3 && int.TryParse(args[3], out var pw) ? pw : 960;
+                int h = args.Length > 4 && int.TryParse(args[4], out var ph) ? ph : 540;
+                if ((w & 1) != 0) w++;
+                if ((h & 1) != 0) h++;
+                int nParticles = args.Length > 5 && int.TryParse(args[5], out var np) ? np : 3200;
+                const int fps = 30;
+                int nFrames = Math.Max(1, (int)Math.Round(duration * fps));
+
+                Console.WriteLine($"fluid-burning-showcase — BurningShip deep-sea life pass, {duration:F1}s @ {fps}fps, {w}x{h}");
+
+                using var renderer = new MetalBurningShipRenderer();
+                if (!renderer.IsAvailable) { Console.Error.WriteLine("Metal backend not available."); return 1; }
+
+                var settings = new RaymarchSettings(260, 7e-4f, 35f, 1.2e-3f, true, 48, 12f,
+                    true, 5, 0.04f, 0.85f, 1, false, 0, 0f, 0f, 1.45f);
+                var bg = new Color(0.004f, 0.018f, 0.030f);
+                var surface = new Color(0.34f, 0.45f, 0.48f);
+                var light = Vector3.Normalize(new Vector3(1.1f, 1.8f, 0.9f));
+                var palette = new PaletteParams
+                {
+                    Base = new Vector3(0.10f, 0.22f, 0.28f),
+                    Amp = new Vector3(0.38f, 0.46f, 0.50f),
+                    Frequency = 1.35f,
+                    Phase = new Vector3(0.58f, 0.18f, 0.85f),
+                    TrapScale = 0.9f,
+                    TrapMix = new Vector3(0.55f, 0.65f, 0.45f),
+                    ShellMix = 0.55f,
+                };
+                var post = new PostProcessParams { Brightness = 1.18f, Contrast = 1.02f, Gamma = 0.90f, Saturation = 1.12f };
+
+                var field = new Parsec.Core.Fluid.FluidParticleField(nParticles, seed: 17)
+                {
+                    SpawnInner = 0.9f, SpawnOuter = 3.4f, KillRadius = 4.9f,
+                    RepelStrength = 1.45f, RepelBand = 0.62f, SwirlStrength = 0.46f,
+                    CurlStrength = 0.55f, CurlScale = 1.15f, CurlFloor = 0.08f, CurlFlow = 0.16f,
+                    AdvectStrength = 8.8f, InfluenceDist = 0.34f, Drag = 0.88f, MaxSpeed = 1.15f,
+                    YankStrength = 13f, YankDist = 0.24f, LifeSeconds = 16f,
+                };
+                var photophores = new SurfacePhotophores(80, seed: 23) { DriftSpeed = 0.04f };
+                var snow = new Parsec.Core.Fluid.FluidParticleField(Math.Max(2200, nParticles), seed: 119)
+                {
+                    SpawnInner = 0.6f, SpawnOuter = 3.8f, KillRadius = 5.2f,
+                    RepelStrength = 0.25f, RepelBand = 0.4f, SwirlStrength = 0f, AdvectStrength = 0f,
+                    CurlStrength = 0.06f, CurlScale = 0.6f, CurlFloor = 1f, CurlFlow = 0.05f,
+                    InfluenceDist = 0.25f, DownDrift = 0.20f, Drag = 0.92f, MaxSpeed = 0.32f, LifeSeconds = 24f,
+                };
+
+                var frameDir = Path.Combine(Path.GetTempPath(), $"parsec-burning-fluid-{Guid.NewGuid():N}");
+                Directory.CreateDirectory(frameDir);
+                float prevPower = 0f;
+                float warpPhase = 0f;
+                const float fovY = MathF.PI / 3.35f;
+                float aspect = (float)w / h;
+                var sw = System.Diagnostics.Stopwatch.StartNew();
+
+                try
+                {
+                    for (int i = 0; i < nFrames; i++)
+                    {
+                        float t = (float)i / fps;
+                        float u = nFrames > 1 ? (float)i / (nFrames - 1) : 0f;
+                        float breath = MathF.Sin(2f * MathF.PI * 0.15f * t);
+                        float crease = MathF.Sin(2f * MathF.PI * 0.52f * t + 0.7f);
+                        float power = 2.08f
+                            + 0.42f * MathF.Sin(2f * MathF.PI * 0.075f * t)
+                            + 0.25f * breath
+                            + 0.10f * crease;
+                        power = Math.Clamp(power, 1.55f, 3.15f);
+
+                        float rippleRate = 1.2f + 2.0f * u + 0.35f * MathF.Sin(2f * MathF.PI * 0.21f * t);
+                        warpPhase += (1f / fps) * rippleRate;
+                        float warpAmp = MathF.Max(0f, 0.016f * (1f + 0.50f * breath));
+                        DomainWarpState.SetControls(true, warpAmp, 18.5f);
+                        DomainWarpState.SetPhase(warpPhase);
+
+                        float theta = 2f * MathF.PI * (0.10f * t);
+                        var bob = DeepSeaState.BuoyancyOffset(t, 0.8f);
+                        var pos = new Vector3(MathF.Cos(theta) * 3.35f, 0.72f + 0.20f * MathF.Sin(theta * 1.7f), MathF.Sin(theta) * 3.35f) + bob;
+                        var target = new Vector3(0f, 0.05f, 0f) + bob;
+                        var cam = new Camera3D(pos, target, Vector3.UnitY, fovY, aspect);
+
+                        var fractal = new BurningShipParams { Iterations = 16, Power = power, Bailout = 2.0f, Fudge = 0.74f, BoundRadius = 2.0f };
+                        uint[] pixels = renderer.RenderBurningShip(fractal, cam, w, h, settings, bg, surface, light, palette, post);
+
+                        float pprev = prevPower == 0f ? power : prevPower;
+                        Func<Vector3, float> de = p => CpuDistanceEstimators.BurningShip(p, power, 2f, 8);
+                        Func<Vector3, float> dePrev = p => CpuDistanceEstimators.BurningShip(p, pprev, 2f, 8);
+                        float motionEnv = Math.Clamp(MathF.Abs(power - pprev) * 4f, 0f, 1f);
+
+                        field.Step(1f / fps, de, dePrev, t, motionEnv);
+                        photophores.Update(de, 1f / fps, t);
+                        snow.Step(1f / fps, de, dePrev, t);
+                        prevPower = power;
+
+                        float glow = 0.55f + 0.12f * breath;
+                        FluidCompositor.Apply(pixels, w, h, field, cam, fovY, t, de,
+                            deepSea: true, foldEnv: motionEnv * 0.30f, excitement: 0.24f,
+                            photophores: photophores,
+                            dsp: new DeepSeaParams(Bloom: 0.28f * glow, Rim: 0.38f * glow,
+                                PhotophoreBrightness: 0.42f * glow, GradeBrightness: 0.82f, GodRays: 0.55f),
+                            snow: snow, snowIntensity: 0.85f);
+
+                        SaveUintPixels(pixels, w, h, Path.Combine(frameDir, $"frame_{i:D4}.png"));
+                        if (i % fps == 0 || i == nFrames - 1)
+                            Console.Write($"\r  frame {i + 1}/{nFrames}  pow={power:F2} warp={warpAmp:F3} env={motionEnv:F2}   ");
+                    }
+                }
+                finally
+                {
+                    DomainWarpState.SetControls(false, 0f, 1f);
+                }
+
+                sw.Stop();
+                Console.WriteLine($"\n  rendered {nFrames} frames in {sw.ElapsedMilliseconds / 1000.0:F1}s");
+
+                Directory.CreateDirectory(Path.GetDirectoryName(outMp4)!);
+                string ffArgs = $"-y -framerate {fps} -i \"{Path.Combine(frameDir, "frame_%04d.png")}\" " +
+                    $"-c:v libx264 -crf 17 -preset medium -pix_fmt yuv420p \"{outMp4}\"";
+                var proc = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("ffmpeg", ffArgs)
+                    { RedirectStandardError = true, UseShellExecute = false })!;
+                string ffErr = proc.StandardError.ReadToEnd();
+                proc.WaitForExit();
+                if (proc.ExitCode != 0) { Console.Error.WriteLine(ffErr); Console.Error.WriteLine("ffmpeg failed."); return 1; }
+                Directory.Delete(frameDir, recursive: true);
+                var fi = new FileInfo(outMp4);
+                Console.WriteLine($"  -> {outMp4}  ({fi.Length / 1024} KB)");
+                return 0;
+            }
+            catch (Exception ex) { Console.Error.WriteLine($"fluid-burning-showcase FAILED: {ex.Message}\n{ex.StackTrace}"); return 1; }
         }
 
         if (args[0] is "metal-domain-warp-mp4")
@@ -7999,6 +8141,7 @@ public static class Program
         Console.WriteLine("  parsec metal-cross-fractal-texture [duration] [out.mp4]  Mandelbrot zoom projected onto Mandelbox surface (macOS)");;
         Console.WriteLine("  parsec metal-fractal-feedback [duration] [out.mp4]  Mandelbox recursive self-texture feedback loop (macOS)");;
         Console.WriteLine("  parsec metal-domain-warp-mp4 [duration] [out.mp4] [w] [h]  Mandelbox procedural domain-warp clip (macOS)");
+        Console.WriteLine("  parsec fluid-burning-showcase [duration] [out.mp4] [w] [h] [particles]  BurningShip deep-sea life clip (macOS)");
         Console.WriteLine("  parsec metal-bulb-smoke [w] [h]      Metal Mandelbulb smoke test (macOS only)");
         Console.WriteLine("  parsec metal-rotbox-smoke [w] [h]    Metal RotBox smoke test (macOS only)");
         Console.WriteLine("  parsec metal-kifs-smoke [w] [h]      Metal KIFS smoke test (macOS only)");

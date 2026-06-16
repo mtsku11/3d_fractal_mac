@@ -8,22 +8,27 @@ float3 domainWarp(float3 p, constant RenderParams& rp) {
     if (strength <= 0.0f) return p;
 
     float scale = max(rp.subpixelJitter.w, 1e-4f);
-    // Peristaltic travel: the animation phase propagates along the body's object-space +X axis
-    // (mouth-to-mouth, front-to-rear in the default orientation), so as phase advances the ripple reads
-    // as a wave traversing the body end-to-end rather than an isotropic shimmer. The axis is locked to
-    // the geometry, so it rotates with the bulb when the camera orbits. Wavelength tracks the warp
-    // scale. (strength==0 above keeps this a no-op.)
-    float phase = rp.trapMix.w - p.x * scale * 0.6f;   // base phase packed by DomainWarpState.GetPhase()
-    float3 q = p * scale;
-    float3 w1 = float3(
-        sin(q.y + sin(q.z * 1.37f) + phase),
-        sin(q.z + sin(q.x * 1.21f) + phase * 1.13f),
-        sin(q.x + sin(q.y * 1.11f) + phase * 0.87f));
-    float3 w2 = float3(
-        cos(q.z * 0.73f + q.y + phase * 0.71f),
-        cos(q.x * 0.67f + q.z + phase),
-        cos(q.y * 0.79f + q.x + phase * 1.27f));
-    return p + strength * (0.75f * w1 + 0.25f * w2);
+    float t = rp.trapMix.w;   // slow phase accumulator packed by DomainWarpState.GetPhase()
+
+    // A single COHERENT transverse ripple that traverses the body's object +X axis, like a wave on a
+    // lake. The crest is the slice x = const where (x*scale - t) hits a multiple of 2pi; as t grows
+    // that slice marches in +X. Displacement is along the radial (surface) direction, so a band of skin
+    // lifts as the crest passes over it -- which is what makes it read as TRAVEL rather than an in-place
+    // shimmer. Wavelength = 2pi/scale (small when scale is high); travel speed = (dt of t)/scale (slow
+    // when the warp rate is low). The axis is locked to the geometry, so it rotates with the bulb when
+    // the camera orbits. strength==0 above keeps this a no-op.
+    float arg = p.x * scale - t;
+    float3 radial = normalize(p + float3(1e-5f));
+    float3 ripple = radial * sin(arg);
+
+    // A faint, slow organic shimmer so the skin isn't a perfectly regular grating.
+    float3 q = p * scale * 0.5f;
+    float3 organic = float3(
+        sin(q.y + sin(q.z * 1.37f) + t * 0.25f),
+        sin(q.z + sin(q.x * 1.21f) + t * 0.21f),
+        sin(q.x + sin(q.y * 1.11f) + t * 0.29f));
+
+    return p + strength * (0.82f * ripple + 0.18f * organic);
 }
 
 """;
