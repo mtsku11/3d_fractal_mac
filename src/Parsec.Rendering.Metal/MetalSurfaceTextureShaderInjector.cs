@@ -8,10 +8,12 @@ float3 domainWarp(float3 p, constant RenderParams& rp) {
     if (strength <= 0.0f) return p;
 
     float scale = max(rp.subpixelJitter.w, 1e-4f);
-    // Peristaltic travel: the animation phase propagates along the body's +Y axis (head->tail), so as
-    // phase advances the ripple reads as a muscular swimming wave travelling up the body rather than an
-    // isotropic shimmer. Wavelength tracks the warp scale. (strength==0 above keeps this a no-op.)
-    float phase = rp.trapMix.w - p.y * scale * 0.6f;   // base phase packed by DomainWarpState.GetPhase()
+    // Peristaltic travel: the animation phase propagates along the body's object-space +X axis
+    // (mouth-to-mouth, front-to-rear in the default orientation), so as phase advances the ripple reads
+    // as a wave traversing the body end-to-end rather than an isotropic shimmer. The axis is locked to
+    // the geometry, so it rotates with the bulb when the camera orbits. Wavelength tracks the warp
+    // scale. (strength==0 above keeps this a no-op.)
+    float phase = rp.trapMix.w - p.x * scale * 0.6f;   // base phase packed by DomainWarpState.GetPhase()
     float3 q = p * scale;
     float3 w1 = float3(
         sin(q.y + sin(q.z * 1.37f) + phase),
