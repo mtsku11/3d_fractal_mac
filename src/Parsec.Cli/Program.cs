@@ -1007,10 +1007,12 @@ public static class Program
                     float breath = MathF.Sin(2f * MathF.PI * 0.14f * t);
                     float power = powerMid + powerAmp * MathF.Sin(2f * MathF.PI * morphHz * t)
                                            + 0.3f * pace * MathF.Sin(2f * MathF.PI * 0.55f * pace * t + 0.6f)
-                                           + 1.0f * breath;                                   // breathing swell/contract
-                    // Domain warp: HIGH frequency (scale 4.2) so it ripples ACROSS the surface like a
-                    // membrane rather than uniformly pushing one side into a smooth arc. Modest amplitude.
-                    Parsec.Rendering.DomainWarpState.SetControls(true, 0.085f + 0.045f * (0.5f + 0.5f * breath), 4.2f);
+                                           + 0.7f * breath;                                   // breathing swell/contract
+                    // A low-power Mandelbulb is nearly a smooth sphere (round silhouette) — keep the
+                    // power high enough that the creature always has spiky, organic structure.
+                    power = MathF.Max(power, 5.2f);
+                    // Domain warp ripple: 2x frequency (scale 8.4), 1/2 amplitude vs before — finer membrane.
+                    Parsec.Rendering.DomainWarpState.SetControls(true, 0.0425f + 0.0225f * (0.5f + 0.5f * breath), 8.4f);
                     Parsec.Rendering.DomainWarpState.SetPhase(t * 0.9f);
                     float ang = 2f * MathF.PI * 0.5f * pace * u + 0.4f;
                     float radius = 2.4f - 0.5f * MathF.Sin(2f * MathF.PI * 0.25f * pace * t);
