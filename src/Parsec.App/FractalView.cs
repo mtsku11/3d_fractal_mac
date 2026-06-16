@@ -161,6 +161,7 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
         // contracts as if respiring (on top of the fast ripple, which is a phase animation).
         float t = (float)_sonicClock.Elapsed.TotalSeconds;
         float breath = MathF.Sin(2f * MathF.PI * 0.16f * t);
+        _dsBreath = breath;
         float amp = DeepSea.WarpStrength * (1f + 0.95f * DeepSea.BreathDepth * breath);
         Parsec.Rendering.DomainWarpState.SetControls(true, MathF.Max(0f, amp), DeepSea.WarpScale);
         Parsec.Rendering.DomainWarpState.SetPhase(DeepSea.Phase);
@@ -214,9 +215,15 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
         _dsPhotophores.Update(de, dt, t);
         _dsSnow?.Step(dt, de, dePrev, t);
 
+        // Breath-coupled glow: bioluminescence brightens on the inhale, dims on the exhale.
+        float glow = 1f + 0.5f * _dsBreath;
+        var dsp = DeepSea.ToParams();
+        dsp = dsp with { Bloom = dsp.Bloom * glow, Rim = dsp.Rim * glow,
+                         PhotophoreBrightness = dsp.PhotophoreBrightness * glow };
+
         Parsec.Rendering.Fluid.FluidCompositor.Apply(pixels, rw, rh, _dsField, camera,
             camera.VerticalFovRadians, t, de, deepSea: true, foldEnv: 0f, excitement: 0.35f,
-            photophores: _dsPhotophores, dsp: DeepSea.ToParams(), snow: _dsSnow, snowIntensity: 0.6f);
+            photophores: _dsPhotophores, dsp: dsp, snow: _dsSnow, snowIntensity: 0.6f);
     }
 
     // Marine snow: a near-static, slowly-sinking, fractal-agnostic drift filling the whole volume.
@@ -352,6 +359,7 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
     private float _dsPrevPower;
     private float _dsBasePower, _dsRenderPower;   // body-size breath: base + temporarily-applied render power
     private bool _dsPowerPulsed;
+    private float _dsBreath;                       // last breath value [-1,1]; couples glow to the breath
     /// <summary>True when the deep-sea composite can run on the active fractal (needs a CPU DE).</summary>
     private bool DeepSeaActive => DeepSea.Enabled && ActiveType == FractalType.Mandelbulb;
     private float _glowStrength = 2.5f;
@@ -1472,6 +1480,14 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
 
             var sw = System.Diagnostics.Stopwatch.StartNew();
             var camera = _cam.ToCamera(PreviewWidth, PreviewHeight);
+            if (DeepSeaActive)
+            {
+                // Buoyancy bob/sway — translate camera + target together (no z-dolly) so the creature
+                // floats against the fixed god rays/vignette. Render + composite share this camera.
+                var bob = Parsec.Rendering.Fluid.DeepSeaState.BuoyancyOffset((float)_sonicClock.Elapsed.TotalSeconds);
+                camera = new Camera3D(camera.Position + bob, camera.LookAt + bob, camera.Up,
+                                      camera.VerticalFovRadians, camera.AspectRatio);
+            }
             int rw = PreviewWidth, rh = PreviewHeight;
             uint[] pixels;
             bool renderedPreview = HasMetalPreviewRenderer();

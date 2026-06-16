@@ -1,3 +1,6 @@
+using System;
+using System.Numerics;
+
 namespace Parsec.Rendering.Fluid;
 
 /// <summary>Post-process tunables for the deep-sea emissive layer + water grade.</summary>
@@ -43,6 +46,19 @@ public sealed class DeepSeaState
     public float BreathDepth = 0.5f;       // slow inhale/exhale on the warp amplitude
 
     public float Phase;                    // accumulated warp phase (render-driven)
+
+    /// <summary>
+    /// Gentle neutral-buoyancy bob/sway offset applied to BOTH camera position and target (a pure
+    /// translation — no z-dolly, so framing/scale never change), making the creature float in the
+    /// current against the fixed god rays + vignette. Low, incommensurate frequencies so it never
+    /// looks like a loop.
+    /// </summary>
+    public static Vector3 BuoyancyOffset(float t, float amount = 1f)
+    {
+        float x = 0.045f * MathF.Sin(2f * MathF.PI * 0.05f * t + 1.3f);   // sway
+        float y = 0.060f * MathF.Sin(2f * MathF.PI * 0.08f * t);          // bob
+        return new Vector3(x, y, 0f) * amount;
+    }
 
     public DeepSeaParams ToParams() => new(
         Bloom: Bloom,

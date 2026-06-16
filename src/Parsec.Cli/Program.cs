@@ -1032,12 +1032,15 @@ public static class Program
                     float breathAmp = MathF.Max(0f, 0.024f * (1f + 0.95f * breath));   // ~2x on inhale → ~0 on exhale
                     Parsec.Rendering.DomainWarpState.SetControls(true, breathAmp, 16.8f);
                     Parsec.Rendering.DomainWarpState.SetPhase(warpPhase);
-                    // Stationary camera (no dolly / orbit) — the creature's own motion reads.
-                    var pos = new Vector3(1.25f, 0.65f, 2.05f);
-                    var fwd = Vector3.Normalize(Vector3.Zero - pos);
+                    // Gentle buoyancy bob/sway (no z-dolly) so the creature floats in the current; the
+                    // bob translates camera + target together, leaving the view direction unchanged.
+                    var bob = DeepSeaState.BuoyancyOffset(t);
+                    var pos = new Vector3(1.25f, 0.65f, 2.05f) + bob;
+                    var tgt = bob;
+                    var fwd = Vector3.Normalize(tgt - pos);
 
                     var fractal = new MandelbulbParams { Power = power, Iterations = 10, Bailout = 2.0f, Fudge = 0.9f, BoundRadius = 1.3f };
-                    var cam  = new Camera3D(pos, Vector3.Zero, Vector3.UnitY, fovY, (float)w / h);
+                    var cam  = new Camera3D(pos, tgt, Vector3.UnitY, fovY, (float)w / h);
                     var st = renderer.RunTelemetryPass(fractal, cam, telSettings);
 
                     float spd = havePrev ? (pos - prevPos).Length() * fps : 0f;
@@ -1093,9 +1096,11 @@ public static class Program
                     prevPos = pos; prevPower = power; havePrev = true;
 
                     // ---- water grade + god rays + creature emissive layer + particle/snow composite ----
+                    // Breath-coupled glow: bioluminescence brightens on the inhale, dims on the exhale.
+                    float glow = 1f + 0.5f * breath;
                     FluidCompositor.Apply(pixels, w, h, field, cam, fovY, t, p => Mbulb(p, power),
                         deepSea: true, foldEnv: foldEnv, excitement: u, photophores: photophores,
-                        dsp: new DeepSeaParams(Bloom: 0.5f, Rim: 0.65f, GodRays: 0.6f),
+                        dsp: new DeepSeaParams(Bloom: 0.5f * glow, Rim: 0.65f * glow, GodRays: 0.6f),
                         snow: snow, snowIntensity: 1.4f);
 
                     var info  = new SKImageInfo(w, h, SKColorType.Rgba8888, SKAlphaType.Premul);
