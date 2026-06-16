@@ -10,25 +10,32 @@ float3 domainWarp(float3 p, constant RenderParams& rp) {
     float scale = max(rp.subpixelJitter.w, 1e-4f);
     float t = rp.trapMix.w;   // slow phase accumulator packed by DomainWarpState.GetPhase()
 
-    // A single COHERENT transverse ripple that traverses the body's object +X axis, like a wave on a
-    // lake. The crest is the slice x = const where (x*scale - t) hits a multiple of 2pi; as t grows
-    // that slice marches in +X. Displacement is along the radial (surface) direction, so a band of skin
-    // lifts as the crest passes over it -- which is what makes it read as TRAVEL rather than an in-place
-    // shimmer. Wavelength = 2pi/scale (small when scale is high); travel speed = (dt of t)/scale (slow
-    // when the warp rate is low). The axis is locked to the geometry, so it rotates with the bulb when
-    // the camera orbits. strength==0 above keeps this a no-op.
-    float arg = p.x * scale - t;
+    // A POINT-SOURCE ripple, like a stone dropped into a pond: concentric shells emanate from the
+    // "front mouth" at the +X end of the body and expand outward across the skin toward the back. The
+    // wave argument keys off DISTANCE from the source (not x), so crests are spherical shells whose
+    // radius = (t + 2pi*n)/scale grows as t advances -- new rings are continuously born at the mouth
+    // and travel front -> back. A wobble perturbs the shells so the rings read as irregular (and the
+    // irregular surface breaks them up further). Displacement is radial (a ring lifts a band of skin as
+    // it passes); amplitude falls off with distance so the wave clearly emerges from the mouth and
+    // dissipates toward the back. The source is locked to the geometry, so it rides the bulb as the
+    // camera orbits. strength==0 above keeps this a no-op.
+    float3 src  = float3(1.15f, 0.0f, 0.0f);          // front mouth: +X end of the bulb
+    float3 d    = p - src;
+    float  dist = length(d);
+    float  wobble = 0.12f * sin(d.y * 3.1f + t * 0.2f) * sin(d.z * 2.7f - t * 0.15f);
+    float  arg  = (dist + wobble) * scale - t;
+    float  falloff = 1.0f / (1.0f + 0.7f * dist);     // strongest at the mouth, fades toward the back
     float3 radial = normalize(p + float3(1e-5f));
-    float3 ripple = radial * sin(arg);
+    float3 ripple = radial * sin(arg) * falloff;
 
-    // A faint, slow organic shimmer so the skin isn't a perfectly regular grating.
+    // A faint, slow organic shimmer so the skin isn't a perfectly regular set of rings.
     float3 q = p * scale * 0.5f;
     float3 organic = float3(
         sin(q.y + sin(q.z * 1.37f) + t * 0.25f),
         sin(q.z + sin(q.x * 1.21f) + t * 0.21f),
         sin(q.x + sin(q.y * 1.11f) + t * 0.29f));
 
-    return p + strength * (0.82f * ripple + 0.18f * organic);
+    return p + strength * (0.85f * ripple + 0.15f * organic);
 }
 
 """;
