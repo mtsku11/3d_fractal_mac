@@ -985,7 +985,8 @@ public static class Program
                 midi.OnNoteOff       = (ch, nn) => events.Add(new(evTime, Parsec.Audio.Midi.MidiInstrumentSynth.EvType.NoteOff, ch, nn, 0));
 
                 var telSettings = new RaymarchSettings(160, 1e-3f, 40f, 1.5e-3f, false, 0, 0f, false, 0, 0f, 0f, 1, false, 0, 0f, 0f, 1f);
-                var dispSettings = new RaymarchSettings(300, 5e-4f, 40f, 5e-4f, true, 64, 12f, true, 5, 0.04f, 1.0f, 1, false, 0, 0f, 0f, 1.0f);
+                // Dim key light — dark ocean floor; the bioluminescence carries the glow.
+                var dispSettings = new RaymarchSettings(300, 5e-4f, 40f, 5e-4f, true, 64, 12f, true, 5, 0.04f, 1.0f, 1, false, 0, 0f, 0f, 0.42f);
                 var bg = new Color(0.005f, 0.02f, 0.03f);
                 var surface = Color.Rgb(200, 175, 155);
                 var light = Vector3.Normalize(new Vector3(0.8f, 1.6f, 1.0f));
@@ -996,28 +997,28 @@ public static class Program
 
                 var prevPos = Vector3.Zero; float prevPower = 0f; bool havePrev = false;
                 float foldEnv = 0f;
+                float excitement = 0.06f;   // emotional arousal: spikes on folds, decays
+                float warpPhase = 0f;       // accumulated ripple phase (rate scales with excitement)
                 float fovY = MathF.PI / 3.5f;
                 var sw = System.Diagnostics.Stopwatch.StartNew();
 
                 for (int i = 0; i < nFrames; i++)
                 {
                     float t = (float)i / fps;
-                    float u = nFrames > 1 ? (float)i / (nFrames - 1) : 0f;
                     // Slow "breathing" pulse (a living inhale/exhale) on top of the big morph.
                     float breath = MathF.Sin(2f * MathF.PI * 0.14f * t);
                     float power = powerMid + powerAmp * MathF.Sin(2f * MathF.PI * morphHz * t)
                                            + 0.3f * pace * MathF.Sin(2f * MathF.PI * 0.55f * pace * t + 0.6f)
-                                           + 0.7f * breath;                                   // breathing swell/contract
-                    // A low-power Mandelbulb is nearly a smooth sphere (round silhouette) — keep the
-                    // power high enough that the creature always has spiky, organic structure.
-                    power = MathF.Max(power, 5.2f);
-                    // Domain warp ripple: 2x frequency (scale 8.4), 1/2 amplitude vs before — finer membrane.
-                    Parsec.Rendering.DomainWarpState.SetControls(true, 0.0425f + 0.0225f * (0.5f + 0.5f * breath), 8.4f);
-                    Parsec.Rendering.DomainWarpState.SetPhase(t * 0.9f);
-                    float ang = 2f * MathF.PI * 0.5f * pace * u + 0.4f;
-                    float radius = 2.4f - 0.5f * MathF.Sin(2f * MathF.PI * 0.25f * pace * t);
-                    float elev = 0.45f + 0.25f * MathF.Sin(2f * MathF.PI * 0.2f * pace * t);
-                    var pos = new Vector3(MathF.Cos(ang) * radius, elev, MathF.Sin(ang) * radius);
+                                           + 0.7f * breath;
+                    power = MathF.Max(power, 5.2f);   // never collapse to a smooth low-power sphere
+                    // Domain warp ripple: very fine (scale 16.8), low amplitude. The TEMPORAL ripple
+                    // RATE scales with excitement (up to ~3x) — the creature's emotional tell.
+                    float ex = excitement;
+                    warpPhase += (1f / fps) * 0.9f * (1f + 2f * ex);
+                    Parsec.Rendering.DomainWarpState.SetControls(true, 0.021f + 0.011f * (0.5f + 0.5f * breath), 16.8f);
+                    Parsec.Rendering.DomainWarpState.SetPhase(warpPhase);
+                    // Stationary camera (no dolly / orbit) — the creature's own motion reads.
+                    var pos = new Vector3(1.25f, 0.65f, 2.05f);
                     var fwd = Vector3.Normalize(Vector3.Zero - pos);
 
                     var fractal = new MandelbulbParams { Power = power, Iterations = 10, Bailout = 2.0f, Fudge = 0.9f, BoundRadius = 1.3f };
@@ -1063,6 +1064,13 @@ public static class Program
                         if (events[e].Type == Parsec.Audio.Midi.MidiInstrumentSynth.EvType.NoteOn
                             && events[e].Channel == 0 && events[e].D1 == 64) { folded = true; break; }
                     foldEnv = folded ? 1f : foldEnv * 0.80f;
+                    // Excitement: folds spike it; it decays toward an idle baseline. Drives the ripple
+                    // RATE (above, next frame) and an audio tremolo (emotional state, seen + heard).
+                    if (folded) excitement = MathF.Min(1f, excitement + 0.5f);
+                    excitement = MathF.Max(excitement * 0.985f, 0.06f);
+                    events.Add(new Parsec.Audio.Midi.MidiInstrumentSynth.Ev(
+                        t, Parsec.Audio.Midi.MidiInstrumentSynth.EvType.Cc, 0, 102,
+                        (int)Math.Clamp(excitement * 127f, 0f, 127f)));
 
                     // Advance the particle field (advection uses this vs last frame's power; fold yank).
                     float pprev = havePrev ? prevPower : power;
@@ -1070,7 +1078,7 @@ public static class Program
                     prevPos = pos; prevPower = power; havePrev = true;
 
                     // ---- water grade + creature emissive layer + particle composite (occluded) ----
-                    FluidCompositor.Apply(pixels, w, h, field, cam, fovY, t, p => Mbulb(p, power), deepSea: true, foldEnv: foldEnv);
+                    FluidCompositor.Apply(pixels, w, h, field, cam, fovY, t, p => Mbulb(p, power), deepSea: true, foldEnv: foldEnv, excitement: excitement);
 
                     var info  = new SKImageInfo(w, h, SKColorType.Rgba8888, SKAlphaType.Premul);
                     var bmp   = new SKBitmap(info);

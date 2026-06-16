@@ -13,7 +13,8 @@ namespace Parsec.Cli;
 internal static class FluidCompositor
 {
     public static void Apply(uint[] px, int w, int h, FluidParticleField field, Camera3D cam, float fovY, float time,
-                             Func<Vector3, float>? de = null, bool deepSea = false, float foldEnv = 0f)
+                             Func<Vector3, float>? de = null, bool deepSea = false, float foldEnv = 0f,
+                             float excitement = 0f)
     {
         // 1. Underwater grade (parallel over rows).
         Parallel.For(0, h, y =>
@@ -46,7 +47,7 @@ internal static class FluidCompositor
 
         // 1b. "Living creature" emissive layer (subsurface bloom + bioluminescent rim/photophores),
         //     applied over the water-graded body but under the particles so it glows through.
-        if (deepSea) DeepSeaPost.ApplyEmissive(px, w, h, time, foldEnv);
+        if (deepSea) DeepSeaPost.ApplyEmissive(px, w, h, time, foldEnv, excitement);
 
         // 2. Additive particle splats (single-threaded — splats overlap in the buffer).
         var posCam = cam.Position;

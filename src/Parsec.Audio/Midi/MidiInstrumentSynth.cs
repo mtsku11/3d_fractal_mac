@@ -67,6 +67,7 @@ public static class MidiInstrumentSynth
         float pLead = 0, pLeadV = 0;
         float[] pChoir = new float[4];
         float pCello = 0, pCelloV = 0;
+        float pTrem = 0;
         float leadHzS = 220f;
         float padLp = 0, celloLp = 0, hazeLp = 0;
         uint rng = 0x1234567u;
@@ -123,6 +124,7 @@ public static class MidiInstrumentSynth
             // Smooth CCs (one-pole ~30 ms) to avoid zipper noise.
             const float a = 0.0015f;
             for (int c = 20; c <= 36; c++) ccS[c] += (cc[c] - ccS[c]) * a;
+            ccS[102] += (cc[102] - ccS[102]) * a;          // excitement (emotional state)
 
             float size = ccS[20], prox = ccS[21], cplx = ccS[22];
             float layering = ccS[25], colour = ccS[24], sat = ccS[35], bright = ccS[36];
@@ -130,6 +132,13 @@ public static class MidiInstrumentSynth
 
             float dryL = 0, dryR = 0, wetL = 0, wetR = 0;
             float sr = SampleRate;
+
+            // Excitement tremolo on the sustained body voices — faster + deeper flutter when excited,
+            // so the emotional state you SEE in the ripple is also AUDIBLE.
+            float excite = ccS[102];
+            float tremRate = 4f + 8f * excite;
+            pTrem += tremRate / sr; if (pTrem >= 1f) pTrem -= 1f;
+            float trem = 1f - (0.12f + 0.55f * excite) * (0.5f + 0.5f * MathF.Sin(pTrem * 6.2832f));
 
             // 1. Sub bass — sine + 2nd partial drive; root D, octave by proximity.
             {
@@ -155,7 +164,7 @@ public static class MidiInstrumentSynth
                 }
                 mix *= 0.16f;
                 padLp += (mix - padLp) * (0.04f + 0.55f * cplx);      // brighter when complex
-                float g = 0.10f + 0.5f * layering;
+                float g = (0.10f + 0.5f * layering) * trem;
                 float l = padLp * g, r = padLp * g;
                 dryL += l * 0.9f; dryR += r * 0.9f; wetL += l * 0.5f; wetR += r * 0.5f;
             }
@@ -188,7 +197,7 @@ public static class MidiInstrumentSynth
                     float w = MathF.Exp(-MathF.Abs(mul[k] - formant) * 0.9f);
                     s += MathF.Sin(pChoir[k] * 6.2832f) * w;
                 }
-                s *= 0.10f * (0.15f + 0.85f * sat);
+                s *= 0.10f * (0.15f + 0.85f * sat) * trem;
                 dryL += s; dryR += s; wetL += s * 0.6f; wetR += s * 0.6f;
             }
 
@@ -201,7 +210,7 @@ public static class MidiInstrumentSynth
                 pCello += hz / sr; if (pCello >= 1f) pCello -= 1f;
                 float saw = (pCello * 2f - 1f);
                 celloLp += (saw - celloLp) * 0.08f;
-                float s = celloLp * (0.08f + 0.34f * prox);
+                float s = celloLp * (0.08f + 0.34f * prox) * trem;
                 dryL += s; dryR += s; wetL += s * 0.4f; wetR += s * 0.4f;
             }
 

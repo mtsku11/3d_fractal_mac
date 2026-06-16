@@ -11,7 +11,7 @@ namespace Parsec.Cli;
 /// </summary>
 internal static class DeepSeaPost
 {
-    public static void ApplyEmissive(uint[] px, int w, int h, float time, float foldEnv)
+    public static void ApplyEmissive(uint[] px, int w, int h, float time, float foldEnv, float excitement = 0f)
     {
         int n = w * h;
 
@@ -69,7 +69,8 @@ internal static class DeepSeaPost
                 uint cell = Hash2((uint)(x / cellPx), (uint)(y / cellPx));
                 if ((cell & 7u) != 0u) continue;          // ~1 in 8 eligible cells
                 float ph = (cell & 0xFFFF) / 65535f * 6.2832f;
-                float pulse = 0.35f + 0.65f * MathF.Sin(time * 2.2f + ph);
+                float pulseRate = 2.2f * (1f + 1.4f * excitement);   // excited → faster flicker
+                float pulse = 0.35f + 0.65f * MathF.Sin(time * pulseRate + ph);
                 float inten = pulse * foldBoost * 2.0f * (0.4f + 0.6f * bright[ci]);
                 bool magenta = (cell & 64u) != 0u;
                 float cr = magenta ? 1.1f * inten : 0.25f * inten;
