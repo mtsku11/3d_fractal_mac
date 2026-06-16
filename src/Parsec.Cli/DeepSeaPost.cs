@@ -55,25 +55,27 @@ internal static class DeepSeaPost
             }
         });
 
-        // --- bioluminescent photophores: sparse pulsing glow discs on the brightest detail ---
-        // Sequential so each lights a small disc (visible at video scale). Sparse → cheap.
+        // --- bioluminescent photophores: pulsing glow discs on mid-tone "skin" (so they read as
+        //     lights emerging from the darker body, not lost in the blown-out highlights). ---
         float foldBoost = 1f + 3.5f * foldEnv;
-        for (int y = 0; y < h; y += 5)
+        const int cellPx = 7;
+        for (int y = 0; y < h; y += cellPx)
         {
-            for (int x = 0; x < w; x += 5)
+            for (int x = 0; x < w; x += cellPx)
             {
                 int ci = y * w + x;
-                if (bright[ci] < 0.48f) continue;
-                uint cell = Hash2((uint)(x / 5), (uint)(y / 5));
-                if ((cell & 7u) != 0u) continue;          // ~1 in 8 bright cells
+                // Mid-tone band: on the body but not the brightest tips → high contrast for the dot.
+                if (bright[ci] < 0.12f || bright[ci] > 0.55f) continue;
+                uint cell = Hash2((uint)(x / cellPx), (uint)(y / cellPx));
+                if ((cell & 7u) != 0u) continue;          // ~1 in 8 eligible cells
                 float ph = (cell & 0xFFFF) / 65535f * 6.2832f;
-                float pulse = 0.4f + 0.6f * MathF.Sin(time * 3.5f + ph);
-                float inten = pulse * foldBoost * 1.25f * bright[ci];
+                float pulse = 0.35f + 0.65f * MathF.Sin(time * 2.2f + ph);
+                float inten = pulse * foldBoost * 2.0f * (0.4f + 0.6f * bright[ci]);
                 bool magenta = (cell & 64u) != 0u;
-                float cr = magenta ? 1.0f * inten : 0.25f * inten;
-                float cg = magenta ? 0.30f * inten : 1.0f * inten;
-                float cb = magenta ? 1.0f * inten : 1.15f * inten;
-                int rad = 3;
+                float cr = magenta ? 1.1f * inten : 0.25f * inten;
+                float cg = magenta ? 0.30f * inten : 1.1f * inten;
+                float cb = magenta ? 1.1f * inten : 1.25f * inten;
+                int rad = 4;
                 for (int dy = -rad; dy <= rad; dy++)
                 for (int dx = -rad; dx <= rad; dx++)
                 {
