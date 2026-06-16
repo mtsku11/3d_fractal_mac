@@ -164,6 +164,22 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
         float amp = DeepSea.WarpStrength * (1f + 0.95f * DeepSea.BreathDepth * breath);
         Parsec.Rendering.DomainWarpState.SetControls(true, MathF.Max(0f, amp), DeepSea.WarpScale);
         Parsec.Rendering.DomainWarpState.SetPhase(DeepSea.Phase);
+
+        // Gentle body-size pulse on the SAME breath: temporarily nudge the render power so the whole
+        // creature swells/contracts (not just the surface relief). Restored right after the render by
+        // DeepSeaRestorePower so the user's Power value never drifts.
+        _dsBasePower = Mandelbulb.Power;
+        _dsRenderPower = MathF.Max(5.2f, _dsBasePower + 0.6f * DeepSea.BreathDepth * breath);
+        Mandelbulb.Power = _dsRenderPower;
+        _dsPowerPulsed = true;
+    }
+
+    // Undo the temporary body-size breath offset applied to Mandelbulb.Power before the render.
+    private void DeepSeaRestorePower()
+    {
+        if (!_dsPowerPulsed) return;
+        Mandelbulb.Power = _dsBasePower;
+        _dsPowerPulsed = false;
     }
 
     // Called after the render: steps the particle/photophore sim with a CPU DE for the active
@@ -179,7 +195,7 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
         else if (_dsSnow == null || _dsSnowCount != DeepSea.SnowCount)
         { _dsSnow = MakeMarineSnow(DeepSea.SnowCount); _dsSnowCount = DeepSea.SnowCount; }
 
-        float power = Mandelbulb.Power;
+        float power = _dsRenderPower;   // breathed render power (body-size pulse), set in DeepSeaSetupWarp
         int iters = Math.Min(Mandelbulb.Iterations, 8);
         Func<Vector3, float> de = p => Parsec.Rendering.Fluid.CpuDistanceEstimators.Mandelbulb(p, power, iters);
         float pprev = _dsPrevPower == 0f ? power : _dsPrevPower;
@@ -334,6 +350,8 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
     private Parsec.Core.Fluid.FluidParticleField? _dsSnow;
     private int _dsParticleCount = -1, _dsPhotophoreCount = -1, _dsSnowCount = -1;
     private float _dsPrevPower;
+    private float _dsBasePower, _dsRenderPower;   // body-size breath: base + temporarily-applied render power
+    private bool _dsPowerPulsed;
     /// <summary>True when the deep-sea composite can run on the active fractal (needs a CPU DE).</summary>
     private bool DeepSeaActive => DeepSea.Enabled && ActiveType == FractalType.Mandelbulb;
     private float _glowStrength = 2.5f;
@@ -1467,6 +1485,7 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
                 renderedPreview = false;
                 Status($"Preview failed: {ex.Message}");
             }
+            DeepSeaRestorePower();   // restore Mandelbulb.Power after the breathed render
             _totalFrameMs = sw.ElapsedMilliseconds;
 
             // Update texture from live source (Feedback / MandelbrotZoom / Video).
