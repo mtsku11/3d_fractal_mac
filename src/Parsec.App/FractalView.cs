@@ -151,6 +151,49 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
         ? "MIDI off"
         : _midiSession.IsAvailable ? $"MIDI: Parsec · {_midiController?.Monitor}" : $"MIDI unavailable: {_midiSession.UnavailableReason}";
 
+    // Called before the render: when deep-sea is on, drive the domain warp (membrane undulation)
+    // from the sliders and advance its phase so the ripple animates.
+    private void DeepSeaSetupWarp()
+    {
+        if (!DeepSeaActive) return;
+        DeepSea.Phase += DeepSea.WarpRate / 30f;
+        Parsec.Rendering.DomainWarpState.SetControls(true, DeepSea.WarpStrength, DeepSea.WarpScale);
+        Parsec.Rendering.DomainWarpState.SetPhase(DeepSea.Phase);
+    }
+
+    // Called after the render: steps the particle/photophore sim with a CPU DE for the active
+    // fractal and composites the underwater grade + bioluminescent creature + drifting motes.
+    private void ApplyDeepSea(uint[] pixels, int rw, int rh, Camera3D camera)
+    {
+        if (!DeepSeaActive) return;
+        if (_dsField == null || _dsParticleCount != DeepSea.ParticleCount)
+        { _dsField = new Parsec.Core.Fluid.FluidParticleField(Math.Max(1, DeepSea.ParticleCount), seed: 7); _dsParticleCount = DeepSea.ParticleCount; }
+        if (_dsPhotophores == null || _dsPhotophoreCount != DeepSea.PhotophoreCount)
+        { _dsPhotophores = new Parsec.Rendering.Fluid.SurfacePhotophores(Math.Max(1, DeepSea.PhotophoreCount), seed: 13); _dsPhotophoreCount = DeepSea.PhotophoreCount; }
+
+        float power = Mandelbulb.Power;
+        int iters = Math.Min(Mandelbulb.Iterations, 8);
+        Func<Vector3, float> de = p => Parsec.Rendering.Fluid.CpuDistanceEstimators.Mandelbulb(p, power, iters);
+        float pprev = _dsPrevPower == 0f ? power : _dsPrevPower;
+        Func<Vector3, float> dePrev = p => Parsec.Rendering.Fluid.CpuDistanceEstimators.Mandelbulb(p, pprev, iters);
+        _dsPrevPower = power;
+
+        // Flow forces scaled by the slider (deep-sea-tuned bases).
+        _dsField.CurlStrength = 0.40f * DeepSea.FlowStrength;
+        _dsField.SwirlStrength = 0.30f * DeepSea.FlowStrength;
+        _dsField.AdvectStrength = 7.0f * DeepSea.FlowStrength;
+        _dsField.InfluenceDist = Math.Max(0.05f, DeepSea.Falloff);
+
+        float t = (float)_sonicClock.Elapsed.TotalSeconds;
+        const float dt = 1f / 30f;
+        _dsField.Step(dt, de, dePrev, t);
+        _dsPhotophores.Update(de, dt, t);
+
+        Parsec.Rendering.Fluid.FluidCompositor.Apply(pixels, rw, rh, _dsField, camera,
+            camera.VerticalFovRadians, t, de, deepSea: true, foldEnv: 0f, excitement: 0.35f,
+            photophores: _dsPhotophores, dsp: DeepSea.ToParams());
+    }
+
     private void EmitMidi(Audio.Sonification.FractalSonicFrame? frame, uint[]? pixels = null, int width = 0, int height = 0)
     {
         if (_midiEnabled && frame != null)
@@ -260,6 +303,16 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
     private float _domainWarpStrength = 0.15f;
     private float _domainWarpScale = 1.5f;
     private bool _glowEnabled;
+
+    // --- Live "deep sea" mode (post-process water + bioluminescent creature + drifting particles) ---
+    /// <summary>Slider-backed deep-sea parameters; read by the render path.</summary>
+    public Parsec.Rendering.Fluid.DeepSeaState DeepSea { get; } = new();
+    private Parsec.Core.Fluid.FluidParticleField? _dsField;
+    private Parsec.Rendering.Fluid.SurfacePhotophores? _dsPhotophores;
+    private int _dsParticleCount = -1, _dsPhotophoreCount = -1;
+    private float _dsPrevPower;
+    /// <summary>True when the deep-sea composite can run on the active fractal (needs a CPU DE).</summary>
+    private bool DeepSeaActive => DeepSea.Enabled && ActiveType == FractalType.Mandelbulb;
     private float _glowStrength = 2.5f;
     private float _glowFalloff = 12f;
 
@@ -1374,6 +1427,7 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
 
             if (_domainWarpEnabled)
                 DomainWarpState.SetPhase((float)_sonicClock.Elapsed.TotalSeconds * 0.25f);
+            DeepSeaSetupWarp();
 
             var sw = System.Diagnostics.Stopwatch.StartNew();
             var camera = _cam.ToCamera(PreviewWidth, PreviewHeight);
@@ -1414,6 +1468,12 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
             }
             _texW = rw; _texH = rh;
             _dirty = false;
+
+            if (DeepSeaActive)
+            {
+                ApplyDeepSea(pixels, rw, rh, camera);
+                MarkDirty();   // keep animating (ripple + drifting particles)
+            }
 
             if (_domainWarpEnabled)
                 MarkDirty();

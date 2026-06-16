@@ -228,6 +228,35 @@ public partial class MainWindow : Window
                     _view.DomainWarpScale = (float)domainWarpScaleSlider.Value;
             };
 
+        // --- DEEP SEA sliders ---
+        void WireDs(string name, Action<float> set)
+        {
+            var s = this.FindControl<Slider>(name);
+            if (s != null)
+                s.PropertyChanged += (_, e) =>
+                {
+                    if (e.Property.Name == nameof(Slider.Value) && _view != null)
+                    { set((float)s.Value); _view.MarkDirty(); }
+                };
+        }
+        var deepSeaEnable = this.FindControl<CheckBox>("DeepSeaEnableCheckBox");
+        if (deepSeaEnable != null)
+            deepSeaEnable.IsCheckedChanged += (_, _) =>
+            {
+                if (_view != null) { _view.DeepSea.Enabled = deepSeaEnable.IsChecked == true; _view.MarkDirty(); }
+            };
+        WireDs("DeepSeaParticlesSlider",     v => _view!.DeepSea.ParticleCount = (int)v);
+        WireDs("DeepSeaFlowSlider",          v => _view!.DeepSea.FlowStrength = v);
+        WireDs("DeepSeaFalloffSlider",       v => _view!.DeepSea.Falloff = v);
+        WireDs("DeepSeaBloomSlider",         v => _view!.DeepSea.Bloom = v);
+        WireDs("DeepSeaRimSlider",           v => _view!.DeepSea.Rim = v);
+        WireDs("DeepSeaPhotophoresSlider",   v => _view!.DeepSea.PhotophoreCount = (int)v);
+        WireDs("DeepSeaPhotoGlowSlider",     v => _view!.DeepSea.PhotophoreGlow = v);
+        WireDs("DeepSeaWarpStrengthSlider",  v => _view!.DeepSea.WarpStrength = v);
+        WireDs("DeepSeaWarpScaleSlider",     v => _view!.DeepSea.WarpScale = v);
+        WireDs("DeepSeaWarpRateSlider",      v => _view!.DeepSea.WarpRate = v);
+        WireDs("DeepSeaMurkSlider",          v => _view!.DeepSea.Murk = v);
+
         var glowEnableCheckBox = this.FindControl<CheckBox>("GlowEnableCheckBox");
         if (glowEnableCheckBox != null)
             glowEnableCheckBox.IsCheckedChanged += (_, _) =>

@@ -4,6 +4,7 @@ using Parsec.Audio.Sonification;
 using Parsec.Cli.Examples;
 using Parsec.Rendering;
 using Parsec.Rendering.DeepZoom;
+using Parsec.Rendering.Fluid;
 using Parsec.Rendering.Gpu;
 using Parsec.Rendering.Metal;
 using Parsec.Rendering.Output;

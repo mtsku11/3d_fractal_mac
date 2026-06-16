@@ -3,19 +3,22 @@ using System.Threading.Tasks;
 using Parsec.Core.Fluid;
 using Parsec.Rendering.Raymarching;
 
-namespace Parsec.Cli;
+namespace Parsec.Rendering.Fluid;
 
 /// <summary>
 /// Composites the "underwater" look onto a rendered RGBA8 frame: a teal water grade with caustic
 /// shimmer + vignette, then additive glowing particles projected from the <see cref="FluidParticleField"/>.
 /// uint layout is RGBA little-endian (R = low byte), matching the Metal renderers.
 /// </summary>
-internal static class FluidCompositor
+public static class FluidCompositor
 {
     public static void Apply(uint[] px, int w, int h, FluidParticleField field, Camera3D cam, float fovY, float time,
                              Func<Vector3, float>? de = null, bool deepSea = false, float foldEnv = 0f,
-                             float excitement = 0f, SurfacePhotophores? photophores = null)
+                             float excitement = 0f, SurfacePhotophores? photophores = null,
+                             DeepSeaParams? dsp = null)
     {
+        var p_ = dsp ?? DeepSeaParams.Default;
+        float gradeB = p_.GradeBrightness;
         // 1. Underwater grade (parallel over rows).
         Parallel.For(0, h, y =>
         {
@@ -39,7 +42,7 @@ internal static class FluidCompositor
                 float nx = (x / (w - 1f)) * 2f - 1f;
                 float vig = 1f - 0.40f * (nx * nx + ny * ny);
                 if (vig < 0f) vig = 0f;
-                r *= vig; g *= vig; b *= vig;
+                r *= vig * gradeB; g *= vig * gradeB; b *= vig * gradeB;   // Murk darkens the water
 
                 px[idx] = Pack(r, g, b);
             }
@@ -47,11 +50,11 @@ internal static class FluidCompositor
 
         // 1b. "Living creature" emissive layer (subsurface bloom + bioluminescent rim/photophores),
         //     applied over the water-graded body but under the particles so it glows through.
-        if (deepSea) DeepSeaPost.ApplyEmissive(px, w, h, time, foldEnv, excitement);
+        if (deepSea) DeepSeaPost.ApplyEmissive(px, w, h, time, foldEnv, excitement, p_.Bloom, p_.Rim);
 
         // Surface-anchored bioluminescent photophores (3-D, occluded, riding the skin).
         if (deepSea && photophores != null && de != null)
-            DrawSurfacePhotophores(px, w, h, cam, fovY, de, photophores, time, excitement, foldEnv);
+            DrawSurfacePhotophores(px, w, h, cam, fovY, de, photophores, time, excitement, foldEnv, p_.PhotophoreBrightness);
 
         // 2. Additive particle splats (single-threaded — splats overlap in the buffer).
         var posCam = cam.Position;
@@ -136,7 +139,7 @@ internal static class FluidCompositor
     // 3-D photophores anchored to the surface: project, occlusion-test against the DE, draw a
     // pulsing glow disc. They ride the deforming skin and hide on the creature's far side.
     private static void DrawSurfacePhotophores(uint[] px, int w, int h, Camera3D cam, float fovY,
-        Func<Vector3, float> de, SurfacePhotophores ph, float time, float excitement, float foldEnv)
+        Func<Vector3, float> de, SurfacePhotophores ph, float time, float excitement, float foldEnv, float glow)
     {
         var posCam = cam.Position;
         var fwd = Vector3.Normalize(cam.LookAt - cam.Position);
@@ -183,7 +186,7 @@ internal static class FluidCompositor
             if (surf < 0.05f) continue;
             float fog = MathF.Exp(-zc * 0.2f);
             float pulse = 0.4f + 0.6f * MathF.Sin(time * pulseRate + ph.Phase[i]);
-            float inten = pulse * foldBoost * 1.5f * fog * surf;   // embedded, not floating
+            float inten = pulse * foldBoost * 1.5f * fog * surf * glow;   // embedded, not floating
             bool magenta = ph.Magenta[i];
             float cr = magenta ? 1.15f * inten : 0.30f * inten;
             float cg = magenta ? 0.30f * inten : 1.10f * inten;

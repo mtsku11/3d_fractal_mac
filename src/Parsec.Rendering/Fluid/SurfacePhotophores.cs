@@ -2,14 +2,14 @@ using System;
 using System.Numerics;
 using System.Threading.Tasks;
 
-namespace Parsec.Cli;
+namespace Parsec.Rendering.Fluid;
 
 /// <summary>
 /// Bioluminescent photophores that live ON the creature's surface (not in screen space), so they
 /// ride the rippling/morphing skin and deform with it. Each is a 3-D point re-projected onto the
 /// DE surface every frame (Newton steps along the gradient) with a slow tangential wander.
 /// </summary>
-internal sealed class SurfacePhotophores
+public sealed class SurfacePhotophores
 {
     public readonly Vector3[] Pos;
     public readonly float[] Phase;

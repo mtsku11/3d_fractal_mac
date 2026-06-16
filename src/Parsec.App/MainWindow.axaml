@@ -190,6 +190,33 @@
             <Slider Name="GlowFalloffSlider" Minimum="1" Maximum="200" Value="12"
                     TickFrequency="1" IsSnapToTickEnabled="False" />
           </StackPanel>
+          <StackPanel Margin="0,10,0,0" Spacing="3">
+            <TextBlock Text="DEEP SEA (Mandelbulb)" Foreground="#9a9ab0" FontSize="11" FontWeight="SemiBold" />
+            <CheckBox Name="DeepSeaEnableCheckBox" Content="Enable deep-sea mode"
+                      ToolTip.Tip="Underwater water grade + bioluminescent creature (subsurface glow, rim, photophores) + drifting particles. Currently Mandelbulb-only (needs a CPU distance estimator)." />
+            <TextBlock Text="Particles" FontSize="11" />
+            <Slider Name="DeepSeaParticlesSlider" Minimum="0" Maximum="4000" Value="1600" TickFrequency="100" IsSnapToTickEnabled="False" />
+            <TextBlock Text="Flow strength" FontSize="11" />
+            <Slider Name="DeepSeaFlowSlider" Minimum="0" Maximum="3" Value="1" TickFrequency="0.05" IsSnapToTickEnabled="False" />
+            <TextBlock Text="Near-field falloff (wide ← → tight)" FontSize="11" />
+            <Slider Name="DeepSeaFalloffSlider" Minimum="0.15" Maximum="1.2" Value="0.4" TickFrequency="0.01" IsSnapToTickEnabled="False" />
+            <TextBlock Text="Subsurface bloom" FontSize="11" />
+            <Slider Name="DeepSeaBloomSlider" Minimum="0" Maximum="2.5" Value="0.95" TickFrequency="0.05" IsSnapToTickEnabled="False" />
+            <TextBlock Text="Bioluminescent rim" FontSize="11" />
+            <Slider Name="DeepSeaRimSlider" Minimum="0" Maximum="3" Value="1.35" TickFrequency="0.05" IsSnapToTickEnabled="False" />
+            <TextBlock Text="Photophores" FontSize="11" />
+            <Slider Name="DeepSeaPhotophoresSlider" Minimum="0" Maximum="300" Value="90" TickFrequency="5" IsSnapToTickEnabled="False" />
+            <TextBlock Text="Photophore glow" FontSize="11" />
+            <Slider Name="DeepSeaPhotoGlowSlider" Minimum="0" Maximum="3" Value="1" TickFrequency="0.05" IsSnapToTickEnabled="False" />
+            <TextBlock Text="Membrane warp strength" FontSize="11" />
+            <Slider Name="DeepSeaWarpStrengthSlider" Minimum="0" Maximum="0.12" Value="0.022" TickFrequency="0.002" IsSnapToTickEnabled="False" />
+            <TextBlock Text="Ripple fineness (scale)" FontSize="11" />
+            <Slider Name="DeepSeaWarpScaleSlider" Minimum="1" Maximum="30" Value="16.8" TickFrequency="0.2" IsSnapToTickEnabled="False" />
+            <TextBlock Text="Ripple speed" FontSize="11" />
+            <Slider Name="DeepSeaWarpRateSlider" Minimum="0" Maximum="30" Value="6" TickFrequency="0.5" IsSnapToTickEnabled="False" />
+            <TextBlock Text="Murk (bright ← → dark water)" FontSize="11" />
+            <Slider Name="DeepSeaMurkSlider" Minimum="0" Maximum="1" Value="0.5" TickFrequency="0.02" IsSnapToTickEnabled="False" />
+          </StackPanel>
         </StackPanel>
       </Grid>
       <Border Name="PanelHost" Grid.Row="1" Margin="12,8,12,12" />

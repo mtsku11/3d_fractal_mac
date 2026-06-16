@@ -1,7 +1,7 @@
 using System;
 using System.Threading.Tasks;
 
-namespace Parsec.Cli;
+namespace Parsec.Rendering.Fluid;
 
 /// <summary>
 /// "Living creature" emissive layer applied to an already water-graded RGBA8 frame: a soft
@@ -11,7 +11,8 @@ namespace Parsec.Cli;
 /// </summary>
 internal static class DeepSeaPost
 {
-    public static void ApplyEmissive(uint[] px, int w, int h, float time, float foldEnv, float excitement = 0f)
+    public static void ApplyEmissive(uint[] px, int w, int h, float time, float foldEnv, float excitement = 0f,
+                                     float bloomStrength = 0.95f, float rimStrength = 1.35f)
     {
         int n = w * h;
 
@@ -30,7 +31,7 @@ internal static class DeepSeaPost
         bloom = BoxBlur(bloom, w, h, 7);
         Parallel.For(0, n, i =>
         {
-            float bl = bloom[i] * 0.95f;            // gelatinous subsurface halo (eased so the dots read)
+            float bl = bloom[i] * bloomStrength;    // gelatinous subsurface halo
             if (bl < 0.002f) return;
             AddRgb(px, i, 0.18f * bl, 0.62f * bl, 0.70f * bl);
         });
@@ -50,7 +51,7 @@ internal static class DeepSeaPost
                     if (bright[ny * w + nx] < 0.05f) nearEdge = true;
                 }
                 if (!nearEdge) continue;
-                float rim = 1.35f * bright[i];
+                float rim = rimStrength * bright[i];
                 AddRgb(px, i, 0.12f * rim, 0.85f * rim, 1.15f * rim);
             }
         });
