@@ -136,9 +136,9 @@ public static class MidiInstrumentSynth
             // Excitement tremolo on the sustained body voices — faster + deeper flutter when excited,
             // so the emotional state you SEE in the ripple is also AUDIBLE.
             float excite = ccS[102];
-            float tremRate = 4f + 8f * excite;
+            float tremRate = 1.5f + 16f * excite;          // ramps slow → fast with the ripple
             pTrem += tremRate / sr; if (pTrem >= 1f) pTrem -= 1f;
-            float trem = 1f - (0.12f + 0.55f * excite) * (0.5f + 0.5f * MathF.Sin(pTrem * 6.2832f));
+            float trem = 1f - (0.10f + 0.6f * excite) * (0.5f + 0.5f * MathF.Sin(pTrem * 6.2832f));
 
             // 1. Sub bass — sine + 2nd partial drive; root D, octave by proximity.
             {

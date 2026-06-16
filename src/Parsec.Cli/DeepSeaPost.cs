@@ -22,7 +22,7 @@ internal static class DeepSeaPost
             uint p = px[i];
             float r = (p & 0xFF) / 255f, g = ((p >> 8) & 0xFF) / 255f, b = ((p >> 16) & 0xFF) / 255f;
             float luma = 0.3f * r + 0.6f * g + 0.1f * b;
-            bright[i] = Smoothstep(0.32f, 0.7f, luma);
+            bright[i] = Smoothstep(0.10f, 0.42f, luma);   // low thresholds: the body is dark now
         });
 
         // --- subsurface bloom: blur the brightness, add back tinted (gelatinous halo) ---
@@ -30,9 +30,9 @@ internal static class DeepSeaPost
         bloom = BoxBlur(bloom, w, h, 7);
         Parallel.For(0, n, i =>
         {
-            float bl = bloom[i] * 1.05f;            // gelatinous subsurface halo
+            float bl = bloom[i] * 1.4f;             // gelatinous subsurface halo (boosted for dark body)
             if (bl < 0.002f) return;
-            AddRgb(px, i, 0.18f * bl, 0.62f * bl, 0.68f * bl);
+            AddRgb(px, i, 0.20f * bl, 0.70f * bl, 0.78f * bl);
         });
 
         // --- bioluminescent fresnel rim on the silhouette (bold cyan edge) ---
@@ -41,16 +41,16 @@ internal static class DeepSeaPost
             for (int x = 0; x < w; x++)
             {
                 int i = y * w + x;
-                if (bright[i] < 0.22f) continue;
+                if (bright[i] < 0.14f) continue;
                 bool nearEdge = false;
                 for (int s = 0; s < 8 && !nearEdge; s++)
                 {
                     int nx = x + Off8X[s] * 4, ny = y + Off8Y[s] * 4;
                     if (nx < 0 || ny < 0 || nx >= w || ny >= h) { nearEdge = true; break; }
-                    if (bright[ny * w + nx] < 0.07f) nearEdge = true;
+                    if (bright[ny * w + nx] < 0.05f) nearEdge = true;
                 }
                 if (!nearEdge) continue;
-                float rim = 1.05f * bright[i];
+                float rim = 1.35f * bright[i];
                 AddRgb(px, i, 0.12f * rim, 0.85f * rim, 1.15f * rim);
             }
         });
@@ -64,14 +64,14 @@ internal static class DeepSeaPost
             for (int x = 0; x < w; x += cellPx)
             {
                 int ci = y * w + x;
-                // Mid-tone band: on the body but not the brightest tips → high contrast for the dot.
-                if (bright[ci] < 0.12f || bright[ci] > 0.55f) continue;
+                // On the body (skin), excluding only the very brightest tips → high-contrast dots.
+                if (bright[ci] < 0.10f || bright[ci] > 0.62f) continue;
                 uint cell = Hash2((uint)(x / cellPx), (uint)(y / cellPx));
                 if ((cell & 7u) != 0u) continue;          // ~1 in 8 eligible cells
                 float ph = (cell & 0xFFFF) / 65535f * 6.2832f;
                 float pulseRate = 2.2f * (1f + 1.4f * excitement);   // excited → faster flicker
                 float pulse = 0.35f + 0.65f * MathF.Sin(time * pulseRate + ph);
-                float inten = pulse * foldBoost * 2.0f * (0.4f + 0.6f * bright[ci]);
+                float inten = pulse * foldBoost * 2.9f * (0.4f + 0.6f * bright[ci]);
                 bool magenta = (cell & 64u) != 0u;
                 float cr = magenta ? 1.1f * inten : 0.25f * inten;
                 float cg = magenta ? 0.30f * inten : 1.1f * inten;
