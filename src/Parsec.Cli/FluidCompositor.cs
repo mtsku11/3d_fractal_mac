@@ -173,15 +173,23 @@ internal static class FluidCompositor
 
             float fpx = (sx * 0.5f + 0.5f) * w;
             float fpy = (0.5f - sy * 0.5f) * h;
+            // Embed in the shading: scale by the surface brightness at this spot, so the node
+            // brightens on the lit side and fades on the shadowed/grazing side (a light IN the skin,
+            // not over it). Where the surface is dark/void, it's killed.
+            int cx = Math.Clamp((int)fpx, 0, w - 1), cy = Math.Clamp((int)fpy, 0, h - 1);
+            uint cpix = px[cy * w + cx];
+            float clum = (0.3f * (cpix & 0xFF) + 0.6f * ((cpix >> 8) & 0xFF) + 0.1f * ((cpix >> 16) & 0xFF)) / 255f;
+            float surf = Clamp01((clum - 0.06f) / 0.34f); surf *= surf * (3f - 2f * surf);
+            if (surf < 0.05f) continue;
             float fog = MathF.Exp(-zc * 0.2f);
             float pulse = 0.4f + 0.6f * MathF.Sin(time * pulseRate + ph.Phase[i]);
-            float inten = pulse * foldBoost * 2.2f * fog;   // bright so they read against the glow
+            float inten = pulse * foldBoost * 1.5f * fog * surf;   // embedded, not floating
             bool magenta = ph.Magenta[i];
             float cr = magenta ? 1.15f * inten : 0.30f * inten;
             float cg = magenta ? 0.30f * inten : 1.10f * inten;
             float cb = magenta ? 1.15f * inten : 1.30f * inten;
 
-            int rad = 5;
+            int rad = 4;
             int x0 = Math.Max(0, (int)(fpx - rad)), x1 = Math.Min(w - 1, (int)(fpx + rad));
             int y0 = Math.Max(0, (int)(fpy - rad)), y1 = Math.Min(h - 1, (int)(fpy + rad));
             float r2 = rad * rad;

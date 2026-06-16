@@ -985,8 +985,9 @@ public static class Program
                 midi.OnNoteOff       = (ch, nn) => events.Add(new(evTime, Parsec.Audio.Midi.MidiInstrumentSynth.EvType.NoteOff, ch, nn, 0));
 
                 var telSettings = new RaymarchSettings(160, 1e-3f, 40f, 1.5e-3f, false, 0, 0f, false, 0, 0f, 0f, 1, false, 0, 0f, 0f, 1f);
-                // Dim key light — dark ocean floor; the bioluminescence carries the glow.
-                var dispSettings = new RaymarchSettings(300, 5e-4f, 40f, 5e-4f, true, 64, 12f, true, 5, 0.04f, 1.0f, 1, false, 0, 0f, 0f, 0.5f);
+                // Dim key light — dark ocean floor; the surface colour still reads so the glow moves
+                // with the creature, but the bioluminescence carries most of it.
+                var dispSettings = new RaymarchSettings(300, 5e-4f, 40f, 5e-4f, true, 64, 12f, true, 5, 0.04f, 1.0f, 1, false, 0, 0f, 0f, 0.62f);
                 var bg = new Color(0.005f, 0.02f, 0.03f);
                 var surface = Color.Rgb(200, 175, 155);
                 var light = Vector3.Normalize(new Vector3(0.8f, 1.6f, 1.0f));
