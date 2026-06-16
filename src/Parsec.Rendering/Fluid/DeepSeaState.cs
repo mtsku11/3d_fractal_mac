@@ -5,7 +5,8 @@ public sealed record DeepSeaParams(
     float Bloom = 0.95f,
     float Rim = 1.35f,
     float PhotophoreBrightness = 1.0f,
-    float GradeBrightness = 1.0f)
+    float GradeBrightness = 1.0f,
+    float GodRays = 0.6f)
 {
     public static DeepSeaParams Default { get; } = new();
 }
@@ -37,6 +38,9 @@ public sealed class DeepSeaState
 
     // Water.
     public float Murk = 0.5f;              // 0 = clear/bright, 1 = dark deep water
+    public float GodRays = 0.6f;           // volumetric light-shaft strength
+    public int SnowCount = 1400;           // drifting "marine snow" detritus motes
+    public float BreathDepth = 0.5f;       // slow inhale/exhale on the warp amplitude
 
     public float Phase;                    // accumulated warp phase (render-driven)
 
@@ -44,5 +48,6 @@ public sealed class DeepSeaState
         Bloom: Bloom,
         Rim: Rim,
         PhotophoreBrightness: PhotophoreGlow,
-        GradeBrightness: 1.0f - 0.6f * System.Math.Clamp(Murk, 0f, 1f));
+        GradeBrightness: 1.0f - 0.6f * System.Math.Clamp(Murk, 0f, 1f),
+        GodRays: GodRays);
 }

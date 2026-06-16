@@ -31,6 +31,8 @@ public sealed class FluidParticleField
     public float InfluenceDist = 0.40f, CurlFloor = 0.05f;
     // Fold "yank": a fold event briefly shoves the very nearest particles outward.
     public float YankStrength = 11f, YankDist = 0.30f;
+    // Gentle constant sink (marine snow drifts downward under gravity); 0 for the main field.
+    public float DownDrift = 0f;
     public float Drag = 0.86f, MaxSpeed = 1.3f, LifeSeconds = 14f;
 
     private readonly Random _rng;
@@ -104,6 +106,7 @@ public sealed class FluidParticleField
                            * foldImpulse * YankStrength * proxYank;
 
             Vector3 acc = repel + swirl + curl + advect + yank;
+            acc.Y -= DownDrift;   // marine-snow sink (0 for the main field)
             p.Vel = p.Vel * Drag + acc * dt;
             // Yanked particles may transiently exceed the resting max speed.
             float maxSp = MaxSpeed * (1f + 3f * foldImpulse * proxYank);

@@ -216,6 +216,12 @@
             <Slider Name="DeepSeaWarpRateSlider" Minimum="0" Maximum="30" Value="6" TickFrequency="0.5" IsSnapToTickEnabled="False" />
             <TextBlock Text="Murk (bright ← → dark water)" FontSize="11" />
             <Slider Name="DeepSeaMurkSlider" Minimum="0" Maximum="1" Value="0.5" TickFrequency="0.02" IsSnapToTickEnabled="False" />
+            <TextBlock Text="God rays (light shafts)" FontSize="11" />
+            <Slider Name="DeepSeaGodRaysSlider" Minimum="0" Maximum="2" Value="0.6" TickFrequency="0.05" IsSnapToTickEnabled="False" />
+            <TextBlock Text="Marine snow" FontSize="11" />
+            <Slider Name="DeepSeaSnowSlider" Minimum="0" Maximum="4000" Value="1400" TickFrequency="100" IsSnapToTickEnabled="False" />
+            <TextBlock Text="Breathing depth" FontSize="11" />
+            <Slider Name="DeepSeaBreathSlider" Minimum="0" Maximum="1.5" Value="0.5" TickFrequency="0.05" IsSnapToTickEnabled="False" />
           </StackPanel>
         </StackPanel>
       </Grid>

@@ -256,6 +256,9 @@ public partial class MainWindow : Window
         WireDs("DeepSeaWarpScaleSlider",     v => _view!.DeepSea.WarpScale = v);
         WireDs("DeepSeaWarpRateSlider",      v => _view!.DeepSea.WarpRate = v);
         WireDs("DeepSeaMurkSlider",          v => _view!.DeepSea.Murk = v);
+        WireDs("DeepSeaGodRaysSlider",       v => _view!.DeepSea.GodRays = v);
+        WireDs("DeepSeaSnowSlider",          v => _view!.DeepSea.SnowCount = (int)v);
+        WireDs("DeepSeaBreathSlider",        v => _view!.DeepSea.BreathDepth = v);
 
         var glowEnableCheckBox = this.FindControl<CheckBox>("GlowEnableCheckBox");
         if (glowEnableCheckBox != null)

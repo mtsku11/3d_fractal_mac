@@ -15,7 +15,7 @@ public static class FluidCompositor
     public static void Apply(uint[] px, int w, int h, FluidParticleField field, Camera3D cam, float fovY, float time,
                              Func<Vector3, float>? de = null, bool deepSea = false, float foldEnv = 0f,
                              float excitement = 0f, SurfacePhotophores? photophores = null,
-                             DeepSeaParams? dsp = null)
+                             DeepSeaParams? dsp = null, FluidParticleField? snow = null, float snowIntensity = 0.6f)
     {
         var p_ = dsp ?? DeepSeaParams.Default;
         float gradeB = p_.GradeBrightness;
@@ -47,6 +47,10 @@ public static class FluidCompositor
                 px[idx] = Pack(r, g, b);
             }
         });
+
+        // 1a. Volumetric light shafts (god rays) slanting down through the water — strongest near the
+        //     surface above, swaying slowly. Over the grade, under the creature so the body occludes them.
+        if (deepSea && p_.GodRays > 0.001f) ApplyGodRays(px, w, h, time, p_.GodRays);
 
         // 1b. "Living creature" emissive layer (subsurface bloom + bioluminescent rim/photophores),
         //     applied over the water-graded body but under the particles so it glows through.
@@ -124,6 +128,112 @@ public static class FluidCompositor
             {
                 float dx = xx - fpx, dy = yy - fpy;
                 float dd = dx * dx + dy * dy;
+                if (dd > r2) continue;
+                float wgt = 1f - MathF.Sqrt(dd) / rad; wgt *= wgt;
+                int idx = yy * w + xx;
+                uint q = px[idx];
+                int nr = Math.Min(255, (int)(q & 0xFF) + (int)(cr * wgt * 255f));
+                int ng = Math.Min(255, (int)((q >> 8) & 0xFF) + (int)(cg * wgt * 255f));
+                int nb = Math.Min(255, (int)((q >> 16) & 0xFF) + (int)(cb * wgt * 255f));
+                px[idx] = (255u << 24) | ((uint)nb << 16) | ((uint)ng << 8) | (uint)nr;
+            }
+        }
+
+        // 3. Marine snow — a slow, fractal-agnostic drift of tiny dim detritus motes (occluded by the
+        //    body), drawn last so the near motes sit in front of everything.
+        if (deepSea && snow != null) DrawMarineSnow(px, w, h, snow, cam, fovY, de, snowIntensity);
+    }
+
+    // Volumetric light shafts: slanted, slowly-swaying beams that fade from the surface downward.
+    private static void ApplyGodRays(uint[] px, int w, int h, float time, float strength)
+    {
+        Parallel.For(0, h, y =>
+        {
+            float ny01 = y / (h - 1f);            // 0 top → 1 bottom
+            float topFade = 1f - ny01; topFade *= topFade;   // light comes from the surface above
+            if (topFade < 0.002f) return;
+            int row = y * w;
+            for (int x = 0; x < w; x++)
+            {
+                // Slanted beam coordinate: shafts descend at an angle; phases sway over time.
+                float beam = (x + (h - y) * 0.45f) * 0.011f;
+                float s = MathF.Sin(beam + time * 0.18f)
+                        + 0.6f * MathF.Sin(beam * 2.3f - time * 0.12f + 1.7f)
+                        + 0.4f * MathF.Sin(beam * 4.7f + time * 0.27f);
+                s = Clamp01(s * 0.25f + 0.5f);
+                float ray = s * s * s * topFade * strength;   // crisp shafts
+                if (ray < 0.003f) continue;
+                int idx = row + x;
+                uint q = px[idx];
+                float luma = (0.3f * (q & 0xFF) + 0.6f * ((q >> 8) & 0xFF) + 0.1f * ((q >> 16) & 0xFF)) / 255f;
+                float k = ray * (1f - 0.7f * Clamp01(luma));   // don't blow out the lit body
+                int nr = Math.Min(255, (int)(q & 0xFF) + (int)(0.10f * k * 255f));
+                int ng = Math.Min(255, (int)((q >> 8) & 0xFF) + (int)(0.19f * k * 255f));
+                int nb = Math.Min(255, (int)((q >> 16) & 0xFF) + (int)(0.24f * k * 255f));
+                px[idx] = (255u << 24) | ((uint)nb << 16) | ((uint)ng << 8) | (uint)nr;
+            }
+        });
+    }
+
+    // Tiny, dim, near-white drifting motes (marine snow). Same projection + occlusion as the main
+    // particles but smaller, fainter, and cooler.
+    private static void DrawMarineSnow(uint[] px, int w, int h, FluidParticleField snow, Camera3D cam,
+        float fovY, Func<Vector3, float>? de, float intensity)
+    {
+        var posCam = cam.Position;
+        var fwd = Vector3.Normalize(cam.LookAt - cam.Position);
+        var right = Vector3.Normalize(Vector3.Cross(fwd, cam.Up));
+        var upL = Vector3.Cross(right, fwd);
+        float tanY = MathF.Tan(fovY * 0.5f);
+        float tanX = tanY * cam.AspectRatio;
+        var parts = snow.Particles;
+        float lifeSec = snow.LifeSeconds;
+
+        bool[]? occluded = null;
+        if (de != null)
+        {
+            occluded = new bool[parts.Length];
+            Parallel.For(0, parts.Length, i =>
+            {
+                Vector3 toP = parts[i].Pos - posCam;
+                float dist = toP.Length();
+                if (dist < 1e-3f) return;
+                Vector3 dir = toP / dist;
+                float tt = 0.04f;
+                for (int s = 0; s < 24 && tt < dist - 0.05f; s++)
+                {
+                    float dd = de(posCam + dir * tt);
+                    if (dd < 1.8e-3f) { occluded[i] = true; return; }
+                    tt += MathF.Max(dd, 1.4e-3f);
+                }
+            });
+        }
+
+        for (int pi = 0; pi < parts.Length; pi++)
+        {
+            if (occluded != null && occluded[pi]) continue;
+            ref readonly var part = ref parts[pi];
+            Vector3 v = part.Pos - posCam;
+            float zc = Vector3.Dot(v, fwd);
+            if (zc <= 0.08f) continue;
+            float sx = Vector3.Dot(v, right) / (zc * tanX);
+            float sy = Vector3.Dot(v, upL) / (zc * tanY);
+            if (MathF.Abs(sx) > 1.05f || MathF.Abs(sy) > 1.05f) continue;
+
+            float fpx = (sx * 0.5f + 0.5f) * w, fpy = (0.5f - sy * 0.5f) * h;
+            float fog = MathF.Exp(-zc * 0.35f);
+            float env = MathF.Min(Clamp01((lifeSec - part.Life) / 1.0f), Clamp01(part.Life / 1.0f));
+            float a = fog * env * intensity * 0.5f;
+            if (a < 0.003f) continue;
+            float cr = 0.85f * a, cg = 0.92f * a, cb = 1.0f * a;
+            float rad = 0.8f + 1.4f * fog;
+            int x0 = Math.Max(0, (int)(fpx - rad)), x1 = Math.Min(w - 1, (int)(fpx + rad));
+            int y0 = Math.Max(0, (int)(fpy - rad)), y1 = Math.Min(h - 1, (int)(fpy + rad));
+            float r2 = rad * rad;
+            for (int yy = y0; yy <= y1; yy++)
+            for (int xx = x0; xx <= x1; xx++)
+            {
+                float dx = xx - fpx, dy = yy - fpy, dd = dx * dx + dy * dy;
                 if (dd > r2) continue;
                 float wgt = 1f - MathF.Sqrt(dd) / rad; wgt *= wgt;
                 int idx = yy * w + xx;

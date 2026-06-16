@@ -157,7 +157,12 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
     {
         if (!DeepSeaActive) return;
         DeepSea.Phase += DeepSea.WarpRate / 30f;
-        Parsec.Rendering.DomainWarpState.SetControls(true, DeepSea.WarpStrength, DeepSea.WarpScale);
+        // Breathing: a slow inhale/exhale on the warp AMPLITUDE so the whole membrane swells and
+        // contracts as if respiring (on top of the fast ripple, which is a phase animation).
+        float t = (float)_sonicClock.Elapsed.TotalSeconds;
+        float breath = MathF.Sin(2f * MathF.PI * 0.14f * t);
+        float amp = DeepSea.WarpStrength * (1f + 0.6f * DeepSea.BreathDepth * breath);
+        Parsec.Rendering.DomainWarpState.SetControls(true, MathF.Max(0f, amp), DeepSea.WarpScale);
         Parsec.Rendering.DomainWarpState.SetPhase(DeepSea.Phase);
     }
 
@@ -170,6 +175,9 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
         { _dsField = new Parsec.Core.Fluid.FluidParticleField(Math.Max(1, DeepSea.ParticleCount), seed: 7); _dsParticleCount = DeepSea.ParticleCount; }
         if (_dsPhotophores == null || _dsPhotophoreCount != DeepSea.PhotophoreCount)
         { _dsPhotophores = new Parsec.Rendering.Fluid.SurfacePhotophores(Math.Max(1, DeepSea.PhotophoreCount), seed: 13); _dsPhotophoreCount = DeepSea.PhotophoreCount; }
+        if (DeepSea.SnowCount <= 0) { _dsSnow = null; _dsSnowCount = -1; }
+        else if (_dsSnow == null || _dsSnowCount != DeepSea.SnowCount)
+        { _dsSnow = MakeMarineSnow(DeepSea.SnowCount); _dsSnowCount = DeepSea.SnowCount; }
 
         float power = Mandelbulb.Power;
         int iters = Math.Min(Mandelbulb.Iterations, 8);
@@ -188,10 +196,24 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
         const float dt = 1f / 30f;
         _dsField.Step(dt, de, dePrev, t);
         _dsPhotophores.Update(de, dt, t);
+        _dsSnow?.Step(dt, de, dePrev, t);
 
         Parsec.Rendering.Fluid.FluidCompositor.Apply(pixels, rw, rh, _dsField, camera,
             camera.VerticalFovRadians, t, de, deepSea: true, foldEnv: 0f, excitement: 0.35f,
-            photophores: _dsPhotophores, dsp: DeepSea.ToParams());
+            photophores: _dsPhotophores, dsp: DeepSea.ToParams(), snow: _dsSnow, snowIntensity: 0.6f);
+    }
+
+    // Marine snow: a near-static, slowly-sinking, fractal-agnostic drift filling the whole volume.
+    private static Parsec.Core.Fluid.FluidParticleField MakeMarineSnow(int n)
+    {
+        var f = new Parsec.Core.Fluid.FluidParticleField(Math.Max(1, n), seed: 99)
+        {
+            SpawnInner = 0.6f, SpawnOuter = 3.6f, KillRadius = 5.0f,
+            RepelStrength = 0.25f, RepelBand = 0.4f, SwirlStrength = 0f, AdvectStrength = 0f,
+            CurlStrength = 0.05f, CurlScale = 0.6f, CurlFloor = 1f, CurlFlow = 0.05f,
+            InfluenceDist = 0.25f, DownDrift = 0.05f, Drag = 0.92f, MaxSpeed = 0.28f, LifeSeconds = 26f,
+        };
+        return f;
     }
 
     private void EmitMidi(Audio.Sonification.FractalSonicFrame? frame, uint[]? pixels = null, int width = 0, int height = 0)
@@ -309,7 +331,8 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
     public Parsec.Rendering.Fluid.DeepSeaState DeepSea { get; } = new();
     private Parsec.Core.Fluid.FluidParticleField? _dsField;
     private Parsec.Rendering.Fluid.SurfacePhotophores? _dsPhotophores;
-    private int _dsParticleCount = -1, _dsPhotophoreCount = -1;
+    private Parsec.Core.Fluid.FluidParticleField? _dsSnow;
+    private int _dsParticleCount = -1, _dsPhotophoreCount = -1, _dsSnowCount = -1;
     private float _dsPrevPower;
     /// <summary>True when the deep-sea composite can run on the active fractal (needs a CPU DE).</summary>
     private bool DeepSeaActive => DeepSea.Enabled && ActiveType == FractalType.Mandelbulb;
