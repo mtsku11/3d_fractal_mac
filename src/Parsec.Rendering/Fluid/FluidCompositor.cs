@@ -16,8 +16,7 @@ public static class FluidCompositor
                              Func<Vector3, float>? de = null, bool deepSea = false, float foldEnv = 0f,
                              float excitement = 0f, SurfacePhotophores? photophores = null,
                              DeepSeaParams? dsp = null, FluidParticleField? snow = null, float snowIntensity = 0.6f,
-                             SurfacePhotophores? chromatophores = null, float chromatophoreIntensity = 0.6f,
-                             SurfacePhotophores? eyes = null, float eyeSize = 1f, float eyeGlow = 1f)
+                             SurfacePhotophores? chromatophores = null, float chromatophoreIntensity = 0.6f)
     {
         var p_ = dsp ?? DeepSeaParams.Default;
         float gradeB = p_.GradeBrightness;
@@ -66,10 +65,6 @@ public static class FluidCompositor
         // Surface-anchored bioluminescent photophores (3-D, occluded, riding the skin).
         if (deepSea && photophores != null && de != null)
             DrawSurfacePhotophores(px, w, h, cam, fovY, de, photophores, time, excitement, foldEnv, p_.PhotophoreBrightness);
-
-        // Eyes / ocelli — surface-anchored, crisp (drawn over the glow), occlusion-tested.
-        if (deepSea && eyes != null && de != null)
-            DrawEyes(px, w, h, cam, fovY, de, eyes, time, eyeSize, eyeGlow, excitement);
 
         // 2. Additive particle splats (single-threaded — splats overlap in the buffer).
         var posCam = cam.Position;
@@ -408,87 +403,6 @@ public static class FluidCompositor
                 g = g * (1f - wgt) + pig.Y * shade * wgt;
                 b = b * (1f - wgt) + pig.Z * shade * wgt;
                 px[idx] = Pack(r, g, b);
-            }
-        }
-    }
-
-    // Eyes / ocelli: a surface-anchored point drawn as a layered eye — dark socket rim, a glowing
-    // amber iris (brighter toward the centre), a black pupil that dilates with excitement, and a bright
-    // catchlight that wanders slightly so the gaze looks alive. Occlusion-tested; clipped to the body
-    // (skips pixels over open water) so it never floats. Drawn opaque over the surface for crispness.
-    private static void DrawEyes(uint[] px, int w, int h, Camera3D cam, float fovY,
-        Func<Vector3, float> de, SurfacePhotophores eyes, float time, float size, float glow, float excitement)
-    {
-        var posCam = cam.Position;
-        var fwd = Vector3.Normalize(cam.LookAt - cam.Position);
-        var right = Vector3.Normalize(Vector3.Cross(fwd, cam.Up));
-        var upL = Vector3.Cross(right, fwd);
-        float tanY = MathF.Tan(fovY * 0.5f);
-        float tanX = tanY * cam.AspectRatio;
-        Vector3 irisCol = new(0.95f, 0.62f, 0.18f);   // luminous amber
-
-        for (int i = 0; i < eyes.Pos.Length; i++)
-        {
-            Vector3 a = eyes.Pos[i];
-            Vector3 v = a - posCam;
-            float zc = Vector3.Dot(v, fwd);
-            if (zc <= 0.08f) continue;
-            float sx = Vector3.Dot(v, right) / (zc * tanX);
-            float sy = Vector3.Dot(v, upL) / (zc * tanY);
-            if (MathF.Abs(sx) > 1.1f || MathF.Abs(sy) > 1.1f) continue;
-
-            float dist = v.Length();
-            Vector3 dir = v / dist;
-            bool occ = false;
-            float tt = 0.04f;
-            for (int s = 0; s < 48 && tt < dist - 0.06f; s++)
-            {
-                float dd = de(posCam + dir * tt);
-                if (dd < 1.8e-3f) { occ = true; break; }
-                tt += MathF.Max(dd, 1.2e-3f);
-            }
-            if (occ) continue;
-
-            float fog = MathF.Exp(-zc * 0.12f);
-            float fpx = (sx * 0.5f + 0.5f) * w, fpy = (0.5f - sy * 0.5f) * h;
-            float R = 16f * size * fog;
-            if (R < 2.5f) continue;
-            float ph = eyes.Phase[i];
-            float pulse = 0.5f + 0.5f * MathF.Sin(time * 0.8f + ph);
-            float pupilR = (0.40f + 0.14f * Clamp01(excitement) + 0.05f * pulse) * R;
-            // Catchlight position (gaze): upper-left, drifting slowly so the stare reads as alive.
-            float gx = -0.30f * R + 0.07f * R * MathF.Sin(time * 0.7f + ph);
-            float gy = -0.30f * R + 0.06f * R * MathF.Cos(time * 0.5f + ph * 1.3f);
-            float catchR = 0.16f * R;
-
-            int x0 = Math.Max(0, (int)(fpx - R)), x1 = Math.Min(w - 1, (int)(fpx + R));
-            int y0 = Math.Max(0, (int)(fpy - R)), y1 = Math.Min(h - 1, (int)(fpy + R));
-            for (int yy = y0; yy <= y1; yy++)
-            for (int xx = x0; xx <= x1; xx++)
-            {
-                float dx = xx - fpx, dy = yy - fpy;
-                float rr = MathF.Sqrt(dx * dx + dy * dy);
-                if (rr > R) continue;
-                int idx = yy * w + xx;
-                uint q = px[idx];
-                float br = (q & 0xFF) / 255f, bg = ((q >> 8) & 0xFF) / 255f, bb = ((q >> 16) & 0xFF) / 255f;
-                if (0.3f * br + 0.6f * bg + 0.1f * bb < 0.04f) continue;   // keep the eye on the body
-
-                float nrm = rr / R;
-                float er = 0.03f, eg = 0.035f, eb = 0.05f;   // dark socket rim (nrm >= 0.88)
-                if (nrm < 0.88f)
-                {
-                    float irisT = Clamp01((0.88f - nrm) / 0.45f);     // brighter toward the centre
-                    float ig = glow * (0.35f + 0.65f * irisT);
-                    er = irisCol.X * ig; eg = irisCol.Y * ig; eb = irisCol.Z * ig;
-                }
-                if (rr < pupilR) { er = 0.015f; eg = 0.02f; eb = 0.03f; }   // pupil
-                float cdx = dx - gx, cdy = dy - gy, cd = MathF.Sqrt(cdx * cdx + cdy * cdy);
-                if (cd < catchR) { float cl = Clamp01(1f - cd / catchR); cl *= cl; er += 1.2f * cl; eg += 1.25f * cl; eb += 1.3f * cl; }
-
-                float aa = Clamp01((R - rr) / 1.5f);   // soft outer edge against the skin
-                er = br * (1f - aa) + er * aa; eg = bg * (1f - aa) + eg * aa; eb = bb * (1f - aa) + eb * aa;
-                px[idx] = Pack(er, eg, eb);
             }
         }
     }

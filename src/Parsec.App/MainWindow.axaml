@@ -226,12 +226,6 @@
             <Slider Name="DeepSeaChromatoSlider" Minimum="0" Maximum="80" Value="22" TickFrequency="1" IsSnapToTickEnabled="False" />
             <TextBlock Text="Chromatophore intensity" FontSize="11" />
             <Slider Name="DeepSeaChromatoIntensitySlider" Minimum="0" Maximum="1.5" Value="0.6" TickFrequency="0.05" IsSnapToTickEnabled="False" />
-            <TextBlock Text="Eyes" FontSize="11" />
-            <Slider Name="DeepSeaEyeCountSlider" Minimum="0" Maximum="6" Value="2" TickFrequency="1" IsSnapToTickEnabled="True" />
-            <TextBlock Text="Eye size" FontSize="11" />
-            <Slider Name="DeepSeaEyeSizeSlider" Minimum="0.3" Maximum="3" Value="1" TickFrequency="0.05" IsSnapToTickEnabled="False" />
-            <TextBlock Text="Eye glow" FontSize="11" />
-            <Slider Name="DeepSeaEyeGlowSlider" Minimum="0" Maximum="2.5" Value="1" TickFrequency="0.05" IsSnapToTickEnabled="False" />
           </StackPanel>
         </StackPanel>
       </Grid>

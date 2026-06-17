@@ -38,11 +38,6 @@ public sealed class DeepSeaState
     public int ChromatophoreCount = 22;
     public float ChromatophoreIntensity = 0.6f;
 
-    // Eyes / ocelli (surface-anchored, flanking the front).
-    public int EyeCount = 2;
-    public float EyeSize = 1.0f;
-    public float EyeGlow = 1.0f;
-
     // Membrane warp (geometry undulation) — small, slow transverse ripple traversing object +X.
     public float WarpStrength = 0.018f;    // really small ripples
     public float WarpScale = 22f;          // fine wavelength (= 2pi/scale)
@@ -67,22 +62,6 @@ public sealed class DeepSeaState
         float x = 0.045f * MathF.Sin(2f * MathF.PI * 0.05f * t + 1.3f);   // sway
         float y = 0.060f * MathF.Sin(2f * MathF.PI * 0.08f * t);          // bob
         return new Vector3(x, y, 0f) * amount;
-    }
-
-    /// <summary>
-    /// Eye anchors flanking the front (+X) of the body, projected onto the surface each frame with
-    /// almost no wander so they stay put. Pairs are offset along ±Z; extra eyes stack up in Y.
-    /// </summary>
-    public static SurfacePhotophores MakeEyeAnchors(int count)
-    {
-        var e = new SurfacePhotophores(Math.Max(1, count), seed: 7) { DriftSpeed = 0.02f };
-        for (int i = 0; i < e.Pos.Length; i++)
-        {
-            float side = (i % 2 == 0) ? 1f : -1f;
-            float tier = (i / 2) * 0.4f;
-            e.Pos[i] = Vector3.Normalize(new Vector3(1.0f, 0.15f + tier, side * 0.55f)) * 1.1f;
-        }
-        return e;
     }
 
     public DeepSeaParams ToParams() => new(

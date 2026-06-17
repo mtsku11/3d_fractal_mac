@@ -238,9 +238,6 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
         else if (_dsChromato == null || _dsChromatoCount != DeepSea.ChromatophoreCount)
         { _dsChromato = new Parsec.Rendering.Fluid.SurfacePhotophores(DeepSea.ChromatophoreCount, seed: 41) { DriftSpeed = 0.08f };
           _dsChromatoCount = DeepSea.ChromatophoreCount; }
-        if (DeepSea.EyeCount <= 0) { _dsEyes = null; _dsEyeCount = -1; }
-        else if (_dsEyes == null || _dsEyeCount != DeepSea.EyeCount)
-        { _dsEyes = Parsec.Rendering.Fluid.DeepSeaState.MakeEyeAnchors(DeepSea.EyeCount); _dsEyeCount = DeepSea.EyeCount; }
 
         float power = _dsRenderPower;   // breathed render power (body-size pulse), set in DeepSeaSetupWarp
         int iters = ActiveType == FractalType.BurningShip ? Math.Min(BurningShip.Iterations, 8) : Math.Min(Mandelbulb.Iterations, 8);
@@ -263,7 +260,6 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
         _dsPhotophores.Update(de, dt, t);
         _dsSnow?.Step(dt, de, dePrev, t);
         _dsChromato?.Update(de, dt, t);
-        _dsEyes?.Update(de, dt, t);
 
         // Breath-coupled glow: bioluminescence brightens on the inhale, dims on the exhale.
         float glow = ActiveType == FractalType.BurningShip ? 0.55f + 0.10f * _dsBreath : 1f + 0.5f * _dsBreath;
@@ -284,8 +280,7 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
             camera.VerticalFovRadians, t, de, deepSea: true, foldEnv: foldEnv,
             excitement: ActiveType == FractalType.BurningShip ? 0.22f : 0.35f,
             photophores: _dsPhotophores, dsp: dsp, snow: _dsSnow, snowIntensity: 0.6f,
-            chromatophores: _dsChromato, chromatophoreIntensity: DeepSea.ChromatophoreIntensity,
-            eyes: _dsEyes, eyeSize: DeepSea.EyeSize, eyeGlow: DeepSea.EyeGlow);
+            chromatophores: _dsChromato, chromatophoreIntensity: DeepSea.ChromatophoreIntensity);
     }
 
     private Func<Vector3, float> DeepSeaEstimator(float power, int iterations) => ActiveType switch
@@ -427,8 +422,7 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
     private Parsec.Rendering.Fluid.SurfacePhotophores? _dsPhotophores;
     private Parsec.Core.Fluid.FluidParticleField? _dsSnow;
     private Parsec.Rendering.Fluid.SurfacePhotophores? _dsChromato;
-    private Parsec.Rendering.Fluid.SurfacePhotophores? _dsEyes;
-    private int _dsParticleCount = -1, _dsPhotophoreCount = -1, _dsSnowCount = -1, _dsChromatoCount = -1, _dsEyeCount = -1;
+    private int _dsParticleCount = -1, _dsPhotophoreCount = -1, _dsSnowCount = -1, _dsChromatoCount = -1;
     private float _dsPrevPower;
     private FractalType? _dsPrevFractalType;
     private float _dsBasePower, _dsRenderPower;   // body-size breath: base + temporarily-applied render power
